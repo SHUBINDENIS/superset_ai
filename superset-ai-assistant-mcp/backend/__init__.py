@@ -1,4 +1,13 @@
-"""Backend module for Superset AI Chat Assistant"""
-from backend.ai_agent import get_agent, SupersetAIAgent
+from backend.ai_agent import (
+    get_session_manager,
+    shutdown_global_resources,
+    SupersetAIAgent,
+    AgentSessionManager
+)
 
-__all__ = ["get_agent", "SupersetAIAgent"]
+__all__ = [
+    'get_session_manager',
+    'shutdown_global_resources',
+    'SupersetAIAgent',
+    'AgentSessionManager'
+]
