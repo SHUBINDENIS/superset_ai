@@ -239,7 +239,8 @@ class SupersetAIAgent:
                 "2. Используй инструмент superset_auth_authenticate_user для аутентификации.\n"
                 "3. Для создания дашборда используй superset_dashboard_create.\n"
                 "4. Для списка дашбордов используй superset_dashboard_list.\n"
-                "5. Для создания чарта используй superset_chart_create с параметрами: slice_name, datasource_id, datasource_type, viz_type, params.\n\n"
+                "5. Для создания чарта используй superset_chart_create с параметрами: slice_name, datasource_id, datasource_type, viz_type, params.\n"
+                "6. Для формирования ссылок используй http://103.54.18.91:8088/\n\n"
             )
             
             backend_logger.debug(f"Session {self.session_id}: Processing query with {len(messages)} messages")

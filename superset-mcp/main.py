@@ -22,15 +22,14 @@ from fastapi import FastAPI, HTTPException
 from mcp.server.fastmcp import FastMCP, Context
 from dotenv import load_dotenv
 
-# Настройка логгера без ограничений на длину строки
+
 logging.basicConfig(
-    level=logging.DEBUG,  # Используйте DEBUG для максимальной детализации
+    level=logging.DEBUG,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
-    stream=sys.stderr  # Всегда пишем в stderr
+    stream=sys.stderr
 )
 
-# Создаем отдельный логгер для файла с безграничной длиной строк
 logger = logging.getLogger('superset_mcp_file')
 logger.setLevel(logging.DEBUG)
 
@@ -45,10 +44,7 @@ file_formatter = logging.Formatter(
 )
 file_handler.setFormatter(file_formatter)
 logger.addHandler(file_handler)
-logger.propagate = False  # Не передаем выше
-
-# Используйте logger в ваших функциях:
-# logger.error(f"Полная ошибка: {full_traceback}")
+logger.propagate = False
 
 logger = logging.getLogger(__name__)
 
@@ -181,15 +177,12 @@ def handle_api_errors(
             full_traceback = traceback.format_exc()
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             
-            # Создаем уникальный идентификатор ошибки
             error_id = f"{function_name}_{timestamp}_{hash(full_traceback) % 1000000}"
             
-            # Сохраняем полный traceback в отдельный файл
             error_dir = "error_logs"
             os.makedirs(error_dir, exist_ok=True)
             error_file = os.path.join(error_dir, f"{error_id}.txt")
             
-            # Формируем детальный отчет об ошибке
             error_report = f"""
 {'='*80}
 ERROR REPORT: {error_id}
@@ -215,22 +208,18 @@ Context Information:
 {'='*80}
 """
             
-            # Сохраняем отчет в файл
             try:
                 with open(error_file, 'w', encoding='utf-8') as f:
                     f.write(error_report)
             except Exception as write_error:
                 logger.error(f"Failed to save error report: {write_error}")
             
-            # Логируем ключевую информацию
             logger.error(f"🚨 ERROR in {function_name}: {type(e).__name__}: {str(e)}")
             logger.error(f"📁 Full error report saved to: {error_file}")
             
-            # Для консоли выводим первые 5 строк traceback
             traceback_lines = full_traceback.split('\n')
-            short_traceback = '\n'.join(traceback_lines[:10])  # Первые 10 строк
+            short_traceback = '\n'.join(traceback_lines[:10])
             
-            # Возвращаем структурированную ошибку с ссылкой на полный отчет
             return {
                 "success": False,
                 "error": f"Error in {function_name}: {type(e).__name__}",
@@ -382,7 +371,6 @@ async def superset_auth_authenticate_user(
     Returns:
         Словарь с результатом аутентификации
     """
-    # Явно обрабатываем None значения
     auth_username = username if username is not None else SUPERSET_USERNAME
     auth_password = password if password is not None else SUPERSET_PASSWORD
     
@@ -398,10 +386,8 @@ async def superset_auth_authenticate_user(
     
     logger.info(f"Authenticating with username: {auth_username}")
     
-    # Используем новый клиент без предварительного получения CSRF токена
     async with httpx.AsyncClient(base_url=_global_base_url, timeout=30.0) as temp_client:
         try:
-            # Сначала попробуем получить CSRF токен, но если не получится - продолжим без него
             csrf_token = None
             try:
                 csrf_response = await temp_client.get("/api/v1/security/csrf_token/")
@@ -414,7 +400,6 @@ async def superset_auth_authenticate_user(
             except Exception as e:
                 logger.warning(f"Could not get CSRF token: {e}")
             
-            # Подготавливаем заголовки
             headers = {
                 "Content-Type": "application/json",
                 "Accept": "application/json",
@@ -422,7 +407,6 @@ async def superset_auth_authenticate_user(
             if csrf_token:
                 headers["X-CSRFToken"] = csrf_token
             
-            # Выполняем логин
             login_data = {
                 "username": auth_username,
                 "password": auth_password,
@@ -446,7 +430,6 @@ async def superset_auth_authenticate_user(
                     save_access_token(access_token)
                     set_global_access_token(access_token)
                     
-                    # Обновляем заголовки глобального клиента
                     global_client = get_global_client()
                     global_client.headers.update({"Authorization": f"Bearer {access_token}"})
                     
@@ -658,7 +641,6 @@ async def superset_dashboard_create(
                 }
         
         else:
-            # Пытаемся понять причину ошибки
             error_data = None
             try:
                 if response_text:
@@ -678,7 +660,6 @@ async def superset_dashboard_create(
                 "dashboard_title": dashboard_title
             }
             
-            # Добавляем рекомендации
             if response.status_code == 400:
                 if "CSRF" in str(error_details).upper():
                     result["suggestions"] = [
@@ -716,7 +697,7 @@ async def superset_dashboard_create(
         return {
             "error": f"Unexpected error: {type(e).__name__}",
             "message": str(e),
-            "traceback": full_traceback[-1000:],  # Последние 1000 символов
+            "traceback": full_traceback[-1000:],
             "suggestions": [
                 "Check Superset server status",
                 "Verify authentication",
@@ -843,7 +824,6 @@ async def superset_chart_create(
                 csrf_token = csrf_data.get("result")
                 logger.info(f"Got CSRF token for chart creation: {csrf_token[:50]}..." if csrf_token else "No CSRF token")
                 
-                # Также получаем cookies из ответа
                 cookies = csrf_response.cookies
                 if cookies:
                     logger.debug(f"Got cookies from CSRF request: {dict(cookies)}")
@@ -905,7 +885,6 @@ async def superset_chart_create(
         logger.info(f"Response status: {response.status_code}")
         logger.debug(f"Response headers: {dict(response.headers)}")
         
-        # Сохраняем полный ответ для анализа
         if len(response_text) > 5000:
             import time
             timestamp = int(time.time())
@@ -922,7 +901,6 @@ async def superset_chart_create(
                 if chart_id:
                     logger.info(f"✅ Chart created successfully! ID: {chart_id}")
                     
-                    # Дополнительная информация о созданном чарте
                     chart_info = {
                         "id": chart_id,
                         "slice_name": result.get("slice_name"),
@@ -959,7 +937,6 @@ async def superset_chart_create(
                 }
         
         else:
-            # Пытаемся понять причину ошибки
             error_data = None
             try:
                 if response_text:
@@ -986,7 +963,6 @@ async def superset_chart_create(
                 }
             }
             
-            # Анализируем ошибку и добавляем рекомендации
             error_text = str(error_details).lower()
             
             if response.status_code == 400:
@@ -1071,7 +1047,7 @@ async def superset_chart_create(
         return {
             "error": f"Unexpected error: {type(e).__name__}",
             "message": str(e),
-            "traceback_summary": full_traceback.split('\n')[-10:],  # Последние 10 строк
+            "traceback_summary": full_traceback.split('\n')[-10:],
             "suggestions": [
                 "Check Superset server status",
                 "Verify authentication token is valid",
@@ -1119,7 +1095,6 @@ async def superset_chart_get_viz_types(ctx: Context) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Error getting viz types: {str(e)}")
         
-        # Возвращаем статический список как fallback
         common_viz_types = [
             {"value": "line", "label": "Line Chart"},
             {"value": "bar", "label": "Bar Chart"},
@@ -1156,11 +1131,9 @@ async def superset_chart_validate_datasource(
         if not token:
             return {"error": "Not authenticated"}
         
-        # Пробуем получить информацию о datasource в зависимости от типа
         if datasource_type.lower() in ["table", "dataset"]:
             endpoint = f"/api/v1/dataset/{datasource_id}"
         else:
-            # Для других типов пробуем общий подход
             endpoint = f"/api/v1/{datasource_type}/{datasource_id}"
         
         client = get_global_client()
@@ -2836,10 +2809,8 @@ class MinimalMCPServer:
         
         for tool_name, tool_func in self.tools.items():
             try:
-                # Получаем сигнатуру функции
                 sig = inspect.signature(tool_func)
 
-                # Пропускаем первый параметр (ctx)
                 params = list(sig.parameters.items())
                 if params and params[0][0] == 'ctx':
                     params = params[1:]
@@ -2852,7 +2823,7 @@ class MinimalMCPServer:
                     param_type = "string"
                     param_desc = ""
                     
-                    # Пытаемся определить тип из аннотации
+                    # Тип из аннотации
                     if param.annotation != inspect.Parameter.empty:
                         ann_str = str(param.annotation)
                         if "str" in ann_str:
@@ -2913,7 +2884,7 @@ class MinimalMCPServer:
         errors = []
 
         if tool_name not in self.tool_schemas:
-            return errors  # Нет схемы - не можем валидировать
+            return errors
 
         schema = self.tool_schemas[tool_name]
         input_schema = schema.get("inputSchema", {})
@@ -2931,13 +2902,11 @@ class MinimalMCPServer:
                 param_schema = properties[param_name]
                 expected_type = param_schema.get("type", "string")
 
-                # Если значение None, оно допустимо для всех необязательных параметров
                 if param_value is None:
-                    continue  # None допустимо для опциональных параметров
+                    continue
 
                 # Обрабатываем случай, когда expected_type может быть массивом (например, ["string", "null"])
                 if isinstance(expected_type, list):
-                    # Проверяем, соответствует ли тип одному из ожидаемых
                     type_matched = False
                     for t in expected_type:
                         if t == "null" and param_value is None:
@@ -2965,7 +2934,6 @@ class MinimalMCPServer:
                     if not type_matched:
                         errors.append(f"Parameter '{param_name}' should be one of {expected_type}, got {type(param_value).__name__}")
                 else:
-                    # Одиночный тип
                     if expected_type == "string" and not isinstance(param_value, str):
                         errors.append(f"Parameter '{param_name}' should be string, got {type(param_value).__name__}")
                     elif expected_type == "integer" and not isinstance(param_value, int):
@@ -2988,7 +2956,6 @@ class MinimalMCPServer:
         
     async def handle_request(self, request: Dict[str, Any]) -> Dict[str, Any]:
         """Обработка JSON-RPC запроса"""
-        # Логируем входящий запрос (кроме шумных методов)
         method = request.get("method")
         request_id = request.get("id")
         
@@ -3020,7 +2987,7 @@ class MinimalMCPServer:
             tools_list = []
             
             for tool_name, schema in self.tool_schemas.items():
-                if tool_name in self.tools:  # Проверяем, что инструмент существует
+                if tool_name in self.tools:
                     tools_list.append(schema)
             
             logger.info(f"📋 Sending list of {len(tools_list)} tools")
@@ -3058,7 +3025,7 @@ class MinimalMCPServer:
                         "code": -32601,
                         "message": f"Tool not found: {tool_name}",
                         "data": {
-                            "available_tools": list(self.tools.keys())[:20],  # Первые 20 для примера
+                            "available_tools": list(self.tools.keys())[:20],
                             "total_tools": len(self.tools)
                         }
                     }
@@ -3085,13 +3052,11 @@ class MinimalMCPServer:
                 # Создаем контекст для инструмента
                 ctx = SupersetContext()
                 
-                # Для отладки: логируем вызов с аргументами
                 logger.debug(f"Calling {tool_name} with arguments: {arguments}")
                 
                 # Вызываем инструмент
                 result = await self.tools[tool_name](ctx, **arguments)
                 
-                # Логируем результат
                 if isinstance(result, dict) and result.get("success") is False:
                     logger.warning(f"⚠️ Tool {tool_name} returned error: {result.get('error', 'Unknown error')}")
                 else:
@@ -3119,7 +3084,6 @@ class MinimalMCPServer:
                 error_msg = str(e)
                 logger.error(f"❌ TypeError in {tool_name}: {error_msg}")
                 
-                # Пытаемся извлечь информацию об ожидаемых аргументах
                 expected_args = []
                 try:
                     sig = inspect.signature(self.tools[tool_name])
@@ -3200,12 +3164,10 @@ class MinimalMCPServer:
         
         loop = asyncio.get_event_loop()
         
-        # Настраиваем stdin для чтения
         reader = asyncio.StreamReader()
         protocol = asyncio.StreamReaderProtocol(reader)
         await loop.connect_read_pipe(lambda: protocol, sys.stdin)
         
-        # Настраиваем stdout для записи
         w_transport, w_protocol = await loop.connect_write_pipe(
             asyncio.streams.FlowControlMixin, sys.stdout
         )
@@ -3213,7 +3175,6 @@ class MinimalMCPServer:
         
         try:
             while True:
-                # Читаем строку из stdin
                 line_bytes = await reader.readline()
                 if not line_bytes:
                     logger.info("EOF received, shutting down")
@@ -3270,7 +3231,6 @@ class MinimalMCPServer:
         except Exception as e:
             logger.error(f"Server error: {e}")
         finally:
-            # Закрываем writer
             writer.close()
             try:
                 await writer.wait_closed()
@@ -3287,7 +3247,6 @@ async def main_async():
 
 def main():
     """Точка входа для запуска MCP сервера"""
-    # Показываем информацию о конфигурации
     print("\n" + "="*60)
     print("Superset MCP Server")
     print("="*60)
