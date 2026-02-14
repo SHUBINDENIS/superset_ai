@@ -50,6 +50,8 @@
 - AI Agent использует `superset-mcp` для безопасных API-вызовов в Superset.
 - Superset выполняет SQL/строит графики/дашборды в подключённых источниках данных.
 
+Подробная схема развёртывания (Deployment): `docs/deployment.md`.
+
 ## Требования к окружению
 - Docker + Docker Compose
 - Python 3.10+ (для локального запуска сервисов)
