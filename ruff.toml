@@ -1,0 +1,15 @@
+line-length = 100
+target-version = "py310"
+
+exclude = [
+  ".git",
+  ".venv",
+  "__pycache__",
+  "superset",
+  "build",
+  "dist",
+]
+
+[lint]
+# Базовый безопасный набор для CI, не ломающий существующий код.
+select = ["E9", "F63", "F7", "F82"]

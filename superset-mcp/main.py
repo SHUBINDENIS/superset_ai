@@ -17,6 +17,7 @@ from functools import wraps
 import json
 import logging
 import asyncio
+import inspect
 import sys
 from fastapi import FastAPI, HTTPException
 from mcp.server.fastmcp import FastMCP, Context
