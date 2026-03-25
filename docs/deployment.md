@@ -9,6 +9,7 @@
 - отдельный streaming backend больше не используется
 - Streamlit вызывает backend-модули и `AI Agent` внутри того же процесса
 - поддерживаемый Docker-сценарий остаётся split-моделью: Superset через compose, ассистент отдельным процессом/контейнером
+- Celery worker/beat оставлены только как опциональный профиль для фоновых задач Superset, а не как обязательная часть базового запуска проекта
 
 ## 1) Диаграмма развёртывания
 
@@ -23,8 +24,8 @@ flowchart TB
                     superset_app[Container: superset_app<br/>Apache Superset<br/>:8088]
                     superset_db[Container: superset_db<br/>PostgreSQL metadata<br/>:5432]
                     superset_cache[Container: superset_cache<br/>Redis<br/>:6379]
-                    superset_worker[Container: superset_worker<br/>Celery worker]
-                    superset_beat[Container: superset_worker_beat<br/>Celery beat]
+                    superset_worker[Container: superset_worker<br/>Celery worker<br/>optional async profile]
+                    superset_beat[Container: superset_worker_beat<br/>Celery beat<br/>optional async profile]
                 end
 
                 subgraph aistack[AI Assistant deployment]
@@ -58,7 +59,8 @@ flowchart TB
 |---|---|---|
 | Облако / датацентр | VM / сервер | IaaS/VPS или физический сервер |
 | Сервер (OS) | Docker Engine | Linux host |
-| Контейнеры Superset | `superset_app`, `superset_db`, `superset_cache`, `superset_worker`, `superset_worker_beat` | Один docker network (`docker-compose-image-tag.yml`) |
+| Контейнеры Superset | `superset_app`, `superset_db`, `superset_cache` | Базовый проектный стек в `docker-compose-image-tag.yml` |
+| Опциональные контейнеры Superset | `superset_worker`, `superset_worker_beat` | Профиль `async` для фоновых задач Superset |
 | Контейнер/процесс AI | Streamlit UI + встроенный backend agent + built-in MCP runtime | Отдельный контейнер `ai_superset` или локальный процесс |
 | Внешние сервисы | OpenAI API | Внешнее облако (SaaS API) |
 
@@ -116,8 +118,9 @@ flowchart TB
 
 1. Поднять Superset стек:
    - `cd superset`
-   - `docker compose -f docker-compose-image-tag.yml up -d db redis superset-init superset superset-worker superset-worker-beat`
+   - `docker compose -f docker-compose-image-tag.yml up -d db redis superset-init superset`
    - `docker compose -f docker-compose-image-tag.yml config --services`
+   - если нужны Celery background jobs: `docker compose -f docker-compose-image-tag.yml --profile async up -d superset-worker superset-worker-beat`
 2. Поднять ассистент:
    - локально: `streamlit run frontend/app.py --server.port 8051 --server.address 0.0.0.0`
    - или контейнером `ai_superset` на порту `8051` из `superset-ai-assistant-mcp/Dockerfile`

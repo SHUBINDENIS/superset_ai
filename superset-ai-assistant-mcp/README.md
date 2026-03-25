@@ -47,6 +47,7 @@ docker run --rm -p 8051:8051 --env-file superset-ai-assistant-mcp/.env ai_supers
 
 Проверенный факт:
 - образ собирается и поднимает Streamlit UI на `:8051`
+- в образ попадают только runtime-модули (`backend/`, `frontend/`, `.streamlit/`, `start_assistant_stack.sh`), без тестов, локальных БД и логов
 
 Важно:
 - этот образ не поднимает Superset

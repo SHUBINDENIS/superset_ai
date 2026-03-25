@@ -63,6 +63,7 @@
 - `superset-ai-assistant-mcp/` запускается отдельно: локально через `streamlit run` или отдельным Docker-образом.
 
 Ассистент не входит в текущий `docker compose` стек Superset.
+`superset-worker` и `superset-worker-beat` больше не считаются обязательной частью базового проекта; они оставлены как opt-in профиль для фоновых задач Superset.
 
 ## Быстрый запуск (рекомендуемый порядок)
 Сначала запускается Superset, затем отдельно запускается ассистент.
@@ -70,7 +71,7 @@
 ### 1) Поднять Apache Superset
 ```bash
 cd /home/superset_ai/superset
-docker compose -f docker-compose-image-tag.yml up -d db redis superset-init superset superset-worker superset-worker-beat
+docker compose -f docker-compose-image-tag.yml up -d db redis superset-init superset
 ```
 
 Проверка:
@@ -80,6 +81,11 @@ docker compose -f docker-compose-image-tag.yml ps
 ```
 
 Обычно UI Superset доступен на `http://localhost:8088` (или на вашем внешнем IP/домене).
+
+Если нужны фоновые функции Superset, которые зависят от Celery, их можно включить отдельно:
+```bash
+docker compose -f docker-compose-image-tag.yml --profile async up -d superset-worker superset-worker-beat
+```
 
 ### 2) Настроить переменные окружения ассистента
 ```bash
@@ -127,12 +133,15 @@ curl -I http://127.0.0.1:8051
 ```
 
 Что было реально проверено в репозитории:
-- compose-файл Superset успешно парсится и объявляет сервисы `db`, `redis`, `superset-init`, `superset`, `superset-worker`, `superset-worker-beat`
+- compose-файл Superset успешно парсится:
+  - базовый стек: `db`, `redis`, `superset-init`, `superset`
+  - optional profile `async`: `superset-worker`, `superset-worker-beat`
 - assistant Docker image успешно собирается
 - контейнер `ai_superset` успешно стартует и отдаёт Streamlit UI на `:8051`
 
 Важно:
 - этот Docker image поднимает только ассистент
+- в image теперь копируются только runtime-файлы ассистента, без тестов, локальных БД и логов
 - он не поднимает Superset и не включает в себя код `superset.mcp_service`
 - для рабочего MCP-подключения внутри такого контейнера нужен либо доступный `built_in_http` endpoint, либо явно заданный stdio launcher
 
