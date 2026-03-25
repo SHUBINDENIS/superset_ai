@@ -12,6 +12,7 @@ from pathlib import Path
 
 from backend.mcp_client.built_in_client import BuiltInMCPClient, McpUseToolTransport
 from backend.mcp_client.tool_registry import build_agent_mcp_use_config
+from backend.us1_schema_profiler import SupersetUS1SchemaProfiler
 from backend.us13_15_viz_service import US13To15VizService
 
 
@@ -364,3 +365,26 @@ class TestBuiltInMCPLive(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(int(updated["chart_id"]), int(widget["chart_id"]))
         finally:
             await asyncio.to_thread(service.close)
+
+    async def test_live_us1_schema_scan_uses_built_in_runtime(self):
+        profiler = SupersetUS1SchemaProfiler(
+            base_url="http://localhost:8088",
+            timeout_seconds=15.0,
+            max_tables_per_db=5,
+        )
+        try:
+            report = await profiler.build_report()
+        finally:
+            await profiler.close()
+
+        self.assertEqual(report["superset_base_url"], "http://localhost:8088")
+        self.assertGreaterEqual(report["summary"]["database_candidates_count"], 1)
+        self.assertIsInstance(report["postgres_databases"], list)
+
+        has_postgres = any(
+            bool(candidate.get("is_postgres"))
+            for candidate in report.get("database_candidates", [])
+            if isinstance(candidate, dict)
+        )
+        if has_postgres:
+            self.assertGreaterEqual(report["summary"]["selected_databases_count"], 1)

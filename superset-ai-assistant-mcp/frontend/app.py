@@ -861,7 +861,7 @@ def sidebar():
             "Режим",
             [CHAT_TRANSPORT_WS, CHAT_TRANSPORT_HTTP],
             key="chat_transport",
-            format_func=lambda x: "WebSocket (stream)" if x == CHAT_TRANSPORT_WS else "HTTP (legacy)",
+            format_func=lambda x: "WebSocket (stream)" if x == CHAT_TRANSPORT_WS else "HTTP (single response)",
         )
         st.text_input(
             "WS base URL",
@@ -1013,7 +1013,7 @@ def render_chat_window():
 def render_us1_window():
     st.title("Сканер схем и связей")
     st.caption(
-        "Автоматический скан метаданных Superset: схемы, профили таблиц и связи FK/эвристик."
+        "Автоматический скан метаданных Superset через built-in MCP: схемы, профили таблиц и связи FK/эвристик."
     )
 
     status = str(st.session_state.get("us1_scan_status", "idle"))
@@ -1066,7 +1066,7 @@ def render_us1_window():
         st.session_state.us1_scan_started_at = datetime.now(timezone.utc).isoformat()
         st.session_state.us1_scan_finished_at = None
         st.session_state.us1_scan_error = None
-        with st.spinner("Сканируем метаданные Superset..."):
+        with st.spinner("Сканируем метаданные Superset через built-in MCP..."):
             try:
                 result = asyncio.run(run_us1_scan_from_env())
                 st.session_state.us1_scan_result = result

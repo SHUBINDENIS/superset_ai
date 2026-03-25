@@ -12,7 +12,6 @@ from mcp_use import MCPAgent
 import logging
 import sys
 import os
-import shutil
 from .us2_glossary_service import get_glossary_service
 from .us3_mapping_rules import get_us3_mapping_rules_service
 from .us4_query_assistant import get_us4_query_assistant_service
@@ -145,7 +144,6 @@ class SupersetAIAgent:
         self._initialized = False
         self.mcp_client = None
         self.product_mcp_client = None
-        self.legacy_mcp_adapter = None
         self.active_mcp_runtime = ""
         self.available_mcp_tools: List[str] = []
         self.agent = None
@@ -680,89 +678,6 @@ class SupersetAIAgent:
             self._locks_loop_id = loop_id
         return self._init_lock, self._run_lock
 
-    @staticmethod
-    def _is_executable_file(path: str) -> bool:
-        clean = str(path).strip()
-        return bool(clean) and os.path.isfile(clean) and os.access(clean, os.X_OK)
-
-    def _resolve_mcp_python_command(self) -> str:
-        """Resolve a working Python executable for launching superset-mcp."""
-        configured = str(os.getenv("SUPERSET_MCP_PYTHON", "")).strip()
-        if configured:
-            # Absolute/relative path explicitly provided.
-            if os.path.sep in configured or configured.startswith("."):
-                if self._is_executable_file(configured):
-                    return configured
-                logger.warning(
-                    "SUPERSET_MCP_PYTHON path is not executable: %s. Falling back.",
-                    configured,
-                )
-            else:
-                resolved = shutil.which(configured)
-                if resolved:
-                    return resolved
-                logger.warning(
-                    "SUPERSET_MCP_PYTHON command not found in PATH: %s. Falling back.",
-                    configured,
-                )
-
-        # Most reliable fallback: current interpreter.
-        if self._is_executable_file(sys.executable):
-            return str(sys.executable)
-
-        # Additional fallbacks.
-        for candidate in ("python3", "python"):
-            resolved = shutil.which(candidate)
-            if resolved:
-                return resolved
-
-        raise FileNotFoundError(
-            "Cannot find Python interpreter for MCP launch. "
-            "Set SUPERSET_MCP_PYTHON to an absolute executable path "
-            "(for example /usr/bin/python3 or /home/.../venv/bin/python)."
-        )
-
-    def _resolve_mcp_server_path(self) -> str:
-        """Resolve superset-mcp entrypoint path for both local and docker runs."""
-        configured = str(os.getenv("SUPERSET_MCP_PATH", "")).strip()
-        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-        repo_default = os.path.join(repo_root, "superset-mcp", "main.py")
-
-        candidates: List[str] = []
-        if configured:
-            candidates.append(configured)
-        candidates.extend(
-            [
-                repo_default,
-                "/app/superset-mcp/main.py",
-            ]
-        )
-
-        seen = set()
-        ordered_candidates: List[str] = []
-        for path in candidates:
-            clean = str(path).strip()
-            if not clean or clean in seen:
-                continue
-            seen.add(clean)
-            ordered_candidates.append(clean)
-
-        for path in ordered_candidates:
-            if os.path.isfile(path):
-                if configured and path != configured:
-                    logger.warning(
-                        "SUPERSET_MCP_PATH '%s' not found. Fallback to '%s'.",
-                        configured,
-                        path,
-                    )
-                return path
-
-        attempted = ", ".join(ordered_candidates)
-        raise FileNotFoundError(
-            "Cannot resolve superset-mcp entrypoint. "
-            f"Tried: {attempted}. Set SUPERSET_MCP_PATH to a valid main.py path."
-        )
-    
     async def _get_or_create_mcp_runtime(self) -> ProductMCPRuntime:
         """Get or create the shared product MCP runtime."""
         global _global_mcp_runtime, _global_mcp_runtime_loop_id
@@ -783,8 +698,7 @@ class SupersetAIAgent:
                         )
 
                 _global_mcp_runtime = await create_product_mcp_runtime(
-                    legacy_python_resolver=self._resolve_mcp_python_command,
-                    legacy_server_path_resolver=self._resolve_mcp_server_path,
+                    fallback_runtime="none",
                 )
                 backend_logger.debug(
                     "Resolved product MCP runtime using product client layer: %s",
@@ -808,7 +722,6 @@ class SupersetAIAgent:
                 runtime = await self._get_or_create_mcp_runtime()
                 self.mcp_client = runtime.mcp_use_client
                 self.product_mcp_client = runtime.product_client
-                self.legacy_mcp_adapter = runtime.legacy_adapter
                 self.active_mcp_runtime = runtime.runtime_name
                 self.available_mcp_tools = list(runtime.tool_names)
                 
@@ -1365,7 +1278,6 @@ class SupersetAIAgent:
         self.agent = None
         self.mcp_client = None
         self.product_mcp_client = None
-        self.legacy_mcp_adapter = None
         self.active_mcp_runtime = ""
         self.available_mcp_tools = []
 

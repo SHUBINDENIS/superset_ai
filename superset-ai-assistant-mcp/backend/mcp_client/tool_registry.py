@@ -16,7 +16,7 @@ from backend.mcp_client.errors import (
 DEFAULT_SERVER_NAME = "superset"
 DEFAULT_LIST_PAGE_SIZE = 1000
 DEFAULT_RUNTIME = "built_in_stdio"
-DEFAULT_FALLBACK_RUNTIME = "legacy"
+DEFAULT_FALLBACK_RUNTIME = "none"
 SUPPORTED_PRODUCT_RUNTIMES: tuple[str, ...] = (
     "built_in_stdio",
     "built_in_http",

@@ -43,7 +43,9 @@ tools:
     covered_by:
       - superset-ai-assistant-mcp/tests/unit/mcp_client/test_error_normalization.py::TestBuiltInClientErrorNormalization.test_normalizes_error_categories
       - superset-ai-assistant-mcp/tests/integration/mcp_client/test_built_in_live.py::TestBuiltInMCPLive.test_live_stdio_startup_and_core_readonly_tools
+      - superset-ai-assistant-mcp/tests/integration/mcp_client/test_built_in_live.py::TestBuiltInMCPLive.test_live_us1_schema_scan_uses_built_in_runtime
       - superset-ai-assistant-mcp/tests/test_us13_15_viz_service.py::TestUS13To15VizService.test_preview_sql_uses_execute_sql_through_mcp
+      - superset-ai-assistant-mcp/tests/test_us1_schema_profiler.py::TestUS1SchemaProfilerRuntime.test_build_report_uses_mcp_tools_without_rest_stack
   - name: open_sql_lab_with_context
     layer: builtin
     use_cases:
@@ -90,7 +92,9 @@ tools:
     covered_by:
       - superset/tests/unit_tests/mcp_service/extensions/tool/test_list_databases.py::test_list_databases_filters_to_accessible_results
       - superset-ai-assistant-mcp/tests/integration/mcp_client/test_built_in_live.py::TestBuiltInMCPLive.test_live_stdio_startup_and_core_readonly_tools
+      - superset-ai-assistant-mcp/tests/integration/mcp_client/test_built_in_live.py::TestBuiltInMCPLive.test_live_us1_schema_scan_uses_built_in_runtime
       - superset-ai-assistant-mcp/tests/test_us13_15_viz_service.py::TestUS13To15VizService.test_list_databases_uses_mcp_extension_instead_of_rest
+      - superset-ai-assistant-mcp/tests/test_us1_schema_profiler.py::TestUS1SchemaProfilerRuntime.test_build_report_uses_mcp_tools_without_rest_stack
   - name: mcp_ext.create_empty_dashboard
     layer: custom_extension
     use_cases:

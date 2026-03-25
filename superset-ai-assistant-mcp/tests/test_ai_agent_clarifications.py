@@ -1,5 +1,4 @@
 import unittest
-from unittest.mock import patch
 
 from backend.ai_agent import SupersetAIAgent
 from backend.mcp_client.tool_registry import (
@@ -68,60 +67,9 @@ class TestAIAgentClarifications(unittest.TestCase):
         self.assertNotIn("superset_auth_authenticate_user", SUPPORTED_LEGACY_TOOLS)
         self.assertNotIn("superset_database_get_tables", SUPPORTED_LEGACY_TOOLS)
 
-    def test_resolve_mcp_python_prefers_explicit_executable_path(self):
-        with (
-            patch.dict("os.environ", {"SUPERSET_MCP_PYTHON": "/opt/python/bin/python3"}, clear=False),
-            patch.object(
-                SupersetAIAgent,
-                "_is_executable_file",
-                side_effect=lambda path: str(path) == "/opt/python/bin/python3",
-            ),
-        ):
-            resolved = self.agent._resolve_mcp_python_command()
-        self.assertEqual(resolved, "/opt/python/bin/python3")
-
-    def test_resolve_mcp_python_falls_back_to_sys_executable(self):
-        with (
-            patch.dict("os.environ", {"SUPERSET_MCP_PYTHON": "python"}, clear=False),
-            patch("backend.ai_agent.shutil.which", return_value=None),
-            patch("backend.ai_agent.sys.executable", "/usr/bin/python3"),
-            patch.object(
-                SupersetAIAgent,
-                "_is_executable_file",
-                side_effect=lambda path: str(path) == "/usr/bin/python3",
-            ),
-        ):
-            resolved = self.agent._resolve_mcp_python_command()
-        self.assertEqual(resolved, "/usr/bin/python3")
-
-    def test_resolve_mcp_python_raises_when_no_candidates(self):
-        with (
-            patch.dict("os.environ", {"SUPERSET_MCP_PYTHON": "python"}, clear=False),
-            patch("backend.ai_agent.shutil.which", return_value=None),
-            patch("backend.ai_agent.sys.executable", ""),
-            patch.object(SupersetAIAgent, "_is_executable_file", return_value=False),
-        ):
-            with self.assertRaises(FileNotFoundError):
-                self.agent._resolve_mcp_python_command()
-
-    def test_resolve_mcp_server_path_fallbacks_to_repo_default(self):
-        with (
-            patch.dict("os.environ", {"SUPERSET_MCP_PATH": "/missing/main.py"}, clear=False),
-            patch(
-                "backend.ai_agent.os.path.isfile",
-                side_effect=lambda path: str(path).endswith("/superset-mcp/main.py"),
-            ),
-        ):
-            resolved = self.agent._resolve_mcp_server_path()
-        self.assertTrue(resolved.endswith("/superset-mcp/main.py"))
-
-    def test_resolve_mcp_server_path_raises_when_missing(self):
-        with (
-            patch.dict("os.environ", {"SUPERSET_MCP_PATH": "/missing/main.py"}, clear=False),
-            patch("backend.ai_agent.os.path.isfile", return_value=False),
-        ):
-            with self.assertRaises(FileNotFoundError):
-                self.agent._resolve_mcp_server_path()
+    def test_agent_no_longer_exposes_legacy_launcher_resolution_helpers(self):
+        self.assertFalse(hasattr(SupersetAIAgent, "_resolve_mcp_python_command"))
+        self.assertFalse(hasattr(SupersetAIAgent, "_resolve_mcp_server_path"))
 
 
 if __name__ == "__main__":

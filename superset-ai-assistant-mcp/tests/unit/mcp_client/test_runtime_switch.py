@@ -38,7 +38,7 @@ class FakeToolTransport:
 class TestRuntimeSwitch(unittest.IsolatedAsyncioTestCase):
     def test_default_runtime_is_built_in_stdio(self):
         self.assertEqual(DEFAULT_RUNTIME, "built_in_stdio")
-        self.assertEqual(get_runtime_attempt_order(), ("built_in_stdio", "legacy"))
+        self.assertEqual(get_runtime_attempt_order(), ("built_in_stdio",))
 
     def test_stdio_command_override(self):
         with patch.dict(
@@ -74,6 +74,15 @@ class TestRuntimeSwitch(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(runtime.legacy_adapter)
         self.assertEqual(runtime.tool_names, ("list_datasets", "get_dataset_info"))
         await runtime.close()
+
+    def test_runtime_attempt_order_supports_explicit_legacy_fallback(self):
+        self.assertEqual(
+            get_runtime_attempt_order(
+                runtime="built_in_stdio",
+                fallback_runtime="legacy",
+            ),
+            ("built_in_stdio", "legacy"),
+        )
 
     async def test_runtime_creation_falls_back_to_legacy(self):
         def fake_from_dict(config):
