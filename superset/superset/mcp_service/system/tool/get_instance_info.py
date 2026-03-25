@@ -72,13 +72,20 @@ _instance_info_core = InstanceInfoCore(
 @tool(tags=["core"])
 @parse_request(GetSupersetInstanceInfoRequest)
 def get_instance_info(
-    request: GetSupersetInstanceInfoRequest, ctx: Context
+    request: GetSupersetInstanceInfoRequest | None = None,
+    ctx: Context | None = None,
 ) -> InstanceInfo:
     """Get instance statistics.
+
+    This tool takes no user-supplied parameters. Calling it with an empty
+    argument object is valid and maps to the empty request model.
 
     Returns counts, activity metrics, and database types.
     """
     try:
+        if request is None:
+            request = GetSupersetInstanceInfoRequest()
+
         # Import DAOs at runtime to avoid circular imports
         from superset.daos.chart import ChartDAO
         from superset.daos.dashboard import DashboardDAO

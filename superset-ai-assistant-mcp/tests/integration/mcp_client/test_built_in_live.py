@@ -171,6 +171,8 @@ class TestBuiltInMCPLive(unittest.IsolatedAsyncioTestCase):
         tools = set(await self.transport.list_tools())
         self.assertTrue(
             {
+                "health_check",
+                "get_instance_info",
                 "list_datasets",
                 "get_dataset_info",
                 "list_charts",
@@ -189,6 +191,25 @@ class TestBuiltInMCPLive(unittest.IsolatedAsyncioTestCase):
                 "generate_explore_link",
             }.issubset(tools)
         )
+
+        health = await self.client.call_tool("health_check", {})
+        self.assertEqual(health.get("status"), "healthy")
+
+        instance_info = await self.client.call_tool("get_instance_info", {})
+        self.assertIn("instance_summary", instance_info)
+        self.assertIn("database_breakdown", instance_info)
+
+        for _ in range(3):
+            charts_result, datasets_result, dashboards_result = await asyncio.gather(
+                self.client.list_charts({"page": 1, "page_size": 5}),
+                self.client.list_datasets({"page": 1, "page_size": 5}),
+                self.client.list_dashboards({"page": 1, "page_size": 5}),
+            )
+            self.assertGreater(len(list(charts_result.get("charts", []) or [])), 0)
+            self.assertGreater(len(list(datasets_result.get("datasets", []) or [])), 0)
+            self.assertGreater(
+                len(list(dashboards_result.get("dashboards", []) or [])), 0
+            )
 
         datasets = await self.client.list_datasets({"page": 1, "page_size": 5})
         dataset_items = list(datasets.get("datasets", []) or [])

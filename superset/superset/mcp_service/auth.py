@@ -42,6 +42,32 @@ F = TypeVar("F", bound=Callable[..., Any])
 logger = logging.getLogger(__name__)
 
 
+def _load_session_bound_user(
+    *,
+    user_id: int | None,
+    username: str | None,
+) -> User | None:
+    """Load a fresh, session-bound user with roles and groups eagerly loaded."""
+    from sqlalchemy.orm import joinedload
+
+    from superset.extensions import db
+
+    query = db.session.query(User).options(
+        joinedload(User.roles),
+        joinedload(User.groups),
+    )
+
+    if user_id is not None:
+        user = query.filter(User.id == user_id).first()
+        if user is not None:
+            return user
+
+    if username:
+        return query.filter(User.username == username).first()
+
+    return None
+
+
 def get_user_from_request() -> User:
     """
     Get the current user for the MCP tool request.
@@ -57,13 +83,17 @@ def get_user_from_request() -> User:
         ValueError: If user cannot be authenticated or found
     """
     from flask import current_app
-    from sqlalchemy.orm import joinedload
-
-    from superset.extensions import db
-
-    # First check if user is already set by Preset workspace middleware
-    if hasattr(g, "user") and g.user:
-        return g.user
+    # First check if user is already set by Preset workspace middleware or
+    # a previous MCP tool call. Always requery to avoid reusing detached users
+    # across sequential or concurrent tool execution in the same session.
+    existing_user = getattr(g, "user", None)
+    if existing_user and not getattr(existing_user, "is_anonymous", False):
+        fresh_user = _load_session_bound_user(
+            user_id=getattr(existing_user, "id", None),
+            username=getattr(existing_user, "username", None),
+        )
+        if fresh_user is not None:
+            return fresh_user
 
     # Fall back to configured username for development/single-user deployments
     username = current_app.config.get("MCP_DEV_USERNAME")
@@ -75,14 +105,9 @@ def get_user_from_request() -> User:
             "MCP_DEV_USERNAME for development."
         )
 
-    # Query user directly with eager loading to ensure fresh session-bound object
-    # Do NOT use security_manager.find_user() as it may return cached/detached user
-    user = (
-        db.session.query(User)
-        .options(joinedload(User.roles), joinedload(User.groups))
-        .filter(User.username == username)
-        .first()
-    )
+    # Query user directly with eager loading to ensure fresh session-bound object.
+    # Do NOT use security_manager.find_user() as it may return cached/detached user.
+    user = _load_session_bound_user(user_id=None, username=username)
 
     if not user:
         raise ValueError(
@@ -149,26 +174,19 @@ def _cleanup_session_on_error() -> None:
     """Clean up database session after an exception."""
     from superset.extensions import db
 
-    # pylint: disable=consider-using-transaction
     try:
         db.session.rollback()
-        db.session.remove()
     except Exception as e:
         logger.warning("Error cleaning up session after exception: %s", e)
 
 
 def _cleanup_session_finally() -> None:
-    """Clean up database session in finally block."""
-    from superset.extensions import db
+    """No-op cleanup.
 
-    # Rollback active session (no exception occurred)
-    # Do NOT call remove() on success to avoid detaching user
-    try:
-        if db.session.is_active:
-            # pylint: disable=consider-using-transaction
-            db.session.rollback()
-    except Exception as e:
-        logger.warning("Error in finally block: %s", e)
+    Flask app-context teardown removes the scoped session for each MCP tool call.
+    Rolling back here expires objects inside the still-running context and breaks
+    concurrent tool execution that relies on eager-loaded relationships.
+    """
 
 
 def mcp_auth_hook(tool_func: F) -> F:

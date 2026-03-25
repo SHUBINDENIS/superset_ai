@@ -354,6 +354,9 @@ class TestParseRequestDecorator:
         name: str
         count: int
 
+    class EmptyRequestModel(BaseModel):
+        """Empty request model for tools that accept no user parameters."""
+
     def test_decorator_with_json_string_async(self):
         """Should parse JSON string request in async function."""
 
@@ -513,3 +516,12 @@ class TestParseRequestDecorator:
         json_str = '{"name": "test", "nested": {"value": 42}}'
         result = sync_tool(json_str)
         assert result == "test:42"
+
+    def test_decorator_allows_omitted_empty_request(self):
+        """Should synthesize an empty request model when a tool omits it."""
+
+        @parse_request(self.EmptyRequestModel)
+        def sync_tool(request=None, ctx=None):
+            return isinstance(request, self.EmptyRequestModel)
+
+        assert sync_tool() is True
