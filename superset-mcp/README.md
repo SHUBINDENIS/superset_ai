@@ -1,4 +1,8 @@
 # Superset MCP Integration
+
+> Historical note: this directory is no longer part of the supported runtime path.
+> The assistant now uses the built-in Superset MCP service. This legacy package
+> snapshot is kept only as migration reference material.
 [![smithery badge](https://smithery.ai/badge/@aptro/superset-mcp)](https://smithery.ai/server/@aptro/superset-mcp)
 
 MCP server for interacting with Apache Superset, enabling AI agents to connect to and control a Superset instance programmatically.

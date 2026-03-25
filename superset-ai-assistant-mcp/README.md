@@ -15,7 +15,6 @@
    - `SUPERSET_BUILT_IN_MCP_COMMAND`, `SUPERSET_BUILT_IN_MCP_ARGS` — опциональный launcher для `built_in_stdio`, если текущая среда не умеет запускать `python -m superset.mcp_service` напрямую
    - `SUPERSET_BUILT_IN_MCP_URL` — адрес built-in MCP только для режима `built_in_http`
    - `SUPERSET_BASE_URL`, `SUPERSET_PUBLIC_URL` — базовый URL Superset для всех ссылок (например, `http://103.54.18.91:8088`)
-   - `SUPERSET_USERNAME`, `SUPERSET_PASSWORD` — опционально; normal runtime через built-in MCP их не использует
    - `AI_ASSISTANT_WS_BASE_URL` — адрес WebSocket API (например, `ws://127.0.0.1:8052/ws/chat`)
    - `AUTH_DB_PATH`, `AUTH_JWT_SECRET`, `AUTH_JWT_TTL_HOURS` — параметры локальной авторизации (логин/пароль + JWT)
    - `AUTH_PASSWORD_MIN_LENGTH`, `AUTH_HISTORY_MAX_MESSAGES` — политика паролей и лимит загружаемой истории чата

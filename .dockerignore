@@ -1,3 +1,7 @@
 **/.venv
 **/__pycache__
 .git
+superset-mcp/.env
+superset-mcp/.superset_token
+superset-mcp/build
+superset-mcp/superset_mcp.egg-info

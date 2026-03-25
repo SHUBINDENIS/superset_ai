@@ -389,10 +389,7 @@ def render_message(role: str, content: str):
 
 
 def _parse_examples_input(raw: str):
-    if not raw:
-        return []
-    tokens = [x.strip() for x in raw.replace("\n", ",").split(",")]
-    return [x for x in tokens if x]
+    return _parse_simple_csv(raw)
 
 
 def _parse_simple_csv(raw: str):

@@ -141,7 +141,7 @@ pytest tests -q
 
 ## Troubleshooting
 - Ошибка `429` от OpenAI: уменьшить частоту запросов, использовать более экономичную модель, сократить контекст.
-- Ошибка авторизации Superset: проверить `SUPERSET_BASE_URL`, логин/пароль и доступность Superset.
+- Ошибка доступа к Superset или built-in MCP: проверить `SUPERSET_BASE_URL`, доступность `superset.mcp_service` и права текущего пользователя в Superset.
 - Ошибка built-in MCP запуска: либо обеспечьте доступность `python -m superset.mcp_service` в текущей среде, либо задайте `SUPERSET_BUILT_IN_MCP_COMMAND` и при необходимости `SUPERSET_BUILT_IN_MCP_ARGS`.
 - Для HTTP-транспорта задайте `SUPERSET_PRODUCT_MCP_RUNTIME=built_in_http` и `SUPERSET_BUILT_IN_MCP_URL`.
 - Пустые списки таблиц/датасетов: убедиться, что в Superset созданы подключения БД и datasets.

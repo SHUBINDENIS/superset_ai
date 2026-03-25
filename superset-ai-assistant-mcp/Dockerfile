@@ -13,7 +13,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # код
 COPY superset-ai-assistant-mcp ./superset-ai-assistant-mcp
-COPY superset-mcp ./superset-mcp
 
 # env
 ENV PYTHONPATH=/app

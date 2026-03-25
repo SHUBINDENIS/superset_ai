@@ -2,6 +2,10 @@
 
 This checklist is the execution plan for rewriting the product from the legacy external MCP server (`superset-mcp/main.py`) to the built-in Superset MCP service (`superset/superset/mcp_service`).
 
+Status note:
+- This is now a historical execution checklist for the completed migration.
+- For the current supported architecture and runtime policy, use `docs/mcp-migration/parity-report.md` and `docs/mcp-migration/runtime-switch-policy.md`.
+
 Follow `AGENTS.md` first.
 
 ---
