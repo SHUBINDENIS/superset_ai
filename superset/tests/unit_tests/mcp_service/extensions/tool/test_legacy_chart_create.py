@@ -15,9 +15,9 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import sys
+from types import ModuleType
 from unittest.mock import Mock, patch
-
-import pytest
 
 
 def _mock_chart(chart_id: int, slice_name: str, viz_type: str) -> Mock:
@@ -29,24 +29,27 @@ def _mock_chart(chart_id: int, slice_name: str, viz_type: str) -> Mock:
     return chart
 
 
-@patch("superset.commands.chart.create.CreateChartCommand")
-@pytest.mark.asyncio
-async def test_legacy_chart_create_uses_server_side_command(
-    mock_create_command, load_extension_module
-):
+def test_legacy_chart_create_uses_server_side_command(load_extension_module):
     module = load_extension_module("superset.mcp_service.extensions.tool.legacy_chart_create")
+    mock_create_command = Mock()
     mock_create_command.return_value.run.return_value = _mock_chart(21, "Revenue Pie", "pie")
+    command_module = ModuleType("superset.commands.chart.create")
+    command_module.CreateChartCommand = mock_create_command
 
-    result = module.legacy_chart_create(
-        {
-            "slice_name": "Revenue Pie",
-            "datasource_id": 7,
-            "datasource_type": "table",
-            "viz_type": "pie",
-            "params": {"viz_type": "pie", "groupby": ["region"]},
-        },
-        Mock(),
-    )
+    with (
+        patch.dict(sys.modules, {"superset.commands.chart.create": command_module}),
+        patch.object(module, "get_superset_base_url", return_value="http://localhost:9001"),
+    ):
+        result = module.legacy_chart_create(
+            {
+                "slice_name": "Revenue Pie",
+                "datasource_id": 7,
+                "datasource_type": "table",
+                "viz_type": "pie",
+                "params": {"viz_type": "pie", "groupby": ["region"]},
+            },
+            Mock(),
+        )
 
     assert result["error"] is None
     assert result["chart_id"] == 21
@@ -54,24 +57,27 @@ async def test_legacy_chart_create_uses_server_side_command(
     assert result["chart_url"].endswith("/explore/?slice_id=21")
 
 
-@patch("superset.commands.chart.create.CreateChartCommand")
-@pytest.mark.asyncio
-async def test_legacy_chart_create_returns_error_payload_on_failure(
-    mock_create_command, load_extension_module
-):
+def test_legacy_chart_create_returns_error_payload_on_failure(load_extension_module):
     module = load_extension_module("superset.mcp_service.extensions.tool.legacy_chart_create")
+    mock_create_command = Mock()
     mock_create_command.return_value.run.side_effect = Exception("chart failed")
+    command_module = ModuleType("superset.commands.chart.create")
+    command_module.CreateChartCommand = mock_create_command
 
-    result = module.legacy_chart_create(
-        {
-            "slice_name": "Broken Chart",
-            "datasource_id": 7,
-            "datasource_type": "table",
-            "viz_type": "pie",
-            "params": {"viz_type": "pie"},
-        },
-        Mock(),
-    )
+    with (
+        patch.dict(sys.modules, {"superset.commands.chart.create": command_module}),
+        patch.object(module, "get_superset_base_url", return_value="http://localhost:9001"),
+    ):
+        result = module.legacy_chart_create(
+            {
+                "slice_name": "Broken Chart",
+                "datasource_id": 7,
+                "datasource_type": "table",
+                "viz_type": "pie",
+                "params": {"viz_type": "pie"},
+            },
+            Mock(),
+        )
 
     assert result["chart"] is None
     assert result["chart_id"] is None

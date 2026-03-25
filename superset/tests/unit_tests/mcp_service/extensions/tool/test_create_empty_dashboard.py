@@ -15,9 +15,10 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import sys
+from types import ModuleType
 from unittest.mock import Mock, patch
 
-import pytest
 from superset.utils import json
 
 
@@ -38,26 +39,29 @@ def _mock_dashboard(dashboard_id: int, title: str) -> Mock:
     return dashboard
 
 
-@patch("superset.commands.dashboard.create.CreateDashboardCommand")
-@pytest.mark.asyncio
-async def test_create_empty_dashboard_uses_empty_layout(
-    mock_create_command, load_extension_module
-):
+def test_create_empty_dashboard_uses_empty_layout(load_extension_module):
     module = load_extension_module(
         "superset.mcp_service.extensions.tool.create_empty_dashboard"
     )
+    mock_create_command = Mock()
     mock_create_command.return_value.run.return_value = _mock_dashboard(
         11, "Product Empty Dashboard"
     )
+    command_module = ModuleType("superset.commands.dashboard.create")
+    command_module.CreateDashboardCommand = mock_create_command
 
-    result = module.create_empty_dashboard(
-        {
-            "dashboard_title": "Product Empty Dashboard",
-            "description": "Dashboard shell",
-            "published": False,
-        },
-        Mock(),
-    )
+    with (
+        patch.dict(sys.modules, {"superset.commands.dashboard.create": command_module}),
+        patch.object(module, "get_superset_base_url", return_value="http://localhost:9001"),
+    ):
+        result = module.create_empty_dashboard(
+            {
+                "dashboard_title": "Product Empty Dashboard",
+                "description": "Dashboard shell",
+                "published": False,
+            },
+            Mock(),
+        )
 
     assert result.error is None
     assert result.dashboard.id == 11
@@ -71,20 +75,23 @@ async def test_create_empty_dashboard_uses_empty_layout(
     assert position_json["DASHBOARD_VERSION_KEY"] == "v2"
 
 
-@patch("superset.commands.dashboard.create.CreateDashboardCommand")
-@pytest.mark.asyncio
-async def test_create_empty_dashboard_returns_error_payload_on_failure(
-    mock_create_command, load_extension_module
-):
+def test_create_empty_dashboard_returns_error_payload_on_failure(load_extension_module):
     module = load_extension_module(
         "superset.mcp_service.extensions.tool.create_empty_dashboard"
     )
+    mock_create_command = Mock()
     mock_create_command.return_value.run.side_effect = Exception("create failed")
+    command_module = ModuleType("superset.commands.dashboard.create")
+    command_module.CreateDashboardCommand = mock_create_command
 
-    result = module.create_empty_dashboard(
-        {"dashboard_title": "Broken Dashboard"},
-        Mock(),
-    )
+    with (
+        patch.dict(sys.modules, {"superset.commands.dashboard.create": command_module}),
+        patch.object(module, "get_superset_base_url", return_value="http://localhost:9001"),
+    ):
+        result = module.create_empty_dashboard(
+            {"dashboard_title": "Broken Dashboard"},
+            Mock(),
+        )
 
     assert result.dashboard is None
     assert result.dashboard_url is None

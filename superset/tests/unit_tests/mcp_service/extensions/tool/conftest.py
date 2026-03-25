@@ -16,7 +16,6 @@
 # under the License.
 
 import importlib
-import os
 import sys
 from types import ModuleType
 from typing import Callable
@@ -24,10 +23,6 @@ from unittest.mock import patch
 
 import pytest
 import superset_core.mcp
-from _pytest.fixtures import SubRequest
-
-from superset.app import SupersetApp
-from superset.initialization import SupersetAppInitializer
 
 
 def _identity_tool(
@@ -52,39 +47,3 @@ def load_extension_module() -> Callable[[str], ModuleType]:
             return importlib.import_module(module_name)
 
     return _load
-
-
-@pytest.fixture(scope="module")
-def app(request: SubRequest) -> SupersetApp:
-    app = SupersetApp(__name__)
-    app.config.from_object("superset.config")
-    app.config["SQLALCHEMY_DATABASE_URI"] = (
-        os.environ.get("SUPERSET__SQLALCHEMY_DATABASE_URI") or "sqlite://"
-    )
-    app.config["WTF_CSRF_ENABLED"] = False
-    app.config["PREVENT_UNSAFE_DB_CONNECTIONS"] = False
-    app.config["TESTING"] = True
-    app.config["RATELIMIT_ENABLED"] = False
-    app.config["CACHE_CONFIG"] = {}
-    app.config["DATA_CACHE_CONFIG"] = {}
-    app.config["SERVER_NAME"] = "example.com"
-    app.config["APPLICATION_ROOT"] = "/"
-    app.config["PREFERRED_URL_SCHEME="] = "http"
-
-    if request and hasattr(request, "param"):
-        for key, value in request.param.items():
-            app.config[key] = value
-
-    from superset.extensions import appbuilder
-
-    appbuilder.baseviews = []
-
-    app_initializer = SupersetAppInitializer(app)
-    app_initializer.init_app()
-    return app
-
-
-@pytest.fixture(autouse=True)
-def app_context(app: SupersetApp):
-    with app.app_context():
-        yield
