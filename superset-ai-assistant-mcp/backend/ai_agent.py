@@ -19,6 +19,10 @@ from .us4_query_assistant import get_us4_query_assistant_service
 from .us5_query_builder import get_us5_query_builder_service
 from .us10_12_guardrails import get_us10_12_guardrails_service
 from .us13_15_viz_service import get_us13_15_viz_service
+from .mcp_client.tool_registry import (
+    build_agent_mcp_use_config,
+    build_agent_runtime_guidance,
+)
 
 # Создаем и настраиваем логгер для вашего бэкенда
 backend_logger = logging.getLogger('superset_backend')
@@ -709,23 +713,13 @@ class SupersetAIAgent:
                             f"Failed closing stale global MCP client: {exc}"
                         )
 
-                mcp_server_path = self._resolve_mcp_server_path()
-
-                mcp_python = self._resolve_mcp_python_command()
-                backend_logger.debug(
-                    "Resolved MCP launcher python: %s (script: %s)",
-                    mcp_python,
-                    mcp_server_path,
+                mcp_config = build_agent_mcp_use_config(
+                    legacy_python_resolver=self._resolve_mcp_python_command,
+                    legacy_server_path_resolver=self._resolve_mcp_server_path,
                 )
-
-                mcp_config = {
-                    "mcpServers": {
-                        "superset": {
-                            "command": mcp_python,
-                            "args": [mcp_server_path]
-                        }
-                    }
-                }
+                backend_logger.debug(
+                    "Resolved MCP runtime config using product client layer"
+                )
                 
                 backend_logger.debug("Creating global MCP client...")
                 _global_mcp_client = MCPClient.from_dict(mcp_config)
@@ -1200,17 +1194,7 @@ class SupersetAIAgent:
                 "Запрос пользователя:\n"
                 f"{last_user_message}\n\n"
                 "Правила выполнения:\n"
-                "- Работай только с инструментами Superset MCP.\n"
-                "- Если нужно, сначала аутентифицируйся через superset_auth_authenticate_user.\n"
-                "- Для dashboard list/create используй профильные инструменты.\n"
-                "- Для chart create используй корректные datasource_id/datasource_type/viz_type/params.\n"
-                f"- Для всех ссылок на Superset используй базовый URL: {superset_public_url}.\n"
-                "- Если в запросе есть scope (база/таблица), сначала резолвь dataset через "
-                "superset_dataset_list и используй dataset-level операции.\n"
-                "- Не считай ошибку /api/v1/database/*/tables (400) финальной, если dataset уже известен.\n"
-                "- Если пользователь указал таблицу/датасет, не подменяй datasource.\n"
-                "- Если данных недостаточно или возникает ошибка инструмента, задай до 3 уточняющих вопросов "
-                "про таблицу/метрику/период вместо общего отказа.\n"
+                f"{build_agent_runtime_guidance(superset_public_url)}"
             )
             
             backend_logger.debug(f"Session {self.session_id}: Processing query with {len(messages)} messages")
