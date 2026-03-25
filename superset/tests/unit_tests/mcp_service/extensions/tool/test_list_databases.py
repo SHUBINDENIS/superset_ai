@@ -18,24 +18,6 @@
 from unittest.mock import Mock, patch
 
 import pytest
-from fastmcp import Client
-
-from superset.mcp_service.app import mcp
-
-
-@pytest.fixture
-def mcp_server():
-    return mcp
-
-
-@pytest.fixture(autouse=True)
-def mock_auth():
-    with patch("superset.mcp_service.auth.get_user_from_request") as mock_get_user:
-        mock_user = Mock()
-        mock_user.id = 1
-        mock_user.username = "admin"
-        mock_get_user.return_value = mock_user
-        yield mock_get_user
 
 
 def _mock_database(database_id: int, name: str, backend: str = "sqlite") -> Mock:
@@ -50,8 +32,9 @@ def _mock_database(database_id: int, name: str, backend: str = "sqlite") -> Mock
 @patch("superset.extensions.db.session.query")
 @pytest.mark.asyncio
 async def test_list_databases_filters_to_accessible_results(
-    mock_query, mock_can_access_database, mcp_server
+    mock_query, mock_can_access_database, load_extension_module
 ):
+    module = load_extension_module("superset.mcp_service.extensions.tool.list_databases")
     databases = [
         _mock_database(1, "examples", "sqlite"),
         _mock_database(2, "warehouse", "postgresql"),
@@ -59,16 +42,11 @@ async def test_list_databases_filters_to_accessible_results(
     mock_query.return_value.order_by.return_value.all.return_value = databases
     mock_can_access_database.side_effect = [True, False]
 
-    async with Client(mcp_server) as client:
-        result = await client.call_tool(
-            "mcp_ext.list_databases",
-            {"request": {"page": 1, "page_size": 1000}},
-        )
+    result = module.list_databases({"page": 1, "page_size": 1000}, Mock())
 
-    data = result.structured_content
-    assert data["count"] == 1
-    assert data["total_count"] == 1
-    assert data["databases"] == [
+    assert result.count == 1
+    assert result.total_count == 1
+    assert [item.model_dump(mode="json") for item in result.databases] == [
         {"id": 1, "name": "examples", "backend": "sqlite"}
     ]
 
@@ -77,8 +55,9 @@ async def test_list_databases_filters_to_accessible_results(
 @patch("superset.extensions.db.session.query")
 @pytest.mark.asyncio
 async def test_list_databases_supports_search_and_pagination(
-    mock_query, mock_can_access_database, mcp_server
+    mock_query, mock_can_access_database, load_extension_module
 ):
+    module = load_extension_module("superset.mcp_service.extensions.tool.list_databases")
     databases = [
         _mock_database(1, "examples", "sqlite"),
         _mock_database(2, "analytics", "postgresql"),
@@ -87,15 +66,12 @@ async def test_list_databases_supports_search_and_pagination(
     mock_query.return_value.order_by.return_value.all.return_value = databases
     mock_can_access_database.return_value = True
 
-    async with Client(mcp_server) as client:
-        result = await client.call_tool(
-            "mcp_ext.list_databases",
-            {"request": {"page": 1, "page_size": 1, "search": "post"}},
-        )
+    result = module.list_databases(
+        {"page": 1, "page_size": 1, "search": "post"},
+        Mock(),
+    )
 
-    data = result.structured_content
-    assert data["count"] == 1
-    assert data["total_count"] == 2
-    assert data["databases"][0]["name"] == "analytics"
-    assert data["databases"][0]["backend"] == "postgresql"
-
+    assert result.count == 1
+    assert result.total_count == 2
+    assert result.databases[0].name == "analytics"
+    assert result.databases[0].backend == "postgresql"

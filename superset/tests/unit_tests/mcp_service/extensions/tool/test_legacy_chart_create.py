@@ -18,24 +18,6 @@
 from unittest.mock import Mock, patch
 
 import pytest
-from fastmcp import Client
-
-from superset.mcp_service.app import mcp
-
-
-@pytest.fixture
-def mcp_server():
-    return mcp
-
-
-@pytest.fixture(autouse=True)
-def mock_auth():
-    with patch("superset.mcp_service.auth.get_user_from_request") as mock_get_user:
-        mock_user = Mock()
-        mock_user.id = 1
-        mock_user.username = "admin"
-        mock_get_user.return_value = mock_user
-        yield mock_get_user
 
 
 def _mock_chart(chart_id: int, slice_name: str, viz_type: str) -> Mock:
@@ -50,53 +32,47 @@ def _mock_chart(chart_id: int, slice_name: str, viz_type: str) -> Mock:
 @patch("superset.commands.chart.create.CreateChartCommand")
 @pytest.mark.asyncio
 async def test_legacy_chart_create_uses_server_side_command(
-    mock_create_command, mcp_server
+    mock_create_command, load_extension_module
 ):
+    module = load_extension_module("superset.mcp_service.extensions.tool.legacy_chart_create")
     mock_create_command.return_value.run.return_value = _mock_chart(21, "Revenue Pie", "pie")
 
-    async with Client(mcp_server) as client:
-        result = await client.call_tool(
-            "mcp_ext.legacy_chart_create",
-            {
-                "request": {
-                    "slice_name": "Revenue Pie",
-                    "datasource_id": 7,
-                    "datasource_type": "table",
-                    "viz_type": "pie",
-                    "params": {"viz_type": "pie", "groupby": ["region"]},
-                }
-            },
-        )
+    result = module.legacy_chart_create(
+        {
+            "slice_name": "Revenue Pie",
+            "datasource_id": 7,
+            "datasource_type": "table",
+            "viz_type": "pie",
+            "params": {"viz_type": "pie", "groupby": ["region"]},
+        },
+        Mock(),
+    )
 
-    data = result.structured_content
-    assert data["error"] is None
-    assert data["chart_id"] == 21
-    assert data["chart"]["viz_type"] == "pie"
-    assert data["chart_url"].endswith("/explore/?slice_id=21")
+    assert result["error"] is None
+    assert result["chart_id"] == 21
+    assert result["chart"]["viz_type"] == "pie"
+    assert result["chart_url"].endswith("/explore/?slice_id=21")
 
 
 @patch("superset.commands.chart.create.CreateChartCommand")
 @pytest.mark.asyncio
 async def test_legacy_chart_create_returns_error_payload_on_failure(
-    mock_create_command, mcp_server
+    mock_create_command, load_extension_module
 ):
+    module = load_extension_module("superset.mcp_service.extensions.tool.legacy_chart_create")
     mock_create_command.return_value.run.side_effect = Exception("chart failed")
 
-    async with Client(mcp_server) as client:
-        result = await client.call_tool(
-            "mcp_ext.legacy_chart_create",
-            {
-                "request": {
-                    "slice_name": "Broken Chart",
-                    "datasource_id": 7,
-                    "datasource_type": "table",
-                    "viz_type": "pie",
-                    "params": {"viz_type": "pie"},
-                }
-            },
-        )
+    result = module.legacy_chart_create(
+        {
+            "slice_name": "Broken Chart",
+            "datasource_id": 7,
+            "datasource_type": "table",
+            "viz_type": "pie",
+            "params": {"viz_type": "pie"},
+        },
+        Mock(),
+    )
 
-    data = result.structured_content
-    assert data["chart"] is None
-    assert data["chart_id"] is None
-    assert "Failed to create chart" in data["error"]
+    assert result["chart"] is None
+    assert result["chart_id"] is None
+    assert "Failed to create chart" in result["error"]

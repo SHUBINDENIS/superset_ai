@@ -25,7 +25,9 @@ Automated coverage now includes:
 - assistant-side unit tests for adapter mappings, runtime switching, inventory
   enforcement, and normalized error handling
 - live built-in MCP integration tests for readonly and mutation flows
-- Superset-side extension unit tests for the custom MCP extension tools
+- Superset-side extension unit tests for the custom MCP extension tools, now
+  isolated from full Flask app bootstrap so the CI job validates the extension
+  logic itself instead of unrelated global app imports
 
 ## Intentional Fixes Versus Legacy
 
