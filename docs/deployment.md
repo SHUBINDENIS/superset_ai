@@ -65,7 +65,7 @@ flowchart TB
 
 | Компонент | Расположение | Назначение |
 |---|---|---|
-| Streamlit UI | `superset-ai-assistant-mcp/frontend/app.py` | Пользовательский интерфейс и HTTP-only точка входа ассистента |
+| Streamlit UI | `superset-ai-assistant-mcp/frontend/app.py` + shared frontend helpers | Пользовательский интерфейс и HTTP-only точка входа ассистента |
 | AI Agent | `superset-ai-assistant-mcp/backend/ai_agent.py` | Оркестрация запроса, guardrails, работа с LLM и built-in MCP внутри процесса Streamlit |
 | MCP Server | `superset/superset/mcp_service` | Built-in MCP runtime для работы с Superset tools / DAO / RBAC |
 | Superset App | `superset_app` | BI-платформа, SQL Lab, charts/dashboards |

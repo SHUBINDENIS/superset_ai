@@ -2,7 +2,6 @@ import os
 import sys
 import asyncio
 import json
-import html
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 import streamlit as st
@@ -28,6 +27,34 @@ from backend import (
     TIME_GRAIN_OPTIONS,
     COMMON_VIZ_TYPES,
 )
+from frontend.state import (
+    AUTH_COOKIE_NAME,
+    SESSION_WIDGET_KEYS_TO_CLEAR,
+    WINDOW_CHAT,
+    WINDOW_LABELS,
+    WINDOW_US1,
+    WINDOW_US2,
+    WINDOW_US3,
+    WINDOW_US4,
+    WINDOW_US5,
+    WINDOW_US13,
+    WINDOW_US14,
+    WINDOW_US15,
+    apply_state_patch,
+    build_authenticated_state,
+    build_logout_state,
+    build_session_reset_state,
+    ensure_state_defaults,
+)
+from frontend.ui_helpers import (
+    apply_product_theme,
+    format_iso_utc as _format_iso_utc,
+    parse_examples_input as _parse_examples_input,
+    parse_simple_csv as _parse_simple_csv,
+    render_empty_state,
+    render_kpi_cards,
+    render_message,
+)
 
 load_dotenv()
 
@@ -39,408 +66,10 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-WINDOW_CHAT = "chat"
-WINDOW_US1 = "us1"
-WINDOW_US2 = "us2"
-WINDOW_US3 = "us3"
-WINDOW_US4 = "us4"
-WINDOW_US5 = "us5"
-WINDOW_US13 = "us13"
-WINDOW_US14 = "us14"
-WINDOW_US15 = "us15"
-
-WINDOW_LABELS = {
-    WINDOW_CHAT: "💬 Чат",
-    WINDOW_US1: "🧱 Сканер схем",
-    WINDOW_US2: "📚 Глоссарий",
-    WINDOW_US3: "🧭 Маппинг правил",
-    WINDOW_US4: "💡 Подсказки",
-    WINDOW_US5: "🧩 Конструктор",
-    WINDOW_US13: "🔎 Предпросмотр",
-    WINDOW_US14: "🎯 Рекомендации",
-    WINDOW_US15: "🔗 Шеринг",
-}
-
-AUTH_COOKIE_NAME = "ai_assistant_auth_token"
-
-
-def apply_product_theme() -> None:
-    st.markdown(
-        """
-        <style>
-          :root {
-            --brand-primary: #1266e3;
-            --brand-accent: #0ea5a8;
-            --brand-bg: #e7edf7;
-            --brand-card: #ffffff;
-            --brand-muted: #5b6478;
-            --brand-border: #d2dced;
-            --brand-shadow: rgba(21, 42, 74, 0.08);
-          }
-          [data-testid="stAppViewContainer"] {
-            background:
-              radial-gradient(1200px 420px at 92% -10%, rgba(18, 102, 227, 0.2), transparent 55%),
-              radial-gradient(900px 360px at 5% -8%, rgba(14, 165, 168, 0.18), transparent 55%),
-              linear-gradient(180deg, rgba(201, 214, 235, 0.36) 0%, rgba(231, 237, 247, 0.9) 18%, rgba(231, 237, 247, 1) 100%),
-              var(--brand-bg);
-          }
-          [data-testid="block-container"] {
-            padding-top: 1.3rem;
-            padding-bottom: 1.8rem;
-          }
-          [data-testid="stSidebar"] {
-            background: linear-gradient(180deg, #2d4969 0%, #355779 52%, #3a5f84 100%);
-            border-right: 1px solid rgba(241, 247, 255, 0.32);
-          }
-          [data-testid="stSidebar"] * {
-            color: #f1f6ff !important;
-          }
-          [data-testid="stSidebar"] hr {
-            border-color: rgba(241, 247, 255, 0.28);
-          }
-          .sidebar-brand {
-            border-radius: 14px;
-            padding: 12px 14px;
-            margin: 2px 0 12px 0;
-            border: 1px solid rgba(241, 247, 255, 0.34);
-            background: linear-gradient(135deg, rgba(255, 255, 255, 0.2) 0%, rgba(214, 232, 255, 0.12) 100%);
-            box-shadow: 0 10px 24px rgba(24, 44, 74, 0.26);
-            backdrop-filter: blur(2px);
-          }
-          .sidebar-brand h3 {
-            margin: 0;
-            font-size: 1.03rem;
-            font-weight: 700;
-            letter-spacing: 0.01em;
-            color: #f8fbff;
-          }
-          .sidebar-brand p {
-            margin: 5px 0 0 0;
-            font-size: 0.84rem;
-            color: #dce8fb;
-            opacity: 0.95;
-          }
-          .sidebar-section {
-            margin: 3px 0 8px 0;
-            font-size: 0.76rem;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: #d6e6ff;
-            opacity: 0.95;
-            font-weight: 700;
-          }
-          [data-testid="stSidebar"] button[kind="secondary"] {
-            border: 1px solid rgba(241, 247, 255, 0.25) !important;
-            background: rgba(233, 244, 255, 0.16) !important;
-            border-radius: 12px !important;
-            color: #f6fbff !important;
-            box-shadow: 0 4px 12px rgba(16, 34, 59, 0.15);
-          }
-          [data-testid="stSidebar"] button[kind="secondary"]:hover {
-            border-color: rgba(241, 247, 255, 0.6) !important;
-            background: rgba(233, 244, 255, 0.26) !important;
-          }
-          [data-testid="stSidebar"] button[kind="primary"] {
-            border: 1px solid rgba(255, 255, 255, 0.45) !important;
-            background: linear-gradient(135deg, #7ab2ff 0%, #5b95ee 100%) !important;
-            color: #ffffff !important;
-            border-radius: 12px !important;
-            box-shadow: 0 7px 16px rgba(15, 38, 69, 0.24);
-          }
-          [data-testid="stSidebar"] button[kind="primary"]:hover {
-            filter: brightness(1.03);
-          }
-          [data-testid="stSidebar"] [data-testid="stAlert"] {
-            border-radius: 12px;
-          }
-          .hero {
-            border-radius: 18px;
-            padding: 22px 24px;
-            background: linear-gradient(120deg, #0f4db8 0%, #0a8ea8 100%);
-            color: #ffffff;
-            margin-bottom: 14px;
-            box-shadow: 0 14px 32px rgba(14, 43, 95, 0.22);
-          }
-          .hero h2 {
-            margin: 0 0 6px 0;
-            font-size: 1.5rem;
-            font-weight: 700;
-          }
-          .hero p {
-            margin: 0;
-            opacity: 0.94;
-            font-size: 0.98rem;
-          }
-          .section-title {
-            font-weight: 700;
-            margin-top: 8px;
-            margin-bottom: 8px;
-            color: #0f172a;
-          }
-          .hint {
-            color: var(--brand-muted);
-            font-size: 0.9rem;
-          }
-          .kpi-card {
-            border: 1px solid var(--brand-border);
-            background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(247, 250, 255, 0.98) 100%);
-            border-radius: 14px;
-            padding: 12px 14px;
-            margin: 6px 0 10px 0;
-            box-shadow: 0 8px 18px var(--brand-shadow);
-          }
-          .kpi-label {
-            color: var(--brand-muted);
-            font-size: 0.82rem;
-            margin-bottom: 2px;
-          }
-          .kpi-value {
-            color: #0f172a;
-            font-size: 1.25rem;
-            font-weight: 700;
-            line-height: 1.2;
-          }
-          .kpi-meta {
-            color: var(--brand-muted);
-            font-size: 0.8rem;
-            margin-top: 4px;
-          }
-          .empty-state {
-            border: 1px dashed #aebed9;
-            background: rgba(255, 255, 255, 0.72);
-            border-radius: 14px;
-            padding: 16px;
-            margin: 8px 0 10px 0;
-          }
-          .empty-state h4 {
-            margin: 0 0 4px 0;
-            color: #0f172a;
-            font-size: 1rem;
-          }
-          .empty-state p {
-            margin: 0;
-            color: var(--brand-muted);
-            font-size: 0.92rem;
-          }
-          [data-testid="stDataFrame"] {
-            border: 1px solid var(--brand-border);
-            border-radius: 14px;
-            overflow: hidden;
-            box-shadow: 0 10px 22px var(--brand-shadow);
-            background: #ffffff;
-          }
-          [data-testid="stDataFrame"] iframe {
-            border-radius: 14px;
-          }
-          [data-testid="stTextInput"], [data-testid="stTextArea"], [data-testid="stSelectbox"], [data-testid="stMultiSelect"], [data-testid="stNumberInput"] {
-            margin-bottom: 2px;
-          }
-          [data-testid="stForm"] {
-            border: 1px solid #d9e2f1;
-            border-radius: 14px;
-            padding: 14px;
-            background: rgba(255, 255, 255, 0.94);
-            box-shadow: 0 8px 18px var(--brand-shadow);
-          }
-          div.stButton > button[kind] {
-            border-radius: 10px;
-            border: 1px solid #c6d4ea;
-            box-shadow: 0 4px 10px rgba(25, 50, 92, 0.06);
-          }
-          div.stButton > button[kind]:hover {
-            border-color: #7aa2e8;
-          }
-          [data-testid="stChatMessage"] {
-            border-radius: 14px;
-            padding: 2px 6px;
-          }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
 
 # --- Session state -----------------------------------------------------------
 def init_state():
-    defaults = {
-        "auth_is_authenticated": False,
-        "auth_username": "",
-        "auth_role": "",
-        "auth_token": "",
-        "auth_cookie_sync_token": "",
-        "auth_cookie_clear_requested": False,
-        "messages": [],
-        "session_id": None,
-        "agent_initialized": False,
-        "active_window": WINDOW_CHAT,
-        "pending_input": None,
-        "us1_scan_result": None,
-        "us1_scan_error": None,
-        "us1_scan_status": "idle",
-        "us1_scan_started_at": None,
-        "us1_scan_finished_at": None,
-        "us2_status_message": "",
-        "us2_error_message": "",
-        "us2_selected_term_id": None,
-        "us3_status_message": "",
-        "us3_error_message": "",
-        "us3_selected_rule_id": None,
-        "us4_draft_query": "",
-        "us4_entity_to_apply": None,
-        "us4_submit_draft_requested": False,
-        "us4_submit_payload": "",
-        "us4_clear_draft_requested": False,
-        "us4_scope_databases": [],
-        "us4_scope_datasets": [],
-        "us4_scope_database": "",
-        "us4_scope_table": "",
-        "us4_scope_status_message": "",
-        "us4_scope_error_message": "",
-        "us4_generated_prompts": [],
-        "us4_generated_status_message": "",
-        "us4_generated_error_message": "",
-        "us4_prompt_limit": 6,
-        "us5_objective": "",
-        "us5_table_name": "",
-        "us5_metric": "",
-        "us5_dimensions_raw": "",
-        "us5_period": "",
-        "us5_time_grain": "month",
-        "us5_filters_raw": "",
-        "us5_sort_by": "",
-        "us5_sort_direction": "desc",
-        "us5_top_n": 0,
-        "us5_compare_to": "",
-        "us5_chart_type": "auto",
-        "us5_built_query": "",
-        "us5_status_message": "",
-        "us5_error_message": "",
-        "us5_last_validation": None,
-        "us5_pending_field_update": None,
-        "us5_dataset_options": [],
-        "us5_dataset_options_status_message": "",
-        "us5_dataset_options_error_message": "",
-        "us5_dataset_metadata_cache": {},
-        "us5_table_choice": "",
-        "us5_metric_choice": "",
-        "us5_metric_custom": "",
-        "us5_dimensions_multiselect": [],
-        "us5_period_choice": "",
-        "us5_period_custom": "",
-        "us5_sort_by_choice": "",
-        "us5_sort_by_custom": "",
-        "us5_compare_to_choice": "",
-        "us5_compare_to_custom": "",
-        "us5_filter_field_choice": "",
-        "us5_filter_value_choice": "",
-        "us13_databases": [],
-        "us13_datasets": [],
-        "us13_database_id": 0,
-        "us13_dataset_id": 0,
-        "us13_schema": "",
-        "us13_sql_template": "table_preview",
-        "us13_sql": "SELECT * FROM birth_names",
-        "us13_preview_limit": 20,
-        "us13_column_type_filter": "all",
-        "us13_column_focus": "",
-        "us13_preview_result": None,
-        "us13_status_message": "",
-        "us13_error_message": "",
-        "us14_metric_column": "",
-        "us14_dimension_column": "",
-        "us14_time_column": "",
-        "us14_recommendation": None,
-        "us14_status_message": "",
-        "us14_error_message": "",
-        "us15_datasets": [],
-        "us15_dataset_id": 0,
-        "us15_dashboard_title": "AI Dashboard",
-        "us15_chart_title": "AI Widget",
-        "us15_viz_type": "table",
-        "us15_metric_column": "",
-        "us15_dimension_column": "",
-        "us15_time_column": "",
-        "us15_row_limit": 1000,
-        "us15_description": "",
-        "us15_dataset_columns_cache": {},
-        "us15_result": None,
-        "us15_status_message": "",
-        "us15_error_message": "",
-    }
-    for k, v in defaults.items():
-        st.session_state.setdefault(k, v)
-
-
-# --- UI helpers --------------------------------------------------------------
-def render_message(role: str, content: str):
-    with st.chat_message(role):
-        st.write(content)
-
-
-def _parse_examples_input(raw: str):
-    return _parse_simple_csv(raw)
-
-
-def _parse_simple_csv(raw: str):
-    if not raw:
-        return []
-    tokens = [x.strip() for x in raw.replace("\n", ",").split(",")]
-    return [x for x in tokens if x]
-
-
-def render_kpi_cards(
-    items: List[Dict[str, Any]],
-    max_columns: int = 4,
-) -> None:
-    cards = [x for x in items if isinstance(x, dict)]
-    if not cards:
-        return
-
-    max_columns = max(1, int(max_columns))
-    for start in range(0, len(cards), max_columns):
-        chunk = cards[start : start + max_columns]
-        cols = st.columns(len(chunk))
-        for col, item in zip(cols, chunk):
-            with col:
-                label = html.escape(str(item.get("label", "")).strip())
-                value = html.escape(str(item.get("value", "")).strip())
-                meta_raw = str(item.get("meta", "")).strip()
-                meta = html.escape(meta_raw) if meta_raw else ""
-                meta_block = f"<div class='kpi-meta'>{meta}</div>" if meta else ""
-                st.markdown(
-                    f"""
-                    <div class="kpi-card">
-                      <div class="kpi-label">{label}</div>
-                      <div class="kpi-value">{value}</div>
-                      {meta_block}
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-
-
-def render_empty_state(title: str, description: str) -> None:
-    safe_title = html.escape(str(title))
-    safe_desc = html.escape(str(description))
-    st.markdown(
-        f"""
-        <div class="empty-state">
-          <h4>{safe_title}</h4>
-          <p>{safe_desc}</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-
-def _format_iso_utc(value: Optional[str]) -> str:
-    raw = str(value or "").strip()
-    if not raw:
-        return "—"
-    try:
-        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        return dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
-    except Exception:
-        return raw
+    ensure_state_defaults(st.session_state)
 
 
 def _us1_status_label(status: str) -> str:
@@ -625,6 +254,22 @@ def _current_username() -> str:
     return str(st.session_state.get("auth_username", "")).strip()
 
 
+def _persist_chat_message(role: str, content: str) -> None:
+    username = _current_username()
+    session_id = str(st.session_state.get("session_id", "")).strip()
+    if not username or not session_id:
+        return
+    try:
+        get_auth_service().save_chat_message(
+            username=username,
+            session_id=session_id,
+            role=role,
+            content=content,
+        )
+    except Exception:
+        pass
+
+
 def _apply_authenticated_state(auth_result: Dict[str, Any], *, persist_cookie: bool = True) -> None:
     username = str(auth_result.get("username", "")).strip()
     role = str(auth_result.get("role", "")).strip() or "analyst"
@@ -648,15 +293,16 @@ def _apply_authenticated_state(auth_result: Dict[str, Any], *, persist_cookie: b
         and str(item.get("content", "")).strip()
     ]
 
-    st.session_state.auth_is_authenticated = True
-    st.session_state.auth_username = username
-    st.session_state.auth_role = role
-    st.session_state.auth_token = auth_token
-    st.session_state.session_id = session_id
-    st.session_state.agent_initialized = False
-    st.session_state.messages = messages
-    st.session_state.pending_input = None
-    st.session_state.active_window = WINDOW_CHAT
+    apply_state_patch(
+        st.session_state,
+        build_authenticated_state(
+            username=username,
+            role=role,
+            auth_token=auth_token,
+            session_id=session_id,
+            messages=messages,
+        ),
+    )
     if persist_cookie:
         _schedule_auth_cookie_set(auth_token)
 
@@ -688,15 +334,7 @@ def _try_auto_login_from_cookie() -> bool:
 
 def logout_user() -> None:
     _schedule_auth_cookie_clear()
-    st.session_state.auth_is_authenticated = False
-    st.session_state.auth_username = ""
-    st.session_state.auth_role = ""
-    st.session_state.auth_token = ""
-    st.session_state.session_id = None
-    st.session_state.agent_initialized = False
-    st.session_state.active_window = WINDOW_CHAT
-    st.session_state.messages = []
-    st.session_state.pending_input = None
+    apply_state_patch(st.session_state, build_logout_state())
     st.rerun()
 
 
@@ -760,18 +398,7 @@ def _queue_message(text: str, switch_to_chat: bool = True) -> None:
     if not clean:
         return
     st.session_state.messages.append({"role": "user", "content": clean})
-    username = _current_username()
-    session_id = str(st.session_state.get("session_id", "")).strip()
-    if username and session_id:
-        try:
-            get_auth_service().save_chat_message(
-                username=username,
-                session_id=session_id,
-                role="user",
-                content=clean,
-            )
-        except Exception:
-            pass
+    _persist_chat_message("user", clean)
     st.session_state.pending_input = clean
     if switch_to_chat:
         st.session_state.active_window = WINDOW_CHAT
@@ -4390,15 +4017,7 @@ async def handle_message(text: str):
         "role": "assistant",
         "content": content,
     })
-    try:
-        get_auth_service().save_chat_message(
-            username=username,
-            session_id=session_id,
-            role="assistant",
-            content=content,
-        )
-    except Exception:
-        pass
+    _persist_chat_message("assistant", content)
 
 
 # --- State utils -------------------------------------------------------------
@@ -4411,95 +4030,11 @@ def reset_session():
         except Exception:
             new_session_id = None
 
-    st.session_state.session_id = new_session_id
-    st.session_state.agent_initialized = False
-    st.session_state.active_window = WINDOW_CHAT
-    st.session_state.messages = []
-    st.session_state.pending_input = None
-    st.session_state.us4_draft_query = ""
-    st.session_state.us4_entity_to_apply = None
-    st.session_state.us4_submit_draft_requested = False
-    st.session_state.us4_submit_payload = ""
-    st.session_state.us4_clear_draft_requested = False
-    st.session_state.us4_scope_databases = []
-    st.session_state.us4_scope_datasets = []
-    st.session_state.us4_scope_database = ""
-    st.session_state.us4_scope_table = ""
-    st.session_state.us4_scope_status_message = ""
-    st.session_state.us4_scope_error_message = ""
-    st.session_state.us4_generated_prompts = []
-    st.session_state.us4_generated_status_message = ""
-    st.session_state.us4_generated_error_message = ""
-    st.session_state.us4_prompt_limit = 6
-    st.session_state.us5_objective = ""
-    st.session_state.us5_table_name = ""
-    st.session_state.us5_metric = ""
-    st.session_state.us5_dimensions_raw = ""
-    st.session_state.us5_period = ""
-    st.session_state.us5_time_grain = "month"
-    st.session_state.us5_filters_raw = ""
-    st.session_state.us5_sort_by = ""
-    st.session_state.us5_sort_direction = "desc"
-    st.session_state.us5_top_n = 0
-    st.session_state.us5_compare_to = ""
-    st.session_state.us5_chart_type = "auto"
-    st.session_state.us5_built_query = ""
-    st.session_state.us5_status_message = ""
-    st.session_state.us5_error_message = ""
-    st.session_state.us5_last_validation = None
-    st.session_state.us5_pending_field_update = None
-    st.session_state.us5_dataset_options = []
-    st.session_state.us5_dataset_options_status_message = ""
-    st.session_state.us5_dataset_options_error_message = ""
-    st.session_state.us5_dataset_metadata_cache = {}
-    st.session_state.us5_table_choice = ""
-    st.session_state.us5_metric_choice = ""
-    st.session_state.us5_metric_custom = ""
-    st.session_state.us5_dimensions_multiselect = []
-    st.session_state.us5_period_choice = ""
-    st.session_state.us5_period_custom = ""
-    st.session_state.us5_sort_by_choice = ""
-    st.session_state.us5_sort_by_custom = ""
-    st.session_state.us5_compare_to_choice = ""
-    st.session_state.us5_compare_to_custom = ""
-    st.session_state.us5_filter_field_choice = ""
-    st.session_state.us5_filter_value_choice = ""
-    st.session_state.us13_databases = []
-    st.session_state.us13_datasets = []
-    st.session_state.us13_database_id = 0
-    st.session_state.us13_dataset_id = 0
-    st.session_state.us13_schema = ""
-    st.session_state.us13_sql_template = "table_preview"
-    st.session_state.us13_sql = "SELECT * FROM birth_names"
-    st.session_state.us13_preview_limit = 20
-    st.session_state.us13_column_type_filter = "all"
-    st.session_state.us13_column_focus = ""
-    st.session_state.us13_preview_result = None
-    st.session_state.us13_status_message = ""
-    st.session_state.us13_error_message = ""
-    st.session_state.us14_metric_column = ""
-    st.session_state.us14_dimension_column = ""
-    st.session_state.us14_time_column = ""
-    st.session_state.us14_recommendation = None
-    st.session_state.us14_status_message = ""
-    st.session_state.us14_error_message = ""
-    st.session_state.us15_datasets = []
-    st.session_state.us15_dataset_id = 0
-    st.session_state.us15_dashboard_title = "AI Dashboard"
-    st.session_state.us15_chart_title = "AI Widget"
-    st.session_state.us15_viz_type = "table"
-    st.session_state.us15_metric_column = ""
-    st.session_state.us15_dimension_column = ""
-    st.session_state.us15_time_column = ""
-    st.session_state.us15_row_limit = 1000
-    st.session_state.us15_description = ""
-    st.session_state.us15_dataset_columns_cache = {}
-    st.session_state.us15_result = None
-    st.session_state.us15_status_message = ""
-    st.session_state.us15_error_message = ""
-    st.session_state.pop("us13_preview_limit_choice", None)
-    st.session_state.pop("us14_apply_type_choice", None)
-    st.session_state.pop("us15_row_limit_choice", None)
+    apply_state_patch(
+        st.session_state,
+        build_session_reset_state(new_session_id),
+        clear_keys=SESSION_WIDGET_KEYS_TO_CLEAR,
+    )
     st.rerun()
 
 

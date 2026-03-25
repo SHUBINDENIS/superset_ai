@@ -1,10 +1,16 @@
 # Target Product Tool Set
 
-Status: phase 4 product-facing target tool set.
+Status: historical target definition for the completed built-in MCP migration.
 
 This file lists only the MCP capabilities actually needed by the product runtime.
 It intentionally excludes legacy auth helpers, raw admin CRUD helpers, and known-bad
 database-table discovery dependencies.
+
+Current-use note:
+
+- This target set is now implemented.
+- For the current supported runtime policy, use `docs/mcp-migration/parity-report.md`
+  and `docs/mcp-migration/runtime-switch-policy.md`.
 
 ## Rules
 

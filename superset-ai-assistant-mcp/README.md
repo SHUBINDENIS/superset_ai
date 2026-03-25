@@ -76,7 +76,9 @@
   - US12: квоты (rate-limit) и ограничение сложности запроса.
 
 ## Структура
-- `frontend/app.py` — чат на Streamlit
+- `frontend/app.py` — entrypoint Streamlit UI
+- `frontend/state.py` — единые state defaults и reset/auth helpers
+- `frontend/ui_helpers.py` — общие UI helpers и theme
 - `backend/ai_agent.py` — обертка LangChain + mcp-use
 - `backend/us1_schema_profiler.py` — US1 scanner (schema/profile/relations)
 - `backend/us2_glossary_service.py` — US2 glossary service (CRUD + mappings)

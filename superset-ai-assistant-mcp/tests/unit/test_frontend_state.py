@@ -1,0 +1,63 @@
+import unittest
+
+from frontend.state import (
+    APP_STATE_DEFAULTS,
+    build_authenticated_state,
+    build_logout_state,
+    build_session_reset_state,
+    ensure_state_defaults,
+)
+
+
+class TestFrontendState(unittest.TestCase):
+    def test_ensure_state_defaults_copies_mutable_values(self):
+        first = {}
+        second = {}
+
+        ensure_state_defaults(first)
+        ensure_state_defaults(second)
+
+        first["messages"].append({"role": "user", "content": "hello"})
+        first["us13_databases"].append({"id": 1})
+
+        self.assertEqual(second["messages"], [])
+        self.assertEqual(second["us13_databases"], [])
+
+    def test_build_authenticated_state_resets_chat_session_fields(self):
+        state = build_authenticated_state(
+            username="alice",
+            role="analyst",
+            auth_token="token-alice",
+            session_id="session-alice",
+            messages=[{"role": "assistant", "content": "saved"}],
+        )
+
+        self.assertTrue(state["auth_is_authenticated"])
+        self.assertEqual(state["auth_username"], "alice")
+        self.assertEqual(state["session_id"], "session-alice")
+        self.assertEqual(state["messages"], [{"role": "assistant", "content": "saved"}])
+        self.assertIsNone(state["pending_input"])
+        self.assertFalse(state["agent_initialized"])
+
+    def test_build_session_reset_state_uses_default_values_with_new_session(self):
+        state = build_session_reset_state("rotated-1")
+
+        self.assertEqual(state["session_id"], "rotated-1")
+        self.assertEqual(state["messages"], [])
+        self.assertEqual(state["us13_sql"], APP_STATE_DEFAULTS["us13_sql"])
+        self.assertEqual(state["us15_chart_title"], "AI Widget")
+        self.assertIsNone(state["us14_recommendation"])
+
+    def test_build_logout_state_clears_auth_fields(self):
+        state = build_logout_state()
+
+        self.assertFalse(state["auth_is_authenticated"])
+        self.assertEqual(state["auth_username"], "")
+        self.assertEqual(state["auth_role"], "")
+        self.assertEqual(state["auth_token"], "")
+        self.assertIsNone(state["session_id"])
+        self.assertEqual(state["messages"], [])
+
+
+if __name__ == "__main__":
+    unittest.main()

@@ -21,7 +21,9 @@
 - `superset-ai-assistant-mcp/`
   - основной продукт (frontend + backend).
   - `frontend/`: UI Streamlit.
-    - `superset-ai-assistant-mcp/frontend/app.py`
+    - `app.py` — тонкий entrypoint Streamlit.
+    - `state.py` — единый источник дефолтов и reset/auth state helpers.
+    - `ui_helpers.py` — общие UI helpers и theme.
   - `backend/`: доменные сервисы по user story.
     - `us1_schema_profiler.py`
     - `us2_glossary_service.py`
@@ -37,6 +39,8 @@
   - CI workflow: автоматический запуск линтеров.
 - `ruff.toml`
   - конфигурация линтера Ruff.
+- `superset-mcp/`
+  - сохранённый исторический архив legacy MCP-пакета; не используется в текущем runtime.
 
 ## Архитектура (кратко)
 - Пользователь работает в `Streamlit UI`.
@@ -121,8 +125,11 @@ python3 -m compileall superset-ai-assistant-mcp/backend superset-ai-assistant-mc
 
 ## Тесты
 ```bash
-cd /home/superset_ai/superset-ai-assistant-mcp
-pytest tests -q
+cd /home/superset_ai
+PYTHONPATH=./superset-ai-assistant-mcp python -m unittest discover -s superset-ai-assistant-mcp/tests/unit -p "test_*.py"
+PYTHONPATH=./superset-ai-assistant-mcp python -m unittest discover -s superset-ai-assistant-mcp/tests -p "test_frontend_ui.py"
+PYTHONPATH=./superset-ai-assistant-mcp python -m unittest discover -s superset-ai-assistant-mcp/tests -p "test_ai_agent_clarifications.py"
+PYTHONPATH=./superset-ai-assistant-mcp python -m unittest discover -s superset-ai-assistant-mcp/tests -p "test_us13_15_viz_service.py"
 ```
 
 ## Ключевые сценарии продукта

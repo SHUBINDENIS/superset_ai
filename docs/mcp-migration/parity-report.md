@@ -72,6 +72,8 @@ Some compatibility-oriented names remain by design, but they are not a legacy ru
   - kept as the intentional contract adapter from legacy product call shapes to built-in MCP tools
 - `mcp_ext.legacy_chart_create`
   - kept as the narrow compatibility bridge for the remaining pie-chart creation gap
+- `superset-mcp/`
+  - kept only as a historical archive directory; it is no longer part of deployment or runtime
 
 No normal product flow requires legacy token-based auth helpers, CSRF, raw
 `database/<id>/tables`, legacy subprocess launchers, or the deleted external MCP server.
