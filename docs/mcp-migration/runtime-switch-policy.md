@@ -32,6 +32,23 @@ Current intended behavior:
 This fallback exists only to keep product safety while the real built-in runtime is
 being validated. It is not the target steady state.
 
+## Phase 4 Product Routing Status
+
+The following product-facing flows now use the unified MCP client layer by default:
+
+- database browsing for UI source pickers
+- dataset browse and metadata resolution
+- SQL preview / execute flows
+- empty-dashboard-first widget creation
+- chart generation and update flows
+- explore-link generation
+
+Current fallback policy for these flows:
+
+1. Use built-in MCP tools and product extensions first.
+2. If runtime creation falls back to `legacy`, keep only narrow compatibility behavior.
+3. Do not restore direct token-based auth helpers as a normal runtime path.
+
 ## Built-in STDIO Launcher Policy
 
 The built-in stdio path may need an explicit launcher when the assistant runtime

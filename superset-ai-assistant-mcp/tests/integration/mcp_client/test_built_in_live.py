@@ -1,3 +1,4 @@
+import asyncio
 import os
 import shutil
 import stat
@@ -6,10 +7,12 @@ import tempfile
 import textwrap
 import unittest
 import json
+import uuid
 from pathlib import Path
 
 from backend.mcp_client.built_in_client import BuiltInMCPClient, McpUseToolTransport
 from backend.mcp_client.tool_registry import build_agent_mcp_use_config
+from backend.us13_15_viz_service import US13To15VizService
 
 
 REPO_ROOT = Path(__file__).resolve().parents[4]
@@ -174,6 +177,14 @@ class TestBuiltInMCPLive(unittest.IsolatedAsyncioTestCase):
                 "list_dashboards",
                 "get_dashboard_info",
                 "execute_sql",
+                "mcp_ext.list_databases",
+                "mcp_ext.create_empty_dashboard",
+                "mcp_ext.legacy_chart_create",
+                "generate_chart",
+                "update_chart",
+                "generate_dashboard",
+                "add_chart_to_existing_dashboard",
+                "generate_explore_link",
             }.issubset(tools)
         )
 
@@ -215,3 +226,123 @@ class TestBuiltInMCPLive(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(sql_result["success"])
         self.assertEqual(sql_result["rows"][0]["one"], 1)
+
+    async def test_live_mutation_tools_and_product_service_flows(self):
+        datasets = await self.client.list_datasets({"page": 1, "page_size": 5})
+        dataset_items = list(datasets.get("datasets", []) or [])
+        self.assertGreater(len(dataset_items), 0)
+        dataset_id = int(dataset_items[0]["id"])
+
+        dataset_info = await self.client.get_dataset_info(dataset_id)
+        columns = list(dataset_info.get("columns", []) or [])
+        self.assertGreater(len(columns), 0)
+        column_names = [
+            str(column.get("column_name", "")).strip()
+            for column in columns
+            if isinstance(column, dict) and str(column.get("column_name", "")).strip()
+        ]
+        self.assertGreater(len(column_names), 0)
+
+        table_config = {
+            "chart_type": "table",
+            "columns": [{"name": column_names[0]}],
+        }
+        if len(column_names) > 1:
+            table_config["columns"].append({"name": column_names[1]})
+
+        explore = await self.client.generate_explore_link(
+            {"dataset_id": dataset_id, "config": table_config}
+        )
+        self.assertIn("/explore/?", str(explore.get("url", "")))
+
+        unique = uuid.uuid4().hex[:8]
+        empty_dashboard = await self.client.create_empty_dashboard(
+            {"dashboard_title": f"MCP Empty {unique}"}
+        )
+        self.assertIsNone(empty_dashboard.get("error"))
+        empty_dashboard_id = int(empty_dashboard["dashboard"]["id"])
+
+        chart_result = await self.client.generate_chart(
+            {
+                "dataset_id": dataset_id,
+                "config": table_config,
+                "save_chart": True,
+                "generate_preview": False,
+            }
+        )
+        self.assertTrue(chart_result["success"])
+        chart_id = int(chart_result["chart"]["id"])
+
+        updated_chart = await self.client.update_chart(
+            {
+                "identifier": chart_id,
+                "config": table_config,
+                "generate_preview": False,
+            }
+        )
+        self.assertTrue(updated_chart["success"])
+        self.assertEqual(int(updated_chart["chart"]["id"]), chart_id)
+
+        attach_result = await self.client.add_chart_to_existing_dashboard(
+            {"dashboard_id": empty_dashboard_id, "chart_id": chart_id}
+        )
+        self.assertIsNone(attach_result.get("error"))
+        self.assertEqual(int(attach_result["dashboard"]["id"]), empty_dashboard_id)
+
+        generated_dashboard = await self.client.generate_dashboard(
+            {
+                "chart_ids": [chart_id],
+                "dashboard_title": f"MCP Generated {unique}",
+                "published": False,
+            }
+        )
+        self.assertIsNone(generated_dashboard.get("error"))
+        self.assertIn("/superset/dashboard/", str(generated_dashboard["dashboard_url"]))
+
+        service = US13To15VizService(
+            base_url="http://localhost:8088",
+            username="",
+            password="",
+            timeout_seconds=5.0,
+            default_preview_limit=20,
+            share_base_url="http://localhost:9001",
+        )
+        try:
+            databases = await asyncio.to_thread(service.list_databases)
+            self.assertGreater(len(databases), 0)
+
+            preview = await asyncio.to_thread(
+                service.preview_sql,
+                database_id=int(dataset_info["database_id"]),
+                sql="SELECT 1 AS one",
+            )
+            self.assertEqual(preview["rows"][0]["one"], 1)
+
+            service_explore_url = await asyncio.to_thread(
+                service.generate_explore_link,
+                dataset_id=dataset_id,
+                viz_type="table",
+            )
+            self.assertIn("/explore/?", service_explore_url)
+
+            widget = await asyncio.to_thread(
+                service.create_dashboard_widget_with_share,
+                dataset_id=dataset_id,
+                dashboard_title=f"Service Dashboard {unique}",
+                slice_name=f"Service Chart {unique}",
+                viz_type="table",
+            )
+            self.assertGreater(int(widget["dashboard_id"]), 0)
+            self.assertGreater(int(widget["chart_id"]), 0)
+            self.assertIn("/superset/dashboard/", widget["dashboard_link"])
+            self.assertIn("/explore/?", widget["chart_link"])
+
+            updated = await asyncio.to_thread(
+                service.update_chart,
+                chart_id=int(widget["chart_id"]),
+                dataset_id=dataset_id,
+                viz_type="table",
+            )
+            self.assertEqual(int(updated["chart_id"]), int(widget["chart_id"]))
+        finally:
+            await asyncio.to_thread(service.close)

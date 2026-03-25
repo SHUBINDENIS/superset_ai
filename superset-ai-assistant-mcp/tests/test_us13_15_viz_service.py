@@ -111,6 +111,156 @@ class TestUS13To15VizService(unittest.TestCase):
         external = self.service._to_absolute_url("https://example.com/docs")
         self.assertEqual(external, "https://example.com/docs")
 
+    def test_list_databases_uses_mcp_extension_instead_of_rest(self):
+        calls = []
+
+        def fake_call_product_client(method_name, request):
+            calls.append((method_name, request))
+            if method_name == "list_databases":
+                return {
+                    "databases": [
+                        {"id": 1, "name": "examples", "backend": "sqlite"},
+                        {"id": 2, "name": "warehouse", "backend": "postgresql"},
+                    ]
+                }
+            raise AssertionError(f"unexpected method {method_name}")
+
+        self.service._runtime_name = lambda: "built_in_stdio"
+        self.service._call_product_client = fake_call_product_client
+        self.service._request = lambda *args, **kwargs: self.fail("REST fallback should not be used")
+
+        databases = self.service.list_databases()
+
+        self.assertEqual(len(databases), 2)
+        self.assertEqual(databases[0]["name"], "examples")
+        self.assertEqual(calls[0][0], "list_databases")
+
+    def test_preview_sql_uses_execute_sql_through_mcp(self):
+        calls = []
+
+        def fake_call_product_client(method_name, request):
+            calls.append((method_name, request))
+            if method_name == "execute_sql":
+                return {
+                    "success": True,
+                    "rows": [
+                        {"ds": "2026-02-11", "sales": 10},
+                        {"ds": "2026-02-12", "sales": 12},
+                    ],
+                }
+            raise AssertionError(f"unexpected method {method_name}")
+
+        self.service._runtime_name = lambda: "built_in_stdio"
+        self.service._call_product_client = fake_call_product_client
+        self.service._request = lambda *args, **kwargs: self.fail("REST fallback should not be used")
+
+        preview = self.service.preview_sql(database_id=7, sql="SELECT ds, sales FROM fact_sales")
+
+        self.assertEqual(preview["rows_count"], 2)
+        self.assertEqual(calls[0][0], "execute_sql")
+        self.assertIn("LIMIT 20", calls[0][1]["sql"])
+
+    def test_create_dashboard_widget_with_share_uses_built_in_mcp_flow(self):
+        calls = []
+
+        def fake_call_product_client(method_name, request):
+            calls.append((method_name, request))
+            if method_name == "create_empty_dashboard":
+                return {
+                    "dashboard": {"id": 11},
+                    "dashboard_url": "/superset/dashboard/11/",
+                }
+            if method_name == "generate_chart":
+                return {
+                    "chart": {"id": 22, "url": "http://localhost:8088/explore/?slice_id=22"},
+                    "explore_url": "http://localhost:8088/explore/?slice_id=22",
+                    "success": True,
+                }
+            if method_name == "add_chart_to_existing_dashboard":
+                return {
+                    "dashboard": {"id": 11},
+                    "dashboard_url": "/superset/dashboard/11/",
+                }
+            raise AssertionError(f"unexpected method {method_name}")
+
+        self.service._runtime_name = lambda: "built_in_stdio"
+        self.service._call_product_client = fake_call_product_client
+        self.service._request = lambda *args, **kwargs: self.fail("REST fallback should not be used")
+
+        result = self.service.create_dashboard_widget_with_share(
+            dataset_id=7,
+            dashboard_title="AI Dashboard",
+            slice_name="Orders by Region",
+            viz_type="bar",
+            metric_column="sales",
+            dimension_column="region",
+        )
+
+        self.assertEqual(result["dashboard_id"], 11)
+        self.assertEqual(result["chart_id"], 22)
+        self.assertEqual([name for name, _ in calls], [
+            "create_empty_dashboard",
+            "generate_chart",
+            "add_chart_to_existing_dashboard",
+        ])
+        self.assertNotIn("token", str(result).casefold())
+
+    def test_create_dashboard_widget_with_share_uses_compat_chart_extension_for_pie(self):
+        calls = []
+
+        def fake_call_product_client(method_name, request):
+            calls.append((method_name, request))
+            if method_name == "create_empty_dashboard":
+                return {
+                    "dashboard": {"id": 11},
+                    "dashboard_url": "/superset/dashboard/11/",
+                }
+            if method_name == "legacy_chart_create":
+                return {
+                    "chart_id": 22,
+                    "chart_url": "/explore/?slice_id=22",
+                }
+            raise AssertionError(f"unexpected method {method_name}")
+
+        self.service._runtime_name = lambda: "built_in_stdio"
+        self.service._call_product_client = fake_call_product_client
+        self.service._request = lambda *args, **kwargs: self.fail("REST fallback should not be used")
+
+        result = self.service.create_dashboard_widget_with_share(
+            dataset_id=7,
+            dashboard_title="AI Dashboard",
+            slice_name="Orders Share",
+            viz_type="pie",
+            dimension_column="region",
+        )
+
+        self.assertEqual(result["chart_id"], 22)
+        self.assertEqual([name for name, _ in calls], [
+            "create_empty_dashboard",
+            "legacy_chart_create",
+        ])
+
+    def test_generate_explore_link_uses_built_in_tool(self):
+        calls = []
+
+        def fake_call_product_client(method_name, request):
+            calls.append((method_name, request))
+            if method_name == "generate_explore_link":
+                return {"url": "http://localhost:8088/explore/?form_data_key=abc"}
+            raise AssertionError(f"unexpected method {method_name}")
+
+        self.service._runtime_name = lambda: "built_in_stdio"
+        self.service._call_product_client = fake_call_product_client
+        self.service.get_dataset_metadata = lambda dataset_id: {
+            "id": dataset_id,
+            "columns": [{"column_name": "region"}],
+        }
+
+        url = self.service.generate_explore_link(dataset_id=7, viz_type="table")
+
+        self.assertEqual(url, "http://localhost:8088/explore/?form_data_key=abc")
+        self.assertEqual(calls[0][0], "generate_explore_link")
+
 
 if __name__ == "__main__":
     unittest.main()

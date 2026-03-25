@@ -1,6 +1,6 @@
 # Target Product Tool Set
 
-Status: phase 2 initial tool-set definition for the migrated product MCP layer.
+Status: phase 4 product-facing target tool set.
 
 This file lists only the MCP capabilities actually needed by the product runtime.
 It intentionally excludes legacy auth helpers, raw admin CRUD helpers, and known-bad
@@ -14,7 +14,7 @@ database-table discovery dependencies.
 
 ## Required Direct Built-in Tools
 
-Phase 2 initial direct built-in tools:
+Direct built-in tools now required by the migrated product runtime:
 
 - `list_dashboards`
 - `get_dashboard_info`
@@ -23,9 +23,6 @@ Phase 2 initial direct built-in tools:
 - `list_datasets`
 - `get_dataset_info`
 - `execute_sql`
-
-Required direct built-in tools for later migration phases:
-
 - `open_sql_lab_with_context`
 - `generate_chart`
 - `update_chart`
@@ -54,20 +51,30 @@ Explicit non-goals for the first adapter:
 
 ## Required Custom Extension Tools
 
-Required by actual product runtime, but not available as direct built-in tools yet:
+Required by actual product runtime, but not available as direct built-in tools:
 
 - `mcp_ext.list_databases`
   - Needed for source pickers and scope selection in the UI.
 - `mcp_ext.create_empty_dashboard`
   - Needed because the product still has an empty-dashboard-first flow and built-in `generate_dashboard` requires chart IDs.
+- `mcp_ext.legacy_chart_create`
+  - Needed only for the remaining compatibility gap where the current UI still exposes legacy-style `pie` creation that is not expressible through the built-in simplified chart schema.
 
 ## Why This Is The Minimum Set
 
 The current runtime needs to support:
 
 - browse datasets, charts, dashboards
+- browse accessible databases for source pickers
 - fetch detailed asset info
 - execute SQL
+- generate and update charts through built-in schemas where possible
+- create empty dashboards first, then attach charts
+- generate user-ready explore links
 - keep dataset-scoped flows independent from `database/tables`
 
-Everything else can be added after these paths are stable and covered by tests.
+Compatibility rule:
+
+- Prefer direct built-in tools first.
+- Use `mcp_ext.legacy_chart_create` only for the narrow unsupported `pie` gap.
+- Do not reintroduce token-based auth helpers or raw database table discovery dependencies.
