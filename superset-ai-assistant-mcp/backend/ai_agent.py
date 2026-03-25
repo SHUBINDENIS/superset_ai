@@ -22,6 +22,7 @@ from .mcp_client.runtime import ProductMCPRuntime, create_product_mcp_runtime
 from .mcp_client.tool_registry import (
     build_agent_runtime_guidance,
 )
+from .openai_safe_adapter import OpenAISafeLangChainAdapter
 
 # Создаем и настраиваем логгер для вашего бэкенда
 backend_logger = logging.getLogger('superset_backend')
@@ -729,8 +730,12 @@ class SupersetAIAgent:
                     client=self.mcp_client, 
                     max_steps=self.agent_max_steps
                 )
+                self.agent.adapter = OpenAISafeLangChainAdapter(
+                    disallowed_tools=list(getattr(self.agent, "disallowed_tools", []) or [])
+                )
                 self.agent.max_steps = self.agent_max_steps
                 self.agent.recursion_limit = self.agent_recursion_limit
+                await self.agent.initialize()
                 backend_logger.debug(
                     f"Session {self.session_id}: MCPAgent configured "
                     f"max_steps={self.agent.max_steps}, "

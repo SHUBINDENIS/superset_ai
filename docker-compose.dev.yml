@@ -8,7 +8,7 @@ x-superset-env: &superset-env
     - path: ./superset/docker/.env-local
       required: false
   environment:
-    SUPERSET_LOAD_EXAMPLES: ${SUPERSET_LOAD_EXAMPLES:-no}
+    SUPERSET_LOAD_EXAMPLES: ${SUPERSET_LOAD_EXAMPLES:-yes}
 x-superset-volumes: &superset-volumes
   - ./superset/docker:/app/docker
   - ./superset/pyproject.toml:/app/pyproject.toml:ro
