@@ -5,14 +5,17 @@
 ## Что нужно
 - Python 3.10+
 - Ключ OpenAI (`OPENAI_API_KEY`)
-- Запущенный Superset и путь к скрипту Superset MCP (`superset-mcp/main.py`)
+- Запущенный Superset с доступным built-in MCP runtime (`superset.mcp_service`)
 
 ## Как запустить
 1. Скопируйте `.env.example` в `.env` и заполните:
    - `OPENAI_API_KEY` — ключ OpenAI
    - `OPENAI_MODEL` — рекомендуемо `gpt-4o-mini` для снижения риска 429 TPM
-   - `SUPERSET_MCP_PATH` — полный путь до `superset-mcp/main.py`
-   - `SUPERSET_BASE_URL`, `SUPERSET_PUBLIC_URL`, `SUPERSET_USERNAME`, `SUPERSET_PASSWORD` — доступ к Superset и базовый URL для всех ссылок (например, `http://103.54.18.91:8088`)
+   - `SUPERSET_PRODUCT_MCP_RUNTIME` — `built_in_stdio` по умолчанию или `built_in_http`, если built-in MCP опубликован по HTTP
+   - `SUPERSET_BUILT_IN_MCP_COMMAND`, `SUPERSET_BUILT_IN_MCP_ARGS` — опциональный launcher для `built_in_stdio`, если текущая среда не умеет запускать `python -m superset.mcp_service` напрямую
+   - `SUPERSET_BUILT_IN_MCP_URL` — адрес built-in MCP только для режима `built_in_http`
+   - `SUPERSET_BASE_URL`, `SUPERSET_PUBLIC_URL` — базовый URL Superset для всех ссылок (например, `http://103.54.18.91:8088`)
+   - `SUPERSET_USERNAME`, `SUPERSET_PASSWORD` — опционально; normal runtime через built-in MCP их не использует
    - `AI_ASSISTANT_WS_BASE_URL` — адрес WebSocket API (например, `ws://127.0.0.1:8052/ws/chat`)
    - `AUTH_DB_PATH`, `AUTH_JWT_SECRET`, `AUTH_JWT_TTL_HOURS` — параметры локальной авторизации (логин/пароль + JWT)
    - `AUTH_PASSWORD_MIN_LENGTH`, `AUTH_HISTORY_MAX_MESSAGES` — политика паролей и лимит загружаемой истории чата
@@ -38,12 +41,12 @@
 - В `sidebar` есть кнопки навигации по окнам: `Чат`, `US1`, `US2`, `US3`, `US4`, `US5`, `US13`, `US14`, `US15`.
 - Кнопка `Выход` завершает пользовательскую сессию в UI (аккаунт и история не удаляются).
 - Каждый US-экран открывается отдельно в основной области, чтобы не перегружать один sidebar.
-- Вводите текстовые запросы в чат — ассистент дергает MCP и Superset API.
+- Вводите текстовые запросы в чат — ассистент работает через built-in Superset MCP.
 - В режиме `WebSocket (stream)` в чате появляется `WebSocket trace` с этапами `status/chunk/done`.
 - История чата сохраняется по пользователю и подгружается после повторного входа.
 - После успешного входа логин сохраняется в стандартной session-cookie браузера: при повторном открытии ссылки в том же браузерном сеансе повторный вход не требуется.
-- Если нет ответа, проверьте, что Superset MCP сервер запущен и переменные окружения заданы верно.
-- В окне `US1` есть кнопка `Запустить US1-сканирование`: она строит отчёт по схемам, таблицам, профилю и связям.
+- Если нет ответа, проверьте, что built-in MCP runtime запускается и переменные окружения заданы верно.
+- В окне `US1` есть кнопка `Запустить US1-сканирование`: она строит отчёт по схемам, таблицам, профилю и связям через built-in MCP (`mcp_ext.list_databases` + `execute_sql`).
 - Если `postgres_databases=0`, откройте блок `Диагностика баз данных (US1)` — там будут `backend_hint` и причины фильтрации.
 - В окне `US2: Глоссарий (CRUD + Mapping)`:
   - создание/редактирование/удаление терминов,
@@ -92,13 +95,13 @@
 - `.env.example` — образец настроек
 
 ## Быстрые подсказки
-- Ошибка подключения: проверьте `SUPERSET_MCP_PATH` и работу Superset MCP.
-- Ошибка `No such file or directory: 'python'`:
-  - укажите `SUPERSET_MCP_PYTHON` абсолютным путём (например, `/usr/bin/python3` или `/home/.../.venv/bin/python`),
-  - либо используйте новую авто-подстановку (fallback на `sys.executable`), уже включённую в `backend/ai_agent.py`.
-- Ошибка `SUPERSET_MCP_PATH does not exist`:
-  - для локального запуска используйте `/home/superset_ai/superset-mcp/main.py`,
-  - для docker-контейнера используйте `/app/superset-mcp/main.py`.
+- Ошибка подключения: проверьте `SUPERSET_PRODUCT_MCP_RUNTIME` и запуск built-in MCP.
+- Для `built_in_stdio`:
+  - если `python -m superset.mcp_service` доступен в текущей среде, дополнительных переменных не нужно,
+  - если нет, задайте `SUPERSET_BUILT_IN_MCP_COMMAND` и при необходимости `SUPERSET_BUILT_IN_MCP_ARGS`.
+- Для `built_in_http`:
+  - задайте `SUPERSET_BUILT_IN_MCP_URL`,
+  - проверьте, что endpoint built-in MCP доступен из среды ассистента.
 - Ошибка про ключ: убедитесь, что `OPENAI_API_KEY` есть в `.env`.
 - Ошибка `GRAPH_RECURSION_LIMIT`: увеличьте `AI_AGENT_MAX_STEPS` и `AI_AGENT_RECURSION_LIMIT` в `.env`.
 - Ошибка `429 rate_limit_exceeded`: используйте `OPENAI_MODEL=gpt-4o-mini`, уменьшите контекст (`AI_AGENT_HISTORY_*`, `AI_AGENT_CONTEXT_CHARS`) и повторите запрос после cooldown.

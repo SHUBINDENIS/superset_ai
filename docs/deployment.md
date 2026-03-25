@@ -23,7 +23,7 @@ flowchart TB
                     streamlit[Container/Process: Streamlit UI<br/>superset-ai-assistant-mcp<br/>:8051]
                     wsapi[Process: WebSocket API<br/>backend/ws_api.py<br/>:8052]
                     agent[Process: AI Agent<br/>backend/ai_agent.py]
-                    mcp[Process: Superset MCP<br/>superset-mcp/main.py<br/>stdio]
+                    mcp[Process: Built-in Superset MCP<br/>superset.mcp_service<br/>stdio or HTTP]
                 end
             end
         end
@@ -39,7 +39,7 @@ flowchart TB
     wsapi --> agent
     agent -->|LLM API| openai
     agent -->|spawn + stdio| mcp
-    mcp -->|REST /api/v1/*| superset_app
+    mcp -->|Superset internals / DAO / RBAC| superset_app
 
     superset_app --> superset_db
     superset_app --> superset_cache
@@ -55,7 +55,7 @@ flowchart TB
 | Облако / датацентр | VM / сервер | IaaS/VPS или физический сервер |
 | Сервер (OS) | Docker Engine | Linux host |
 | Контейнеры Superset | `superset_app`, `superset_db`, `superset_cache`, `superset_worker`, `superset_worker_beat` | Один docker network (`docker-compose-image-tag.yml`) |
-| Контейнер/процесс AI | Streamlit UI + backend сервисы + MCP subprocess | Отдельный контейнер `ai_superset` или локальный процесс |
+| Контейнер/процесс AI | Streamlit UI + backend сервисы + built-in MCP runtime | Отдельный контейнер `ai_superset` или локальный процесс |
 | Внешние сервисы | OpenAI API | Внешнее облако (SaaS API) |
 
 ## 3) Компоненты и их назначение
@@ -65,7 +65,7 @@ flowchart TB
 | Streamlit UI | `superset-ai-assistant-mcp/frontend/app.py` | Пользовательский интерфейс ассистента |
 | WebSocket API | `superset-ai-assistant-mcp/backend/ws_api.py` | Real-time канал событий `status/chunk/done` для чата |
 | AI Agent | `superset-ai-assistant-mcp/backend/ai_agent.py` | Оркестрация запроса, guardrails, работа с LLM и MCP |
-| MCP Server | `superset-mcp/main.py` | Программный доступ к Superset API через MCP-инструменты |
+| MCP Server | `superset/superset/mcp_service` | Built-in MCP runtime для работы с Superset tools / DAO / RBAC |
 | Superset App | `superset_app` | BI-платформа, SQL Lab, charts/dashboards |
 | Superset DB | `superset_db` | Метаданные Superset (PostgreSQL) |
 | Superset Cache | `superset_cache` | Redis для кэша/очередей |
@@ -82,7 +82,7 @@ flowchart TB
 | `superset_db` | 5432 | Внутренняя БД Superset |
 | `superset_cache` | 6379 | Внутренний Redis |
 
-Примечание: MCP-сервер в текущем проекте обычно запускается как subprocess и общается с агентом через `stdio` (без публичного HTTP порта).
+Примечание: built-in MCP в текущем проекте обычно запускается как subprocess через `stdio`, но также поддерживается режим `built_in_http`.
 
 ## 5) Потоки данных
 
@@ -90,8 +90,8 @@ flowchart TB
 2. `Streamlit` открывает WebSocket к `backend/ws_api.py` и передаёт payload чата.
 3. `WS API` вызывает `AI Agent`, который применяет guardrails и готовит контекст.
 4. Агент вызывает `OpenAI API` для генерации/интерпретации.
-5. Для операций Superset агент вызывает MCP-инструменты (`superset-mcp/main.py`).
-6. MCP ходит в `Superset REST API` (`/api/v1/...`).
+5. Для операций Superset агент вызывает built-in MCP-инструменты (`superset.mcp_service`).
+6. Built-in MCP использует внутренние Superset tools / DAO / RBAC вместо legacy REST-прокси.
 7. `WS API` отдаёт в поток события `status/chunk/done`, Streamlit рендерит ответ и trace.
 
 ## 6) Переменные окружения, критичные для развёртывания
@@ -100,12 +100,14 @@ flowchart TB
 
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
+- `SUPERSET_PRODUCT_MCP_RUNTIME`
+- `SUPERSET_BUILT_IN_MCP_COMMAND`
+- `SUPERSET_BUILT_IN_MCP_ARGS`
+- `SUPERSET_BUILT_IN_MCP_URL`
 - `SUPERSET_BASE_URL`
 - `SUPERSET_PUBLIC_URL`
 - `SUPERSET_USERNAME`
 - `SUPERSET_PASSWORD`
-- `SUPERSET_MCP_PATH`
-- `SUPERSET_MCP_PYTHON`
 - `US15_SHARE_BASE_URL`
 - `AI_ASSISTANT_WS_BASE_URL`
 
@@ -137,4 +139,4 @@ flowchart TB
    - события `status` (этапы обработки),
    - события `chunk` (поток текста),
    - событие `done` (`latency_ms`, `finish_reason`).
-5. Для сравнения переключить транспорт на `HTTP (legacy)` и показать, что trace не заполняется и ответ приходит одним блоком.
+5. Для сравнения переключить транспорт на `HTTP (single response)` и показать, что trace не заполняется и ответ приходит одним блоком.

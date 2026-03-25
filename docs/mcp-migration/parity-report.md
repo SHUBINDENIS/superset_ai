@@ -1,6 +1,6 @@
 # MCP Migration Parity Report
 
-Status: phase 5 stabilization snapshot before legacy runtime removal.
+Status: phase 6 cleanup snapshot before the dedicated legacy-removal commit.
 
 This report describes the current migration state of the assistant product from
 `superset-mcp/main.py` to the built-in Superset MCP service. It is a parity and
@@ -19,6 +19,7 @@ The following product-facing paths are now validated on the built-in MCP route:
 - generate dashboards through `generate_dashboard`
 - generate explore links through `generate_explore_link`
 - generate SQL Lab URLs through `open_sql_lab_with_context`
+- run the US1 schema/profile/relations scan through `mcp_ext.list_databases` plus `execute_sql`
 
 Automated coverage now includes:
 
@@ -54,37 +55,29 @@ them:
 
 ## Remaining Legacy or Direct-REST Dependencies
 
-The migration is not finished yet. The following paths still remain outside the
-final desired steady state:
+The migration is not fully removed yet. The remaining legacy-specific items are now
+isolated cleanup targets rather than normal runtime dependencies:
 
-- `superset-ai-assistant-mcp/backend/us1_schema_profiler.py`
-  still uses direct REST login, CSRF, `sqllab/execute`, `database`, `schemas`,
-  and `database/<id>/tables` endpoints.
-- `superset-ai-assistant-mcp/frontend/app.py`
-  still invokes the US1 scanner, so this direct REST path is part of normal
-  product runtime today.
-- `superset-ai-assistant-mcp/backend/ai_agent.py`
-  still carries legacy launcher resolution helpers and legacy fallback support.
 - `superset-ai-assistant-mcp/backend/mcp_client/runtime.py`
   and `superset-ai-assistant-mcp/backend/mcp_client/tool_registry.py`
-  still support the temporary `legacy` runtime.
-- `superset-ai-assistant-mcp/.env.example`,
-  `superset-ai-assistant-mcp/README.md`, and `docs/deployment.md`
-  still contain legacy runtime configuration or setup references.
+  still carry low-level `legacy` runtime support for the final dedicated removal pass.
+- `superset-ai-assistant-mcp/backend/us13_15_viz_service.py`
+  still contains isolated legacy-only helper branches, but they are no longer part
+  of the standard runtime path after default fallback removal.
 - `superset-mcp/main.py`
-  still exists as the temporary fallback process path.
+  still exists because the final removal commit has not been executed yet.
 
 ## Legacy-Only Items Still Present
 
 Current legacy-only or legacy-specific items that are still present:
 
 - runtime name `legacy`
-- fallback env var `SUPERSET_PRODUCT_MCP_FALLBACK_RUNTIME`
-- legacy launcher env vars `SUPERSET_MCP_PATH` and `SUPERSET_MCP_PYTHON`
-- legacy subprocess path resolution in `backend/ai_agent.py`
+- `build_legacy_stdio_server_config()` and explicit legacy mapping code in the unified client layer
+- isolated legacy branches in `backend/us13_15_viz_service.py`
 - the runtime implementation in `superset-mcp/main.py`
 
-No product flow should require legacy token-based auth helpers anymore.
+No normal product flow should require legacy token-based auth helpers, CSRF, raw
+`database/<id>/tables`, or legacy subprocess launcher env vars anymore.
 
 ## `open_sql_lab_with_context` Status
 
@@ -95,25 +88,19 @@ capability rather than as a newly-added UI flow.
 
 ## Removal Plan
 
-Legacy runtime removal is blocked until the following steps are complete:
+The remaining dedicated removal sequence is:
 
-1. Migrate or explicitly isolate the US1 schema-profiler flow away from direct
-   REST and the broken database-tables dependency.
-2. Remove legacy fallback as the default safety path, then disable it in normal
-   deployment.
-3. Delete legacy launcher env vars and the corresponding resolver code from the
-   assistant runtime.
-4. Update `.env.example`, deployment docs, and README files to remove legacy
-   runtime instructions.
-5. Remove `superset-mcp/main.py` only in a dedicated final commit after the
-   parity and stability gates stay green.
+1. Delete the remaining low-level `legacy` runtime mode and its isolated compatibility branches.
+2. Remove `superset-mcp/main.py` in a dedicated final commit.
+3. Re-run the parity and stability suites after that dedicated removal commit.
 
 ## Current Gate Assessment
 
 - Built-in MCP is the default runtime: yes
 - Product-critical browse, SQL, chart, dashboard, and explore flows use the
   unified MCP client: yes
+- US1 schema-profiler flow uses the unified MCP client: yes
 - Target product tool inventory is enforced by tests: yes
 - Superset-side extension tools have standalone CI coverage: yes
-- All normal product runtime paths are migrated off direct REST: no
-- Legacy runtime can be removed now: no
+- All normal product runtime paths are migrated off direct REST: yes
+- Legacy runtime can be removed now: yes, but only in a dedicated final removal commit

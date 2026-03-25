@@ -54,7 +54,7 @@ Explicit non-goals for the first adapter:
 Required by actual product runtime, but not available as direct built-in tools:
 
 - `mcp_ext.list_databases`
-  - Needed for source pickers and scope selection in the UI.
+  - Needed for source pickers, scope selection in the UI, and the US1 schema-profiler entrypoint.
 - `mcp_ext.create_empty_dashboard`
   - Needed because the product still has an empty-dashboard-first flow and built-in `generate_dashboard` requires chart IDs.
 - `mcp_ext.legacy_chart_create`
@@ -66,6 +66,7 @@ The current runtime needs to support:
 
 - browse datasets, charts, dashboards
 - browse accessible databases for source pickers
+- scan PostgreSQL schemas, tables, columns, row counts, and relations for US1
 - fetch detailed asset info
 - execute SQL
 - generate and update charts through built-in schemas where possible

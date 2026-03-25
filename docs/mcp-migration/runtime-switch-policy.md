@@ -1,6 +1,6 @@
 # Runtime Switch Policy
 
-Status: phase 3 runtime switchover policy for the assistant product.
+Status: phase 6 cleanup snapshot before the dedicated legacy-removal commit.
 
 This note explains the current runtime selection policy while the product is being
 migrated from `superset-mcp/main.py` to the built-in Superset MCP service.
@@ -8,29 +8,27 @@ migrated from `superset-mcp/main.py` to the built-in Superset MCP service.
 ## Current Default
 
 - Default requested runtime: `built_in_stdio`
+- Default fallback runtime: disabled (`none`)
 - Supported explicit runtimes:
   - `built_in_stdio`
   - `built_in_http`
-  - `legacy`
+  - `legacy` (still present in low-level code only; not part of standard deployment)
 
-The product should now try the built-in MCP path first unless configuration explicitly
-requests `legacy`.
+The assistant normal runtime now uses the built-in MCP path only. Standard deployment
+should not configure a legacy fallback anymore.
 
-## Temporary Fallback Policy
+## Standard Deployment Policy
 
-- Default fallback runtime: `legacy`
-- Fallback env var: `SUPERSET_PRODUCT_MCP_FALLBACK_RUNTIME`
-- Disable fallback by setting:
-  - `SUPERSET_PRODUCT_MCP_FALLBACK_RUNTIME=none`
+- `SUPERSET_PRODUCT_MCP_RUNTIME=built_in_stdio` is the standard default.
+- `SUPERSET_PRODUCT_MCP_FALLBACK_RUNTIME` should remain unset in normal deployment.
+- `SUPERSET_MCP_PATH` and `SUPERSET_MCP_PYTHON` are no longer part of standard assistant configuration.
 
 Current intended behavior:
 
 1. Try the requested built-in runtime.
 2. Preflight the built-in runtime through the unified product MCP client layer.
-3. If startup or tool discovery fails, fall back to `legacy` temporarily.
-
-This fallback exists only to keep product safety while the real built-in runtime is
-being validated. It is not the target steady state.
+3. If startup or tool discovery fails, surface the failure explicitly instead of silently
+   switching back to the legacy subprocess.
 
 ## Phase 4 Product Routing Status
 
@@ -46,8 +44,8 @@ The following product-facing flows now use the unified MCP client layer by defau
 Current fallback policy for these flows:
 
 1. Use built-in MCP tools and product extensions first.
-2. If runtime creation falls back to `legacy`, keep only narrow compatibility behavior.
-3. Do not restore direct token-based auth helpers as a normal runtime path.
+2. Do not restore direct token-based auth helpers as a normal runtime path.
+3. Keep any remaining legacy-only code explicitly isolated until the final removal commit.
 
 ## Built-in STDIO Launcher Policy
 
@@ -76,29 +74,27 @@ For HTTP transport:
 - set `SUPERSET_BUILT_IN_MCP_URL`
 
 The product will use the unified MCP client layer against the configured built-in MCP
-HTTP endpoint and still honor the temporary fallback policy unless disabled.
+HTTP endpoint without enabling a legacy fallback by default.
 
-## Why Legacy Is Still Present
+## Why Legacy Code Is Still Present
 
-Legacy runtime code remains available because:
+Legacy runtime code remains in the repository only because the final dedicated removal
+commit has not been made yet.
 
-- live built-in integration coverage is still being added
-- runtime environments differ in how the built-in service must be launched
-- migration safety requires a controlled fallback until built-in checks are green
+It is no longer part of standard deployment behavior.
 
-Do not treat this note as approval to keep legacy as the long-term default.
+Do not treat this note as approval to keep legacy as a fallback safety net.
 
-## Phase 5 Stabilization Status
+## Phase 6 Status
 
-Current phase 5 assessment:
+Current phase 6 assessment:
 
 - built-in MCP remains the default runtime
-- legacy remains temporary fallback only
+- default legacy fallback is disabled
 - `open_sql_lab_with_context` is now part of the validated target tool surface
   and has live integration coverage
-- the remaining normal product runtime that still bypasses the unified MCP layer
-  is the US1 schema-profiler flow in
-  `superset-ai-assistant-mcp/backend/us1_schema_profiler.py`
+- the US1 schema-profiler flow now runs through `mcp_ext.list_databases` and `execute_sql`
+  instead of direct REST login/CSRF/database-table dependencies
 
-This means fallback removal is still blocked on the remaining direct-REST US1
-path and the final legacy cleanup pass.
+This means the remaining work is the dedicated final removal of the dormant legacy runtime
+code and any last isolated compatibility branches.
