@@ -11,7 +11,7 @@ class TestSessionManagerOwnership(unittest.IsolatedAsyncioTestCase):
             os.environ,
             {
                 "OPENAI_API_KEY": "test-openai-key",
-                "OPENAI_MODEL": "gpt-4o-mini",
+                "OPENAI_MODEL": "gpt-5.4-mini",
             },
             clear=False,
         )

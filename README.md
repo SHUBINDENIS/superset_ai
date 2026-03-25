@@ -108,7 +108,7 @@ cp .env.example .env
 
 Минимально проверьте в `.env`:
 - `OPENAI_API_KEY=...`
-- `OPENAI_MODEL=gpt-4o-mini` (рекомендуется для уменьшения 429)
+- `OPENAI_MODEL=gpt-5.4-mini` (рекомендуется для уменьшения 429)
 - `SUPERSET_PRODUCT_MCP_RUNTIME=...`
 - для `built_in_stdio`:
   - либо текущая среда ассистента умеет запускать `python -m superset.mcp_service`,

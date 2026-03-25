@@ -92,7 +92,7 @@ class SupersetAIAgent:
             raise ValueError("OPENAI_API_KEY environment variable not set")
 
         os.environ.setdefault("LANGCHAIN_GRAPH_RECURSION_LIMIT", "50")
-        self.model_name = os.getenv("OPENAI_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+        self.model_name = os.getenv("OPENAI_MODEL", "gpt-5.4-minii").strip() or "gpt-5.4-mini"
 
         self.llm = ChatOpenAI(
             model=self.model_name,

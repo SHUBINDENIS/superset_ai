@@ -19,7 +19,7 @@
 ## Как запустить
 1. Скопируйте `.env.example` в `.env` и заполните:
    - `OPENAI_API_KEY` — ключ OpenAI
-   - `OPENAI_MODEL` — рекомендуемо `gpt-4o-mini` для снижения риска 429 TPM
+   - `OPENAI_MODEL` — рекомендуемо `gpt-5.4-mini` для снижения риска 429 TPM
    - `SUPERSET_PRODUCT_MCP_RUNTIME` — `built_in_stdio` по умолчанию или `built_in_http`, если built-in MCP опубликован по HTTP
    - `SUPERSET_BUILT_IN_MCP_COMMAND`, `SUPERSET_BUILT_IN_MCP_ARGS` — опциональный launcher для `built_in_stdio`, если текущая среда не умеет запускать `python -m superset.mcp_service` напрямую
    - `SUPERSET_BUILT_IN_MCP_URL` — адрес built-in MCP только для режима `built_in_http`
@@ -149,5 +149,5 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml up -d
   - по умолчанию безопаснее документировать `built_in_http` или явно заданный stdio launcher.
 - Ошибка про ключ: убедитесь, что `OPENAI_API_KEY` есть в `.env`.
 - Ошибка `GRAPH_RECURSION_LIMIT`: увеличьте `AI_AGENT_MAX_STEPS` и `AI_AGENT_RECURSION_LIMIT` в `.env`.
-- Ошибка `429 rate_limit_exceeded`: используйте `OPENAI_MODEL=gpt-4o-mini`, уменьшите контекст (`AI_AGENT_HISTORY_*`, `AI_AGENT_CONTEXT_CHARS`) и повторите запрос после cooldown.
+- Ошибка `429 rate_limit_exceeded`: используйте `OPENAI_MODEL=gpt-5.4-mini`, уменьшите контекст (`AI_AGENT_HISTORY_*`, `AI_AGENT_CONTEXT_CHARS`) и повторите запрос после cooldown.
 - Ошибка `Запрос заблокирован политикой безопасности US10-US12`: уточните формулировку в рамках Superset/SQL и используйте разрешённые таблицы/метрики.
