@@ -22,6 +22,8 @@ This module provides the concrete implementation of MCP abstractions
 that replaces the abstract functions in superset-core during initialization.
 """
 
+import functools
+import inspect
 import logging
 from typing import Any, Callable, Optional, TypeVar
 
@@ -29,6 +31,30 @@ from typing import Any, Callable, Optional, TypeVar
 F = TypeVar("F", bound=Callable[..., Any])
 
 logger = logging.getLogger(__name__)
+
+
+def _wrap_with_flask_app_context(func: F) -> F:
+    """Ensure MCP tool/prompt executions always run with an active Flask app context."""
+    from superset.mcp_service.flask_singleton import get_flask_app
+
+    flask_app = get_flask_app()
+    is_async = inspect.iscoroutinefunction(func)
+
+    if is_async:
+
+        @functools.wraps(func)
+        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+            with flask_app.app_context():
+                return await func(*args, **kwargs)
+
+        return async_wrapper  # type: ignore[return-value]
+
+    @functools.wraps(func)
+    def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+        with flask_app.app_context():
+            return func(*args, **kwargs)
+
+    return sync_wrapper  # type: ignore[return-value]
 
 
 def create_tool_decorator(
@@ -77,6 +103,7 @@ def create_tool_decorator(
                 wrapped_func = mcp_auth_hook(func)
             else:
                 wrapped_func = func
+            wrapped_func = _wrap_with_flask_app_context(wrapped_func)
 
             from fastmcp.tools import Tool
 
@@ -165,6 +192,7 @@ def create_prompt_decorator(
                 wrapped_func = mcp_auth_hook(func)
             else:
                 wrapped_func = func
+            wrapped_func = _wrap_with_flask_app_context(wrapped_func)
 
             # Register prompt with FastMCP using the same pattern as existing code
             mcp.prompt(
