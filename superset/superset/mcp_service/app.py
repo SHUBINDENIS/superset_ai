@@ -305,6 +305,11 @@ from superset.mcp_service.dataset.tool import (  # noqa: F401, E402
     get_dataset_info,
     list_datasets,
 )
+from superset.mcp_service.extensions.tool import (  # noqa: F401, E402
+    create_empty_dashboard,
+    legacy_chart_create,
+    list_databases,
+)
 from superset.mcp_service.explore.tool import (  # noqa: F401, E402
     generate_explore_link,
 )
