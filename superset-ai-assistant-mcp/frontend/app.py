@@ -6,12 +6,16 @@ import html
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 import streamlit as st
+import streamlit.components.v1 as components
 from dotenv import load_dotenv
+import websockets
+from urllib.parse import unquote
 
 # --- Path & env --------------------------------------------------------------
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from backend import (
     get_session_manager,
+    get_auth_service,
     run_us1_scan_from_env,
     get_glossary_service,
     get_us3_mapping_rules_service,
@@ -57,6 +61,10 @@ WINDOW_LABELS = {
     WINDOW_US14: "🎯 Рекомендации",
     WINDOW_US15: "🔗 Шеринг",
 }
+
+CHAT_TRANSPORT_HTTP = "http"
+CHAT_TRANSPORT_WS = "websocket"
+AUTH_COOKIE_NAME = "ai_assistant_auth_token"
 
 
 def apply_product_theme() -> None:
@@ -257,9 +265,24 @@ def apply_product_theme() -> None:
 # --- Session state -----------------------------------------------------------
 def init_state():
     defaults = {
+        "auth_is_authenticated": False,
+        "auth_username": "",
+        "auth_role": "",
+        "auth_token": "",
+        "auth_cookie_sync_token": "",
+        "auth_cookie_clear_requested": False,
         "messages": [],
         "session_id": None,
         "agent_initialized": False,
+        "chat_transport": CHAT_TRANSPORT_WS,
+        "chat_ws_base_url": os.getenv(
+            "AI_ASSISTANT_WS_BASE_URL",
+            "ws://localhost:8052/ws/chat",
+        ).strip(),
+        "chat_last_trace": [],
+        "chat_last_trace_error": "",
+        "chat_last_latency_ms": 0,
+        "chat_last_finish_reason": "",
         "active_window": WINDOW_CHAT,
         "pending_input": None,
         "us1_scan_result": None,
@@ -553,14 +576,260 @@ def _collect_us5_criteria_from_state():
     )
 
 
+def _render_cookie_js(script_body: str) -> None:
+    components.html(
+        f"""
+        <script>
+        {script_body}
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
+
+
+def _schedule_auth_cookie_set(token: str) -> None:
+    clean = str(token or "").strip()
+    if not clean:
+        return
+    st.session_state.auth_cookie_sync_token = clean
+    st.session_state.auth_cookie_clear_requested = False
+
+
+def _schedule_auth_cookie_clear() -> None:
+    st.session_state.auth_cookie_sync_token = ""
+    st.session_state.auth_cookie_clear_requested = True
+
+
+def _flush_auth_cookie_ops() -> None:
+    clear_requested = bool(st.session_state.get("auth_cookie_clear_requested"))
+    sync_token = str(st.session_state.get("auth_cookie_sync_token", "")).strip()
+
+    if clear_requested:
+        _render_cookie_js(
+            f"""
+            document.cookie = "{AUTH_COOKIE_NAME}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax";
+            """
+        )
+        st.session_state.auth_cookie_clear_requested = False
+        return
+
+    if sync_token:
+        _render_cookie_js(
+            f"""
+            document.cookie = "{AUTH_COOKIE_NAME}=" + encodeURIComponent("{sync_token}") + "; path=/; SameSite=Lax";
+            """
+        )
+        st.session_state.auth_cookie_sync_token = ""
+
+
+def _read_auth_cookie_token() -> str:
+    try:
+        cookies = getattr(st.context, "cookies", None)
+    except Exception:
+        cookies = None
+    if not cookies:
+        return ""
+    raw_value = str(cookies.get(AUTH_COOKIE_NAME, "")).strip()
+    if not raw_value:
+        return ""
+    return unquote(raw_value).strip()
+
+
+def _current_username() -> str:
+    return str(st.session_state.get("auth_username", "")).strip()
+
+
+def _current_auth_token() -> str:
+    return str(st.session_state.get("auth_token", "")).strip()
+
+
+def _apply_authenticated_state(auth_result: Dict[str, Any], *, persist_cookie: bool = True) -> None:
+    username = str(auth_result.get("username", "")).strip()
+    role = str(auth_result.get("role", "")).strip() or "analyst"
+    auth_token = str(auth_result.get("auth_token", "")).strip()
+    session_id = str(auth_result.get("session_id", "")).strip()
+    if not username or not auth_token:
+        raise ValueError("Invalid auth payload.")
+
+    auth_service = get_auth_service()
+    if not session_id:
+        session_id = auth_service.get_or_create_user_session(username)
+
+    history_rows = auth_service.list_chat_history(username=username)
+    messages = [
+        {
+            "role": str(item.get("role", "")).strip(),
+            "content": str(item.get("content", "")).strip(),
+        }
+        for item in history_rows
+        if str(item.get("role", "")).strip() in {"user", "assistant"}
+        and str(item.get("content", "")).strip()
+    ]
+
+    st.session_state.auth_is_authenticated = True
+    st.session_state.auth_username = username
+    st.session_state.auth_role = role
+    st.session_state.auth_token = auth_token
+    st.session_state.session_id = session_id
+    st.session_state.agent_initialized = False
+    st.session_state.messages = messages
+    st.session_state.pending_input = None
+    st.session_state.active_window = WINDOW_CHAT
+    st.session_state.chat_last_trace = []
+    st.session_state.chat_last_trace_error = ""
+    st.session_state.chat_last_latency_ms = 0
+    st.session_state.chat_last_finish_reason = ""
+    if persist_cookie:
+        _schedule_auth_cookie_set(auth_token)
+
+
+def _try_auto_login_from_cookie() -> bool:
+    if st.session_state.get("auth_is_authenticated"):
+        return True
+
+    token = _read_auth_cookie_token()
+    if not token:
+        return False
+
+    auth_service = get_auth_service()
+    try:
+        token_context = auth_service.validate_token(token)
+    except Exception:
+        _schedule_auth_cookie_clear()
+        return False
+
+    auth_result = {
+        "username": str(token_context.get("username", "")).strip(),
+        "role": str(token_context.get("role", "")).strip() or "analyst",
+        "auth_token": token,
+        "session_id": str(token_context.get("session_id", "")).strip(),
+    }
+    _apply_authenticated_state(auth_result, persist_cookie=False)
+    return True
+
+
+def logout_user() -> None:
+    _schedule_auth_cookie_clear()
+    st.session_state.auth_is_authenticated = False
+    st.session_state.auth_username = ""
+    st.session_state.auth_role = ""
+    st.session_state.auth_token = ""
+    st.session_state.session_id = None
+    st.session_state.agent_initialized = False
+    st.session_state.active_window = WINDOW_CHAT
+    st.session_state.messages = []
+    st.session_state.pending_input = None
+    st.session_state.chat_last_trace = []
+    st.session_state.chat_last_trace_error = ""
+    st.session_state.chat_last_latency_ms = 0
+    st.session_state.chat_last_finish_reason = ""
+    st.rerun()
+
+
+def render_auth_window() -> None:
+    auth_service = get_auth_service()
+    st.markdown(
+        """
+        <div class="hero">
+          <h2>Авторизация в Superset AI Assistant</h2>
+          <p>Для продолжения войдите в систему или зарегистрируйте новый аккаунт.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.caption("Вход по логину и паролю. SMS/2FA не используются.")
+
+    tab_login, tab_register = st.tabs(["Вход", "Регистрация"])
+
+    with tab_login:
+        with st.form("auth_login_form", clear_on_submit=False):
+            login_username = st.text_input("Логин", value="", max_chars=64, key="auth_login_username")
+            login_password = st.text_input("Пароль", value="", type="password", key="auth_login_password")
+            login_submit = st.form_submit_button("Войти", use_container_width=True)
+        if login_submit:
+            try:
+                auth_result = auth_service.authenticate_user(login_username, login_password)
+                _apply_authenticated_state(auth_result)
+                st.rerun()
+            except Exception as exc:
+                st.error(str(exc))
+
+    with tab_register:
+        with st.form("auth_register_form", clear_on_submit=False):
+            reg_username = st.text_input("Логин", value="", max_chars=64, key="auth_register_username")
+            reg_password = st.text_input("Пароль", value="", type="password", key="auth_register_password")
+            reg_password_repeat = st.text_input(
+                "Повторите пароль",
+                value="",
+                type="password",
+                key="auth_register_password_repeat",
+            )
+            register_submit = st.form_submit_button("Зарегистрироваться", use_container_width=True)
+        st.caption(
+            f"Минимальная длина пароля: {int(os.getenv('AUTH_PASSWORD_MIN_LENGTH', '8'))} символов."
+        )
+        if register_submit:
+            if reg_password != reg_password_repeat:
+                st.error("Пароли не совпадают.")
+            else:
+                try:
+                    auth_service.register_user(reg_username, reg_password)
+                    auth_result = auth_service.authenticate_user(reg_username, reg_password)
+                    _apply_authenticated_state(auth_result)
+                    st.rerun()
+                except Exception as exc:
+                    st.error(str(exc))
+
+
 def _queue_message(text: str, switch_to_chat: bool = True) -> None:
     clean = text.strip()
     if not clean:
         return
     st.session_state.messages.append({"role": "user", "content": clean})
+    username = _current_username()
+    session_id = str(st.session_state.get("session_id", "")).strip()
+    if username and session_id:
+        try:
+            get_auth_service().save_chat_message(
+                username=username,
+                session_id=session_id,
+                role="user",
+                content=clean,
+            )
+        except Exception:
+            pass
     st.session_state.pending_input = clean
+    st.session_state.chat_last_trace = []
+    st.session_state.chat_last_trace_error = ""
+    st.session_state.chat_last_latency_ms = 0
+    st.session_state.chat_last_finish_reason = ""
     if switch_to_chat:
         st.session_state.active_window = WINDOW_CHAT
+
+
+def _build_ws_chat_url(session_id: str) -> str:
+    raw_base = str(st.session_state.get("chat_ws_base_url", "")).strip()
+    if not raw_base:
+        raw_base = "ws://localhost:8052/ws/chat"
+    return f"{raw_base.rstrip('/')}/{session_id}"
+
+
+def _ws_trace_to_rows(trace: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for idx, event in enumerate(trace):
+        if not isinstance(event, dict):
+            continue
+        rows.append(
+            {
+                "#": idx + 1,
+                "type": str(event.get("type", "")).strip(),
+                "stage": str(event.get("stage", "")).strip(),
+                "message": str(event.get("message", "")).strip(),
+                "timestamp": str(event.get("timestamp", "")).strip(),
+            }
+        )
+    return rows
 
 
 def sidebar():
@@ -575,6 +844,10 @@ def sidebar():
             unsafe_allow_html=True,
         )
 
+        current_user = _current_username()
+        if current_user:
+            st.info(f"Пользователь: {current_user}")
+
         if st.session_state.session_id:
             if st.session_state.agent_initialized:
                 st.success("Агент готов")
@@ -582,6 +855,19 @@ def sidebar():
                 st.warning("Агент не инициализирован")
         else:
             st.warning("Сессия не создана")
+
+        st.markdown('<div class="sidebar-section">Транспорт чата</div>', unsafe_allow_html=True)
+        st.selectbox(
+            "Режим",
+            [CHAT_TRANSPORT_WS, CHAT_TRANSPORT_HTTP],
+            key="chat_transport",
+            format_func=lambda x: "WebSocket (stream)" if x == CHAT_TRANSPORT_WS else "HTTP (legacy)",
+        )
+        st.text_input(
+            "WS base URL",
+            key="chat_ws_base_url",
+            help="Формат: ws://host:8052/ws/chat",
+        )
 
         st.divider()
         st.markdown('<div class="sidebar-section">Навигация</div>', unsafe_allow_html=True)
@@ -611,14 +897,27 @@ def sidebar():
         st.divider()
         st.markdown('<div class="sidebar-section">Сессия</div>', unsafe_allow_html=True)
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
         with col1:
             if st.button("🔄 Новая сессия", use_container_width=True, type="secondary"):
                 reset_session()
         with col2:
             if st.button("🗑 Очистить чат", use_container_width=True, type="secondary"):
+                username = _current_username()
+                if username:
+                    try:
+                        get_auth_service().clear_chat_history(username=username)
+                    except Exception:
+                        pass
                 st.session_state.messages = []
+                st.session_state.chat_last_trace = []
+                st.session_state.chat_last_trace_error = ""
+                st.session_state.chat_last_latency_ms = 0
+                st.session_state.chat_last_finish_reason = ""
                 st.rerun()
+        with col3:
+            if st.button("🚪 Выход", use_container_width=True, type="secondary"):
+                logout_user()
 
         st.divider()
         manager = get_session_manager()
@@ -654,8 +953,18 @@ def render_chat_window():
                 "value": "Готов" if st.session_state.agent_initialized else "Инициализация",
                 "meta": "Готовность backend-агента",
             },
+            {
+                "label": "Транспорт",
+                "value": "WebSocket" if st.session_state.get("chat_transport") == CHAT_TRANSPORT_WS else "HTTP",
+                "meta": "Текущий канал доставки ответа",
+            },
+            {
+                "label": "Latency (последний ответ)",
+                "value": f"{int(st.session_state.get('chat_last_latency_ms', 0) or 0)} ms",
+                "meta": "Из события done",
+            },
         ],
-        max_columns=3,
+        max_columns=5,
     )
 
     st.markdown("### Быстрые вопросы")
@@ -683,6 +992,17 @@ def render_chat_window():
     else:
         for msg in st.session_state.messages:
             render_message(msg["role"], msg["content"])
+
+    if st.session_state.get("chat_transport") == CHAT_TRANSPORT_WS:
+        trace = st.session_state.get("chat_last_trace", [])
+        if trace:
+            st.markdown("### WebSocket trace (last request)")
+            trace_rows = _ws_trace_to_rows(trace)
+            if trace_rows:
+                st.dataframe(trace_rows, hide_index=True, use_container_width=True)
+        trace_error = str(st.session_state.get("chat_last_trace_error", "")).strip()
+        if trace_error:
+            st.error(f"WS ошибка: {trace_error}")
 
     user_text = st.chat_input("Введите запрос…")
     if user_text:
@@ -4096,14 +4416,34 @@ def render_us15_window():
 # --- Backend interaction -----------------------------------------------------
 async def ensure_session():
     manager = get_session_manager()
+    auth_service = get_auth_service()
+    transport = st.session_state.get("chat_transport")
+    username = _current_username()
+    if not username:
+        return False, "Пользователь не авторизован."
 
     if not st.session_state.session_id:
-        st.session_state.session_id = await manager.create_session()
+        try:
+            st.session_state.session_id = auth_service.get_or_create_user_session(username)
+        except Exception as exc:
+            return False, str(exc)
         st.session_state.agent_initialized = False
 
-    agent = await manager.get_agent(st.session_state.session_id)
+    if transport == CHAT_TRANSPORT_WS:
+        # In WebSocket mode, initialization happens in backend/ws_api.py.
+        st.session_state.agent_initialized = True
+        return True, None
+
+    try:
+        agent = await manager.get_agent(st.session_state.session_id, owner=username)
+    except PermissionError:
+        return False, "Доступ к сессии запрещён."
+
     if not agent:
-        return False, "Сессия не найдена"
+        try:
+            agent = await manager.get_or_create_agent(st.session_state.session_id, owner=username)
+        except PermissionError:
+            return False, "Доступ к сессии запрещён."
 
     if not st.session_state.agent_initialized:
         with st.spinner("Инициализация агента..."):
@@ -4117,7 +4457,26 @@ async def ensure_session():
 
 async def handle_message(text: str):
     manager = get_session_manager()
-    agent = await manager.get_agent(st.session_state.session_id)
+    username = _current_username()
+    if not username:
+        raise ValueError("User is not authenticated.")
+
+    session_id = str(st.session_state.get("session_id", "")).strip()
+    if not session_id:
+        raise ValueError("Session ID is missing.")
+
+    try:
+        agent = await manager.get_agent(session_id, owner=username)
+    except PermissionError as exc:
+        raise RuntimeError("Доступ к сессии запрещён.") from exc
+
+    if not agent:
+        agent = await manager.get_or_create_agent(session_id, owner=username)
+        if not st.session_state.get("agent_initialized"):
+            ok = await agent.initialize()
+            if not ok:
+                raise RuntimeError("Не удалось инициализировать агента для fallback HTTP.")
+            st.session_state.agent_initialized = True
 
     reply = await agent.chat(st.session_state.messages)
     content = str(reply.get("content", "")).strip()
@@ -4127,15 +4486,122 @@ async def handle_message(text: str):
         "role": "assistant",
         "content": content,
     })
+    try:
+        get_auth_service().save_chat_message(
+            username=username,
+            session_id=session_id,
+            role="assistant",
+            content=content,
+        )
+    except Exception:
+        pass
+
+
+async def handle_message_ws(text: str):
+    username = _current_username()
+    if not username:
+        raise ValueError("User is not authenticated.")
+
+    session_id = str(st.session_state.get("session_id", "")).strip()
+    if not session_id:
+        raise ValueError("Session ID is missing.")
+
+    auth_token = _current_auth_token()
+    if not auth_token:
+        raise ValueError("Auth token is missing.")
+
+    ws_url = _build_ws_chat_url(session_id)
+    trace: List[Dict[str, Any]] = []
+    chunks: List[str] = []
+    done_content = ""
+    done_latency_ms = 0
+    done_finish_reason = ""
+
+    payload = {
+        "type": "chat",
+        "message": text,
+        "messages": st.session_state.get("messages", []),
+        "auth_token": auth_token,
+    }
+
+    async with websockets.connect(
+        ws_url,
+        open_timeout=12,
+        ping_interval=20,
+        ping_timeout=20,
+        max_size=2_000_000,
+    ) as socket:
+        await socket.send(json.dumps(payload, ensure_ascii=False))
+        while True:
+            raw = await asyncio.wait_for(socket.recv(), timeout=180)
+            if isinstance(raw, bytes):
+                raw = raw.decode("utf-8", errors="ignore")
+
+            event: Dict[str, Any]
+            try:
+                parsed = json.loads(raw)
+                event = parsed if isinstance(parsed, dict) else {"type": "raw", "payload": parsed}
+            except Exception:
+                event = {"type": "raw", "payload": str(raw)}
+
+            trace.append(event)
+            event_type = str(event.get("type", "")).strip().lower()
+
+            if event_type == "chunk":
+                chunks.append(str(event.get("text", "")))
+            elif event_type == "done":
+                done_content = str(event.get("content", "")).strip()
+                done_latency_ms = int(event.get("latency_ms", 0) or 0)
+                done_finish_reason = str(event.get("finish_reason", "")).strip()
+                break
+            elif event_type == "error":
+                message = str(event.get("message", "")).strip() or "WebSocket processing error."
+                raise RuntimeError(message)
+
+    content = done_content or "".join(chunks).strip()
+    if not content:
+        content = "Пустой ответ ассистента."
+
+    st.session_state.chat_last_trace = trace
+    st.session_state.chat_last_trace_error = ""
+    st.session_state.chat_last_latency_ms = done_latency_ms
+    st.session_state.chat_last_finish_reason = done_finish_reason
+    st.session_state.messages.append(
+        {
+            "role": "assistant",
+            "content": content,
+        }
+    )
+    try:
+        get_auth_service().save_chat_message(
+            username=username,
+            session_id=session_id,
+            role="assistant",
+            content=content,
+        )
+    except Exception:
+        pass
 
 
 # --- State utils -------------------------------------------------------------
 def reset_session():
-    st.session_state.session_id = None
+    new_session_id = None
+    username = _current_username()
+    if st.session_state.get("auth_is_authenticated") and username:
+        try:
+            new_session_id = get_auth_service().rotate_user_session(username)
+        except Exception:
+            new_session_id = None
+
+    st.session_state.session_id = new_session_id
     st.session_state.agent_initialized = False
     st.session_state.active_window = WINDOW_CHAT
     st.session_state.messages = []
     st.session_state.pending_input = None
+    st.session_state.chat_last_trace = []
+    st.session_state.chat_last_trace_error = ""
+    st.session_state.chat_last_latency_ms = 0
+    st.session_state.chat_last_finish_reason = ""
     st.session_state.us4_draft_query = ""
     st.session_state.us4_entity_to_apply = None
     st.session_state.us4_submit_draft_requested = False
@@ -4229,21 +4695,52 @@ def process_pending_input():
     if not text:
         return False
     st.session_state.pending_input = None
+    transport = str(st.session_state.get("chat_transport", CHAT_TRANSPORT_WS)).strip().lower()
+    st.session_state.chat_last_trace = []
+    st.session_state.chat_last_trace_error = ""
+    st.session_state.chat_last_latency_ms = 0
+    st.session_state.chat_last_finish_reason = ""
     try:
-        asyncio.run(handle_message(text))
+        if transport == CHAT_TRANSPORT_WS:
+            asyncio.run(handle_message_ws(text))
+        else:
+            asyncio.run(handle_message(text))
     except Exception as exc:
-        st.session_state.messages.append(
-            {
-                "role": "assistant",
-                "content": f"Ошибка при обработке запроса: {exc}",
-            }
-        )
+        if transport == CHAT_TRANSPORT_WS:
+            st.session_state.chat_last_trace_error = str(exc)
+            # Fallback to legacy request/response mode when WS endpoint is unavailable.
+            try:
+                asyncio.run(handle_message(text))
+            except Exception as fallback_exc:
+                st.session_state.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": f"Ошибка WS и fallback HTTP: {fallback_exc}",
+                    }
+                )
+        else:
+            st.session_state.messages.append(
+                {
+                    "role": "assistant",
+                    "content": f"Ошибка при обработке запроса: {exc}",
+                }
+            )
     return True
 
 
 def main():
     init_state()
     apply_product_theme()
+    _flush_auth_cookie_ops()
+
+    if not st.session_state.get("auth_is_authenticated"):
+        _try_auto_login_from_cookie()
+        _flush_auth_cookie_ops()
+
+    if not st.session_state.get("auth_is_authenticated"):
+        render_auth_window()
+        st.stop()
+
     sidebar()
 
     ok, error = asyncio.run(ensure_session())

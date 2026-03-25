@@ -13,22 +13,35 @@
    - `OPENAI_MODEL` — рекомендуемо `gpt-4o-mini` для снижения риска 429 TPM
    - `SUPERSET_MCP_PATH` — полный путь до `superset-mcp/main.py`
    - `SUPERSET_BASE_URL`, `SUPERSET_PUBLIC_URL`, `SUPERSET_USERNAME`, `SUPERSET_PASSWORD` — доступ к Superset и базовый URL для всех ссылок (например, `http://103.54.18.91:8088`)
+   - `AI_ASSISTANT_WS_BASE_URL` — адрес WebSocket API (например, `ws://127.0.0.1:8052/ws/chat`)
+   - `AUTH_DB_PATH`, `AUTH_JWT_SECRET`, `AUTH_JWT_TTL_HOURS` — параметры локальной авторизации (логин/пароль + JWT)
+   - `AUTH_PASSWORD_MIN_LENGTH`, `AUTH_HISTORY_MAX_MESSAGES` — политика паролей и лимит загружаемой истории чата
    - `AI_AGENT_MAX_STEPS`, `AI_AGENT_RECURSION_LIMIT` — лимиты шагов/рекурсии агента
    - `AI_AGENT_HISTORY_*`, `AI_AGENT_CONTEXT_CHARS`, `AI_AGENT_RATE_LIMIT_COOLDOWN_SECONDS` — ограничения на размер контекста и анти-спам cooldown после 429
 2. Установите зависимости:
    ```bash
    pip install -r requirements.txt
    ```
-3. Запустите приложение:
+3. Запустите WebSocket API (терминал №1):
    ```bash
-   streamlit run frontend/app.py
+   uvicorn backend.ws_api:app --app-dir . --host 0.0.0.0 --port 8052
    ```
-4. Откройте в браузере `http://localhost:8051` и пишите запросы в чат.
+4. Запустите Streamlit UI (терминал №2):
+   ```bash
+   streamlit run frontend/app.py --server.port 8051 --server.address 0.0.0.0
+   ```
+5. Откройте `http://localhost:8051`:
+   - сначала появится экран `Вход / Регистрация` (логин+пароль, без SMS/2FA),
+   - после авторизации откроется основной интерфейс ассистента.
 
 ## Как пользоваться
 - В `sidebar` есть кнопки навигации по окнам: `Чат`, `US1`, `US2`, `US3`, `US4`, `US5`, `US13`, `US14`, `US15`.
+- Кнопка `Выход` завершает пользовательскую сессию в UI (аккаунт и история не удаляются).
 - Каждый US-экран открывается отдельно в основной области, чтобы не перегружать один sidebar.
 - Вводите текстовые запросы в чат — ассистент дергает MCP и Superset API.
+- В режиме `WebSocket (stream)` в чате появляется `WebSocket trace` с этапами `status/chunk/done`.
+- История чата сохраняется по пользователю и подгружается после повторного входа.
+- После успешного входа логин сохраняется в стандартной session-cookie браузера: при повторном открытии ссылки в том же браузерном сеансе повторный вход не требуется.
 - Если нет ответа, проверьте, что Superset MCP сервер запущен и переменные окружения заданы верно.
 - В окне `US1` есть кнопка `Запустить US1-сканирование`: она строит отчёт по схемам, таблицам, профилю и связям.
 - Если `postgres_databases=0`, откройте блок `Диагностика баз данных (US1)` — там будут `backend_hint` и причины фильтрации.
@@ -80,6 +93,12 @@
 
 ## Быстрые подсказки
 - Ошибка подключения: проверьте `SUPERSET_MCP_PATH` и работу Superset MCP.
+- Ошибка `No such file or directory: 'python'`:
+  - укажите `SUPERSET_MCP_PYTHON` абсолютным путём (например, `/usr/bin/python3` или `/home/.../.venv/bin/python`),
+  - либо используйте новую авто-подстановку (fallback на `sys.executable`), уже включённую в `backend/ai_agent.py`.
+- Ошибка `SUPERSET_MCP_PATH does not exist`:
+  - для локального запуска используйте `/home/superset_ai/superset-mcp/main.py`,
+  - для docker-контейнера используйте `/app/superset-mcp/main.py`.
 - Ошибка про ключ: убедитесь, что `OPENAI_API_KEY` есть в `.env`.
 - Ошибка `GRAPH_RECURSION_LIMIT`: увеличьте `AI_AGENT_MAX_STEPS` и `AI_AGENT_RECURSION_LIMIT` в `.env`.
 - Ошибка `429 rate_limit_exceeded`: используйте `OPENAI_MODEL=gpt-4o-mini`, уменьшите контекст (`AI_AGENT_HISTORY_*`, `AI_AGENT_CONTEXT_CHARS`) и повторите запрос после cooldown.

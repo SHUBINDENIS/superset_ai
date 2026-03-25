@@ -87,6 +87,12 @@ cp .env.example .env
 - `SUPERSET_USERNAME=...`
 - `SUPERSET_PASSWORD=...`
 - `SUPERSET_MCP_PATH=/home/superset_ai/superset-mcp/main.py`
+- `AI_ASSISTANT_WS_BASE_URL=ws://<host>:8052/ws/chat`
+- `AUTH_DB_PATH=/home/superset_ai/superset-ai-assistant-mcp/data/auth.db`
+- `AUTH_JWT_SECRET=...` (обязательно поменять с дефолтного значения)
+- `AUTH_JWT_TTL_HOURS=12`
+- `AUTH_PASSWORD_MIN_LENGTH=8`
+- `AUTH_HISTORY_MAX_MESSAGES=500`
 
 ### 3) Запустить MCP сервер (локально)
 ```bash
@@ -94,14 +100,16 @@ cd /home/superset_ai/superset-mcp
 python main.py
 ```
 
-### 4) Запустить UI ассистента (локально)
+### 4) Запустить WS API и UI ассистента (локально)
 ```bash
 cd /home/superset_ai/superset-ai-assistant-mcp
 pip install -r requirements.txt
+uvicorn backend.ws_api:app --app-dir . --host 0.0.0.0 --port 8052
+# в отдельном терминале:
 streamlit run frontend/app.py --server.port 8051 --server.address 0.0.0.0
 ```
 
-Открыть: `http://localhost:8051`
+Открыть: `http://localhost:8051`, пройти `Вход/Регистрацию`, затем выбрать транспорт `WebSocket (stream)`.
 
 ## Запуск через Docker (ассистент)
 Сборку нужно делать из корня репозитория (контекст включает оба каталога `superset-ai-assistant-mcp` и `superset-mcp`):
@@ -109,7 +117,7 @@ streamlit run frontend/app.py --server.port 8051 --server.address 0.0.0.0
 ```bash
 cd /home/superset_ai
 docker build -t ai_superset -f superset-ai-assistant-mcp/Dockerfile .
-docker run --rm -p 8051:8051 --env-file superset-ai-assistant-mcp/.env ai_superset
+docker run --rm -p 8051:8051 -p 8052:8052 --env-file superset-ai-assistant-mcp/.env ai_superset
 ```
 
 ## Линтеры и CI
@@ -147,7 +155,9 @@ pytest tests -q
 ## Troubleshooting
 - Ошибка `429` от OpenAI: уменьшить частоту запросов, использовать более экономичную модель, сократить контекст.
 - Ошибка авторизации Superset: проверить `SUPERSET_BASE_URL`, логин/пароль и доступность Superset.
-- Ошибка MCP (`python not found`): в окружении должен быть доступен `python` для запуска `superset-mcp/main.py`.
+- Ошибка MCP (`python not found`): используйте `SUPERSET_MCP_PYTHON` с абсолютным путём до интерпретатора; код также пытается fallback на `sys.executable` и `python3`.
+- Ошибка MCP (`No such file or directory: 'python'`): задайте `SUPERSET_MCP_PYTHON` абсолютным путём (`/usr/bin/python3` или путь до `.venv/bin/python`).
+- Ошибка MCP (`SUPERSET_MCP_PATH does not exist`): для локального запуска используйте `/home/superset_ai/superset-mcp/main.py`, для docker — `/app/superset-mcp/main.py`.
 - Пустые списки таблиц/датасетов: убедиться, что в Superset созданы подключения БД и datasets.
 
 ## Вклад команды

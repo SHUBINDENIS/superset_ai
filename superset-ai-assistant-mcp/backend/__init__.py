@@ -39,6 +39,10 @@ from backend.us13_15_viz_service import (
     get_us13_15_viz_service,
     COMMON_VIZ_TYPES,
 )
+from backend.auth_service import (
+    AuthService,
+    get_auth_service,
+)
 
 __all__ = [
     'get_session_manager',
@@ -66,4 +70,6 @@ __all__ = [
     'US13To15VizService',
     'get_us13_15_viz_service',
     'COMMON_VIZ_TYPES',
+    'AuthService',
+    'get_auth_service',
 ]

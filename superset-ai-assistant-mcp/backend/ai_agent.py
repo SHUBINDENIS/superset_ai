@@ -5,12 +5,14 @@ import asyncio
 import uuid
 import re
 import time
-from typing import List, Dict, Any, Optional
+from datetime import datetime, timezone
+from typing import List, Dict, Any, Optional, Callable, Awaitable
 from langchain_openai import ChatOpenAI
 from mcp_use import MCPAgent, MCPClient
 import logging
 import sys
 import os
+import shutil
 from .us2_glossary_service import get_glossary_service
 from .us3_mapping_rules import get_us3_mapping_rules_service
 from .us4_query_assistant import get_us4_query_assistant_service
@@ -22,23 +24,27 @@ from .us13_15_viz_service import get_us13_15_viz_service
 backend_logger = logging.getLogger('superset_backend')
 backend_logger.setLevel(logging.DEBUG)  # Уровень детализации
 
-# Создаем обработчик для записи в файл
-log_file_path = os.path.join(os.path.dirname(__file__), '..', 'backend_logs.log')
-file_handler = logging.FileHandler(log_file_path)
-file_handler.setLevel(logging.DEBUG)
+# Создаем обработчики только один раз, иначе при повторном импорте будут дубли в логах.
+if not backend_logger.handlers:
+    # Создаем обработчик для записи в файл
+    log_file_path = os.path.join(os.path.dirname(__file__), '..', 'backend_logs.log')
+    file_handler = logging.FileHandler(log_file_path)
+    file_handler.setLevel(logging.DEBUG)
 
-# Задаем формат сообщений
-formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-file_handler.setFormatter(formatter)
+    # Задаем формат сообщений
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    file_handler.setFormatter(formatter)
 
-# Добавляем обработчик к логгеру
-backend_logger.addHandler(file_handler)
+    # Добавляем обработчик к логгеру
+    backend_logger.addHandler(file_handler)
 
-# Также можно выводить логи в консоль для отладки
-console_handler = logging.StreamHandler(sys.stderr)
-console_handler.setLevel(logging.INFO)
-console_handler.setFormatter(formatter)
-backend_logger.addHandler(console_handler)
+    # Также можно выводить логи в консоль для отладки
+    console_handler = logging.StreamHandler(sys.stderr)
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(formatter)
+    backend_logger.addHandler(console_handler)
+
+backend_logger.propagate = False
 
 # Теперь используйте этот логгер вместо print
 backend_logger.info("Модуль ai_agent инициализирован")
@@ -54,6 +60,8 @@ _global_mcp_client: Optional[MCPClient] = None
 _global_mcp_client_loop_id: Optional[int] = None
 _global_mcp_client_lock: Optional[asyncio.Lock] = None
 _global_mcp_client_lock_loop_id: Optional[int] = None
+
+AgentEventCallback = Callable[[Dict[str, Any]], Awaitable[None]]
 
 
 def _current_loop_id() -> int:
@@ -598,6 +606,89 @@ class SupersetAIAgent:
             self._run_lock = asyncio.Lock()
             self._locks_loop_id = loop_id
         return self._init_lock, self._run_lock
+
+    @staticmethod
+    def _is_executable_file(path: str) -> bool:
+        clean = str(path).strip()
+        return bool(clean) and os.path.isfile(clean) and os.access(clean, os.X_OK)
+
+    def _resolve_mcp_python_command(self) -> str:
+        """Resolve a working Python executable for launching superset-mcp."""
+        configured = str(os.getenv("SUPERSET_MCP_PYTHON", "")).strip()
+        if configured:
+            # Absolute/relative path explicitly provided.
+            if os.path.sep in configured or configured.startswith("."):
+                if self._is_executable_file(configured):
+                    return configured
+                logger.warning(
+                    "SUPERSET_MCP_PYTHON path is not executable: %s. Falling back.",
+                    configured,
+                )
+            else:
+                resolved = shutil.which(configured)
+                if resolved:
+                    return resolved
+                logger.warning(
+                    "SUPERSET_MCP_PYTHON command not found in PATH: %s. Falling back.",
+                    configured,
+                )
+
+        # Most reliable fallback: current interpreter.
+        if self._is_executable_file(sys.executable):
+            return str(sys.executable)
+
+        # Additional fallbacks.
+        for candidate in ("python3", "python"):
+            resolved = shutil.which(candidate)
+            if resolved:
+                return resolved
+
+        raise FileNotFoundError(
+            "Cannot find Python interpreter for MCP launch. "
+            "Set SUPERSET_MCP_PYTHON to an absolute executable path "
+            "(for example /usr/bin/python3 or /home/.../venv/bin/python)."
+        )
+
+    def _resolve_mcp_server_path(self) -> str:
+        """Resolve superset-mcp entrypoint path for both local and docker runs."""
+        configured = str(os.getenv("SUPERSET_MCP_PATH", "")).strip()
+        repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+        repo_default = os.path.join(repo_root, "superset-mcp", "main.py")
+
+        candidates: List[str] = []
+        if configured:
+            candidates.append(configured)
+        candidates.extend(
+            [
+                repo_default,
+                "/app/superset-mcp/main.py",
+            ]
+        )
+
+        seen = set()
+        ordered_candidates: List[str] = []
+        for path in candidates:
+            clean = str(path).strip()
+            if not clean or clean in seen:
+                continue
+            seen.add(clean)
+            ordered_candidates.append(clean)
+
+        for path in ordered_candidates:
+            if os.path.isfile(path):
+                if configured and path != configured:
+                    logger.warning(
+                        "SUPERSET_MCP_PATH '%s' not found. Fallback to '%s'.",
+                        configured,
+                        path,
+                    )
+                return path
+
+        attempted = ", ".join(ordered_candidates)
+        raise FileNotFoundError(
+            "Cannot resolve superset-mcp entrypoint. "
+            f"Tried: {attempted}. Set SUPERSET_MCP_PATH to a valid main.py path."
+        )
     
     async def _get_or_create_mcp_client(self):
         """Get or create global MCP client (shared across sessions)"""
@@ -618,12 +709,15 @@ class SupersetAIAgent:
                             f"Failed closing stale global MCP client: {exc}"
                         )
 
-                mcp_server_path = os.getenv("SUPERSET_MCP_PATH")
-                if not mcp_server_path:
-                    raise ValueError("SUPERSET_MCP_PATH environment variable not set")
-                
-                mcp_python = os.getenv("SUPERSET_MCP_PYTHON", "python")
-                
+                mcp_server_path = self._resolve_mcp_server_path()
+
+                mcp_python = self._resolve_mcp_python_command()
+                backend_logger.debug(
+                    "Resolved MCP launcher python: %s (script: %s)",
+                    mcp_python,
+                    mcp_server_path,
+                )
+
                 mcp_config = {
                     "mcpServers": {
                         "superset": {
@@ -787,31 +881,141 @@ class SupersetAIAgent:
                         pass
                     continue
                 raise
+
+    async def _emit_event(
+        self,
+        event_callback: Optional[AgentEventCallback],
+        event_type: str,
+        **payload: Any,
+    ) -> None:
+        if event_callback is None:
+            return
+        event = {
+            "type": str(event_type),
+            "session_id": self.session_id,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            **payload,
+        }
+        try:
+            await event_callback(event)
+        except Exception as exc:
+            backend_logger.debug(
+                "Session %s: failed to emit event '%s': %s",
+                self.session_id,
+                event_type,
+                exc,
+            )
+
+    async def _emit_status(
+        self,
+        event_callback: Optional[AgentEventCallback],
+        stage: str,
+        message: str,
+    ) -> None:
+        await self._emit_event(
+            event_callback,
+            "status",
+            stage=str(stage),
+            message=str(message),
+        )
+
+    async def _emit_chunked_text(
+        self,
+        event_callback: Optional[AgentEventCallback],
+        text: str,
+        chunk_size: int = 160,
+    ) -> None:
+        if event_callback is None:
+            return
+        normalized = str(text or "")
+        if not normalized:
+            return
+        safe_chunk_size = max(32, int(chunk_size))
+        total_chunks = (len(normalized) + safe_chunk_size - 1) // safe_chunk_size
+        for idx in range(total_chunks):
+            start = idx * safe_chunk_size
+            chunk = normalized[start : start + safe_chunk_size]
+            await self._emit_event(
+                event_callback,
+                "chunk",
+                chunk_index=idx,
+                chunk_total=total_chunks,
+                text=chunk,
+            )
+            await asyncio.sleep(0)
     
     async def chat(
         self,
         messages: List[Dict[str, str]],
-        stream: bool = False
+        stream: bool = False,
+        event_callback: Optional[AgentEventCallback] = None,
     ) -> Dict[str, Any]:
         """
         Process a chat message for this session
         """
+        started_at = time.monotonic()
+        last_user_message = messages[-1]["content"] if messages else ""
+
+        async def _finalize_response(
+            response: Dict[str, Any],
+            *,
+            include_chunks: bool,
+        ) -> Dict[str, Any]:
+            content = str(response.get("content", "")).strip()
+            finish_reason = str(response.get("finish_reason", "stop")).strip() or "stop"
+            if include_chunks:
+                await self._emit_chunked_text(event_callback, content)
+            if finish_reason == "error":
+                await self._emit_event(
+                    event_callback,
+                    "error",
+                    stage="chat",
+                    message=content or "Unknown chat error",
+                )
+            await self._emit_event(
+                event_callback,
+                "done",
+                finish_reason=finish_reason,
+                content=content,
+                latency_ms=int((time.monotonic() - started_at) * 1000),
+                model=self.model_name,
+            )
+            return response
+
+        await self._emit_status(
+            event_callback,
+            "request_received",
+            "User request accepted by AI agent.",
+        )
+
         # Ensure agent is initialized
         try:
+            await self._emit_status(
+                event_callback,
+                "initialization",
+                "Initializing agent session.",
+            )
             await self._ensure_initialized()
+            await self._emit_status(
+                event_callback,
+                "initialization",
+                "Agent is ready.",
+            )
         except Exception as e:
-            return {
+            response = {
                 "content": f"Ошибка инициализации агента: {str(e)}",
                 "role": "assistant",
-                "finish_reason": "error"
+                "finish_reason": "error",
+                "model": self.model_name,
+                "session_id": self.session_id,
             }
+            return await _finalize_response(response, include_chunks=stream)
 
-        last_user_message = messages[-1]["content"] if messages else ""
         try:
             # Build conversation context from history
             cooldown_left = self._get_rate_limit_remaining()
             if cooldown_left > 0:
-                return {
+                response = {
                     "content": (
                         "Лимит OpenAI временно исчерпан. "
                         f"Подождите примерно {cooldown_left} сек и повторите запрос."
@@ -819,8 +1023,9 @@ class SupersetAIAgent:
                     "role": "assistant",
                     "finish_reason": "rate_limit_cooldown",
                     "model": self.model_name,
-                    "session_id": self.session_id
+                    "session_id": self.session_id,
                 }
+                return await _finalize_response(response, include_chunks=stream)
 
             conversation_context = ""
             if len(messages) > 1:
@@ -844,6 +1049,11 @@ class SupersetAIAgent:
             scope_dataset: Dict[str, Any] = {}
 
             try:
+                await self._emit_status(
+                    event_callback,
+                    "guardrails",
+                    "Checking guardrails and quotas.",
+                )
                 guardrails_role = os.getenv("US11_DEFAULT_ROLE", "").strip().lower() or None
                 guardrails_service = get_us10_12_guardrails_service()
                 guardrails_decision = guardrails_service.evaluate_user_input(
@@ -854,7 +1064,7 @@ class SupersetAIAgent:
                 if not guardrails_decision.get("allowed", False):
                     reason_code = str(guardrails_decision.get("code", "")).strip()
                     reason_text = str(guardrails_decision.get("reason", "")).strip()
-                    return {
+                    response = {
                         "content": self._build_guardrail_block_reply(
                             reason_code=reason_code,
                             reason_text=reason_text,
@@ -863,8 +1073,9 @@ class SupersetAIAgent:
                         "role": "assistant",
                         "finish_reason": "blocked",
                         "model": self.model_name,
-                        "session_id": self.session_id
+                        "session_id": self.session_id,
                     }
+                    return await _finalize_response(response, include_chunks=stream)
 
                 warnings = guardrails_decision.get("warnings", [])
                 us10_12_context = (
@@ -878,11 +1089,22 @@ class SupersetAIAgent:
                         f"{warning_lines}"
                     )
                 us10_12_context = self._clip_context("US10_US12", us10_12_context)
+                await self._emit_status(
+                    event_callback,
+                    "guardrails",
+                    "Guardrails passed.",
+                )
             except Exception as exc:
                 backend_logger.warning(
                     f"Session {self.session_id}: US10-US12 guardrails check failed: {exc}"
                 )
                 us10_12_context = ""
+
+            await self._emit_status(
+                event_callback,
+                "context",
+                "Building enriched context from US2-US5 and scope.",
+            )
 
             try:
                 glossary_context = get_glossary_service().build_agent_context(
@@ -995,12 +1217,22 @@ class SupersetAIAgent:
             backend_logger.debug(f"Session {self.session_id}: US3 matched rules: {us3_matches_count}")
             
             # Run the agent
+            await self._emit_status(
+                event_callback,
+                "agent_run",
+                "Running MCP-enabled reasoning.",
+            )
             result = await self._safe_agent_run(enhanced_query, max_retries=2)
             if (
                 scope_payload
                 and scope_dataset
                 and self._looks_like_scope_tables_failure(str(result))
             ):
+                await self._emit_status(
+                    event_callback,
+                    "agent_retry",
+                    "Retrying with resolved dataset scope.",
+                )
                 retry_prompt = (
                     f"{enhanced_query}\n\n"
                     "Дополнительная инструкция для повтора:\n"
@@ -1012,13 +1244,14 @@ class SupersetAIAgent:
                 )
                 result = await self._safe_agent_run(retry_prompt, max_retries=1)
             
-            return {
+            response = {
                 "content": result,
                 "role": "assistant",
                 "finish_reason": "stop",
                 "model": self.model_name,
-                "session_id": self.session_id
+                "session_id": self.session_id,
             }
+            return await _finalize_response(response, include_chunks=stream)
             
         except Exception as e:
             logger.error(f"Session {self.session_id}: Error in chat processing: {e}")
@@ -1029,7 +1262,7 @@ class SupersetAIAgent:
                     default=self.rate_limit_cooldown_seconds,
                 )
                 self._set_rate_limit_cooldown(wait_seconds)
-                return {
+                response = {
                     "content": (
                         "Достигнут лимит запросов OpenAI (429). "
                         f"Подождите примерно {wait_seconds} сек и повторите запрос."
@@ -1037,9 +1270,10 @@ class SupersetAIAgent:
                     "role": "assistant",
                     "finish_reason": "error",
                     "model": self.model_name,
-                    "session_id": self.session_id
+                    "session_id": self.session_id,
                 }
-            return {
+                return await _finalize_response(response, include_chunks=stream)
+            response = {
                 "content": self._build_error_clarification_reply(
                     user_message=last_user_message,
                     error_text=error_text,
@@ -1047,8 +1281,20 @@ class SupersetAIAgent:
                 "role": "assistant",
                 "finish_reason": "error",
                 "model": self.model_name,
-                "session_id": self.session_id
+                "session_id": self.session_id,
             }
+            return await _finalize_response(response, include_chunks=stream)
+
+    async def chat_stream(
+        self,
+        messages: List[Dict[str, str]],
+        event_callback: Optional[AgentEventCallback],
+    ) -> Dict[str, Any]:
+        return await self.chat(
+            messages=messages,
+            stream=True,
+            event_callback=event_callback,
+        )
     
     async def close(self):
         """Close session-specific resources"""
@@ -1066,6 +1312,7 @@ class AgentSessionManager:
     
     def __init__(self):
         self.sessions: Dict[str, SupersetAIAgent] = {}
+        self.session_owners: Dict[str, str] = {}
         self.sessions_lock: Optional[asyncio.Lock] = None
         self.sessions_lock_loop_id: Optional[int] = None
 
@@ -1079,21 +1326,79 @@ class AgentSessionManager:
             self.sessions_lock_loop_id = loop_id
         return self.sessions_lock
     
-    async def create_session(self) -> str:
+    @staticmethod
+    def _normalize_owner(owner: Optional[str]) -> str:
+        return str(owner or "").strip()
+
+    def _assert_owner(self, session_id: str, owner: Optional[str]) -> None:
+        normalized_owner = self._normalize_owner(owner)
+        existing_owner = self.session_owners.get(session_id, "")
+        if not existing_owner:
+            if normalized_owner:
+                self.session_owners[session_id] = normalized_owner
+            return
+        if normalized_owner and existing_owner != normalized_owner:
+            raise PermissionError(
+                f"Session '{session_id}' belongs to another user."
+            )
+
+    async def create_session(self, owner: Optional[str] = None) -> str:
         """Create a new agent session"""
         session_id = str(uuid.uuid4())[:8]
         
         async with self._get_sessions_lock():
             agent = SupersetAIAgent(session_id)
             self.sessions[session_id] = agent
+            clean_owner = self._normalize_owner(owner)
+            if clean_owner:
+                self.session_owners[session_id] = clean_owner
         
         backend_logger.debug(f"Created new session: {session_id}")
         return session_id
+
+    async def get_or_create_agent(
+        self,
+        session_id: str,
+        owner: Optional[str] = None,
+    ) -> SupersetAIAgent:
+        """Get existing session agent or create one with provided session_id."""
+        safe_session_id = str(session_id).strip()
+        if not safe_session_id:
+            raise ValueError("session_id must not be empty")
+        async with self._get_sessions_lock():
+            existing = self.sessions.get(safe_session_id)
+            if existing is not None:
+                self._assert_owner(safe_session_id, owner)
+                return existing
+            agent = SupersetAIAgent(safe_session_id)
+            self.sessions[safe_session_id] = agent
+            self._assert_owner(safe_session_id, owner)
+            backend_logger.debug(f"Created session by id: {safe_session_id}")
+            return agent
     
-    async def get_agent(self, session_id: str) -> Optional[SupersetAIAgent]:
+    async def get_agent(
+        self,
+        session_id: str,
+        owner: Optional[str] = None,
+    ) -> Optional[SupersetAIAgent]:
         """Get agent for session"""
         async with self._get_sessions_lock():
-            return self.sessions.get(session_id)
+            safe_session_id = str(session_id).strip()
+            if not safe_session_id:
+                return None
+            agent = self.sessions.get(safe_session_id)
+            if agent is None:
+                return None
+            self._assert_owner(safe_session_id, owner)
+            return agent
+
+    async def get_session_owner(self, session_id: str) -> Optional[str]:
+        safe_session_id = str(session_id).strip()
+        if not safe_session_id:
+            return None
+        async with self._get_sessions_lock():
+            owner = self.session_owners.get(safe_session_id, "")
+        return owner or None
     
     async def close_session(self, session_id: str):
         """Close a session"""
@@ -1102,13 +1407,16 @@ class AgentSessionManager:
                 agent = self.sessions[session_id]
                 await agent.close()
                 del self.sessions[session_id]
+                self.session_owners.pop(session_id, None)
                 backend_logger.debug(f"Closed session: {session_id}")
     
     async def close_all_sessions(self):
         """Close all sessions"""
-        async with self.sessions_lock:
-            for session_id in list(self.sessions.keys()):
-                await self.close_session(session_id)
+        lock = self._get_sessions_lock()
+        async with lock:
+            session_ids = list(self.sessions.keys())
+        for session_id in session_ids:
+            await self.close_session(session_id)
 
 
 # Global session manager
