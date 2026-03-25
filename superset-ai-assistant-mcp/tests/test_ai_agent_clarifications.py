@@ -2,6 +2,10 @@ import unittest
 from unittest.mock import patch
 
 from backend.ai_agent import SupersetAIAgent
+from backend.mcp_client.tool_registry import (
+    SUPPORTED_LEGACY_TOOLS,
+    build_agent_runtime_guidance,
+)
 
 
 class TestAIAgentClarifications(unittest.TestCase):
@@ -51,6 +55,18 @@ class TestAIAgentClarifications(unittest.TestCase):
             "GET /api/v1/database/2/tables/ -> 400"
         )
         self.assertTrue(self.agent._looks_like_scope_tables_failure(text))
+
+    def test_runtime_guidance_does_not_require_legacy_auth_or_database_tables(self):
+        guidance = build_agent_runtime_guidance("http://superset.local")
+        self.assertNotIn("superset_auth_authenticate_user", guidance)
+        self.assertIn("Аутентификация уже должна быть обеспечена", guidance)
+        self.assertIn("dataset-level", guidance)
+        self.assertIn("database/tables endpoint", guidance)
+        self.assertNotIn("superset_database_get_tables", guidance)
+
+    def test_supported_legacy_tools_exclude_auth_and_database_tables(self):
+        self.assertNotIn("superset_auth_authenticate_user", SUPPORTED_LEGACY_TOOLS)
+        self.assertNotIn("superset_database_get_tables", SUPPORTED_LEGACY_TOOLS)
 
     def test_resolve_mcp_python_prefers_explicit_executable_path(self):
         with (
