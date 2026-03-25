@@ -156,5 +156,5 @@ jobs:
               /app/.venv/bin/python -m pip install -e . >/tmp/mcp_ext_superset_install.log 2>&1
               export PYTHONPATH="$TMP_WS/docker/pythonpath_dev"
               export SUPERSET_CONFIG_PATH="$TMP_WS/docker/pythonpath_dev/superset_config.py"
-              /app/.venv/bin/python -m pytest tests/unit_tests/mcp_service/extensions/tool -q
+              /app/.venv/bin/python -m pytest --confcutdir=tests/unit_tests/mcp_service/extensions/tool tests/unit_tests/mcp_service/extensions/tool -q
             '
