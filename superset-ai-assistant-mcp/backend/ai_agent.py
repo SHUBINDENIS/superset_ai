@@ -6,7 +6,7 @@ import uuid
 import re
 import time
 from datetime import datetime, timezone
-from typing import List, Dict, Any, Optional, Callable, Awaitable
+from typing import List, Dict, Any, Optional
 from langchain_openai import ChatOpenAI
 from mcp_use import MCPAgent
 import logging
@@ -63,8 +63,6 @@ _global_mcp_runtime: Optional[ProductMCPRuntime] = None
 _global_mcp_runtime_loop_id: Optional[int] = None
 _global_mcp_runtime_lock: Optional[asyncio.Lock] = None
 _global_mcp_runtime_lock_loop_id: Optional[int] = None
-
-AgentEventCallback = Callable[[Dict[str, Any]], Awaitable[None]]
 
 
 def _current_loop_id() -> int:
@@ -865,140 +863,32 @@ class SupersetAIAgent:
                     continue
                 raise
 
-    async def _emit_event(
-        self,
-        event_callback: Optional[AgentEventCallback],
-        event_type: str,
-        **payload: Any,
-    ) -> None:
-        if event_callback is None:
-            return
-        event = {
-            "type": str(event_type),
-            "session_id": self.session_id,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-            **payload,
-        }
-        try:
-            await event_callback(event)
-        except Exception as exc:
-            backend_logger.debug(
-                "Session %s: failed to emit event '%s': %s",
-                self.session_id,
-                event_type,
-                exc,
-            )
-
-    async def _emit_status(
-        self,
-        event_callback: Optional[AgentEventCallback],
-        stage: str,
-        message: str,
-    ) -> None:
-        await self._emit_event(
-            event_callback,
-            "status",
-            stage=str(stage),
-            message=str(message),
-        )
-
-    async def _emit_chunked_text(
-        self,
-        event_callback: Optional[AgentEventCallback],
-        text: str,
-        chunk_size: int = 160,
-    ) -> None:
-        if event_callback is None:
-            return
-        normalized = str(text or "")
-        if not normalized:
-            return
-        safe_chunk_size = max(32, int(chunk_size))
-        total_chunks = (len(normalized) + safe_chunk_size - 1) // safe_chunk_size
-        for idx in range(total_chunks):
-            start = idx * safe_chunk_size
-            chunk = normalized[start : start + safe_chunk_size]
-            await self._emit_event(
-                event_callback,
-                "chunk",
-                chunk_index=idx,
-                chunk_total=total_chunks,
-                text=chunk,
-            )
-            await asyncio.sleep(0)
-    
     async def chat(
         self,
         messages: List[Dict[str, str]],
-        stream: bool = False,
-        event_callback: Optional[AgentEventCallback] = None,
     ) -> Dict[str, Any]:
         """
         Process a chat message for this session
         """
-        started_at = time.monotonic()
         last_user_message = messages[-1]["content"] if messages else ""
-
-        async def _finalize_response(
-            response: Dict[str, Any],
-            *,
-            include_chunks: bool,
-        ) -> Dict[str, Any]:
-            content = str(response.get("content", "")).strip()
-            finish_reason = str(response.get("finish_reason", "stop")).strip() or "stop"
-            if include_chunks:
-                await self._emit_chunked_text(event_callback, content)
-            if finish_reason == "error":
-                await self._emit_event(
-                    event_callback,
-                    "error",
-                    stage="chat",
-                    message=content or "Unknown chat error",
-                )
-            await self._emit_event(
-                event_callback,
-                "done",
-                finish_reason=finish_reason,
-                content=content,
-                latency_ms=int((time.monotonic() - started_at) * 1000),
-                model=self.model_name,
-            )
-            return response
-
-        await self._emit_status(
-            event_callback,
-            "request_received",
-            "User request accepted by AI agent.",
-        )
 
         # Ensure agent is initialized
         try:
-            await self._emit_status(
-                event_callback,
-                "initialization",
-                "Initializing agent session.",
-            )
             await self._ensure_initialized()
-            await self._emit_status(
-                event_callback,
-                "initialization",
-                "Agent is ready.",
-            )
         except Exception as e:
-            response = {
+            return {
                 "content": f"Ошибка инициализации агента: {str(e)}",
                 "role": "assistant",
                 "finish_reason": "error",
                 "model": self.model_name,
                 "session_id": self.session_id,
             }
-            return await _finalize_response(response, include_chunks=stream)
 
         try:
             # Build conversation context from history
             cooldown_left = self._get_rate_limit_remaining()
             if cooldown_left > 0:
-                response = {
+                return {
                     "content": (
                         "Лимит OpenAI временно исчерпан. "
                         f"Подождите примерно {cooldown_left} сек и повторите запрос."
@@ -1008,7 +898,6 @@ class SupersetAIAgent:
                     "model": self.model_name,
                     "session_id": self.session_id,
                 }
-                return await _finalize_response(response, include_chunks=stream)
 
             conversation_context = ""
             if len(messages) > 1:
@@ -1032,11 +921,6 @@ class SupersetAIAgent:
             scope_dataset: Dict[str, Any] = {}
 
             try:
-                await self._emit_status(
-                    event_callback,
-                    "guardrails",
-                    "Checking guardrails and quotas.",
-                )
                 guardrails_role = os.getenv("US11_DEFAULT_ROLE", "").strip().lower() or None
                 guardrails_service = get_us10_12_guardrails_service()
                 guardrails_decision = guardrails_service.evaluate_user_input(
@@ -1047,7 +931,7 @@ class SupersetAIAgent:
                 if not guardrails_decision.get("allowed", False):
                     reason_code = str(guardrails_decision.get("code", "")).strip()
                     reason_text = str(guardrails_decision.get("reason", "")).strip()
-                    response = {
+                    return {
                         "content": self._build_guardrail_block_reply(
                             reason_code=reason_code,
                             reason_text=reason_text,
@@ -1058,7 +942,6 @@ class SupersetAIAgent:
                         "model": self.model_name,
                         "session_id": self.session_id,
                     }
-                    return await _finalize_response(response, include_chunks=stream)
 
                 warnings = guardrails_decision.get("warnings", [])
                 us10_12_context = (
@@ -1072,22 +955,11 @@ class SupersetAIAgent:
                         f"{warning_lines}"
                     )
                 us10_12_context = self._clip_context("US10_US12", us10_12_context)
-                await self._emit_status(
-                    event_callback,
-                    "guardrails",
-                    "Guardrails passed.",
-                )
             except Exception as exc:
                 backend_logger.warning(
                     f"Session {self.session_id}: US10-US12 guardrails check failed: {exc}"
                 )
                 us10_12_context = ""
-
-            await self._emit_status(
-                event_callback,
-                "context",
-                "Building enriched context from US2-US5 and scope.",
-            )
 
             try:
                 glossary_context = get_glossary_service().build_agent_context(
@@ -1190,22 +1062,12 @@ class SupersetAIAgent:
             backend_logger.debug(f"Session {self.session_id}: US3 matched rules: {us3_matches_count}")
             
             # Run the agent
-            await self._emit_status(
-                event_callback,
-                "agent_run",
-                "Running MCP-enabled reasoning.",
-            )
             result = await self._safe_agent_run(enhanced_query, max_retries=2)
             if (
                 scope_payload
                 and scope_dataset
                 and self._looks_like_scope_tables_failure(str(result))
             ):
-                await self._emit_status(
-                    event_callback,
-                    "agent_retry",
-                    "Retrying with resolved dataset scope.",
-                )
                 retry_prompt = (
                     f"{enhanced_query}\n\n"
                     "Дополнительная инструкция для повтора:\n"
@@ -1217,14 +1079,13 @@ class SupersetAIAgent:
                 )
                 result = await self._safe_agent_run(retry_prompt, max_retries=1)
             
-            response = {
+            return {
                 "content": result,
                 "role": "assistant",
                 "finish_reason": "stop",
                 "model": self.model_name,
                 "session_id": self.session_id,
             }
-            return await _finalize_response(response, include_chunks=stream)
             
         except Exception as e:
             logger.error(f"Session {self.session_id}: Error in chat processing: {e}")
@@ -1235,7 +1096,7 @@ class SupersetAIAgent:
                     default=self.rate_limit_cooldown_seconds,
                 )
                 self._set_rate_limit_cooldown(wait_seconds)
-                response = {
+                return {
                     "content": (
                         "Достигнут лимит запросов OpenAI (429). "
                         f"Подождите примерно {wait_seconds} сек и повторите запрос."
@@ -1245,8 +1106,7 @@ class SupersetAIAgent:
                     "model": self.model_name,
                     "session_id": self.session_id,
                 }
-                return await _finalize_response(response, include_chunks=stream)
-            response = {
+            return {
                 "content": self._build_error_clarification_reply(
                     user_message=last_user_message,
                     error_text=error_text,
@@ -1256,18 +1116,6 @@ class SupersetAIAgent:
                 "model": self.model_name,
                 "session_id": self.session_id,
             }
-            return await _finalize_response(response, include_chunks=stream)
-
-    async def chat_stream(
-        self,
-        messages: List[Dict[str, str]],
-        event_callback: Optional[AgentEventCallback],
-    ) -> Dict[str, Any]:
-        return await self.chat(
-            messages=messages,
-            stream=True,
-            event_callback=event_callback,
-        )
     
     async def close(self):
         """Close session-specific resources"""

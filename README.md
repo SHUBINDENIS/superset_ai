@@ -80,23 +80,20 @@ cp .env.example .env
 - `SUPERSET_BUILT_IN_MCP_COMMAND=...` и `SUPERSET_BUILT_IN_MCP_ARGS=...` только если текущая среда не умеет запускать `python -m superset.mcp_service` напрямую
 - `SUPERSET_BASE_URL=http://<host>:8088`
 - `SUPERSET_PUBLIC_URL=http://<host>:8088`
-- `AI_ASSISTANT_WS_BASE_URL=ws://<host>:8052/ws/chat`
 - `AUTH_DB_PATH=/home/superset_ai/superset-ai-assistant-mcp/data/auth.db`
 - `AUTH_JWT_SECRET=...` (обязательно поменять с дефолтного значения)
 - `AUTH_JWT_TTL_HOURS=12`
 - `AUTH_PASSWORD_MIN_LENGTH=8`
 - `AUTH_HISTORY_MAX_MESSAGES=500`
 
-### 3) Запустить WS API и UI ассистента (локально)
+### 3) Запустить UI ассистента (локально)
 ```bash
 cd /home/superset_ai/superset-ai-assistant-mcp
 pip install -r requirements.txt
-uvicorn backend.ws_api:app --app-dir . --host 0.0.0.0 --port 8052
-# в отдельном терминале:
 streamlit run frontend/app.py --server.port 8051 --server.address 0.0.0.0
 ```
 
-Открыть: `http://localhost:8051`, пройти `Вход/Регистрацию`, затем выбрать транспорт `WebSocket (stream)`.
+Открыть: `http://localhost:8051` и пройти `Вход/Регистрацию`.
 
 ## Запуск через Docker (ассистент)
 Сборку нужно делать из корня репозитория:
@@ -104,7 +101,7 @@ streamlit run frontend/app.py --server.port 8051 --server.address 0.0.0.0
 ```bash
 cd /home/superset_ai
 docker build -t ai_superset -f superset-ai-assistant-mcp/Dockerfile .
-docker run --rm -p 8051:8051 -p 8052:8052 --env-file superset-ai-assistant-mcp/.env ai_superset
+docker run --rm -p 8051:8051 --env-file superset-ai-assistant-mcp/.env ai_superset
 ```
 
 ## Линтеры и CI

@@ -15,8 +15,7 @@
    - `SUPERSET_BUILT_IN_MCP_COMMAND`, `SUPERSET_BUILT_IN_MCP_ARGS` — опциональный launcher для `built_in_stdio`, если текущая среда не умеет запускать `python -m superset.mcp_service` напрямую
    - `SUPERSET_BUILT_IN_MCP_URL` — адрес built-in MCP только для режима `built_in_http`
    - `SUPERSET_BASE_URL`, `SUPERSET_PUBLIC_URL` — базовый URL Superset для всех ссылок (например, `http://103.54.18.91:8088`)
-   - `AI_ASSISTANT_WS_BASE_URL` — адрес WebSocket API (например, `ws://127.0.0.1:8052/ws/chat`)
-   - `AUTH_DB_PATH`, `AUTH_JWT_SECRET`, `AUTH_JWT_TTL_HOURS` — параметры локальной авторизации (логин/пароль + JWT)
+    - `AUTH_DB_PATH`, `AUTH_JWT_SECRET`, `AUTH_JWT_TTL_HOURS` — параметры локальной авторизации (логин/пароль + JWT)
    - `AUTH_PASSWORD_MIN_LENGTH`, `AUTH_HISTORY_MAX_MESSAGES` — политика паролей и лимит загружаемой истории чата
    - `AI_AGENT_MAX_STEPS`, `AI_AGENT_RECURSION_LIMIT` — лимиты шагов/рекурсии агента
    - `AI_AGENT_HISTORY_*`, `AI_AGENT_CONTEXT_CHARS`, `AI_AGENT_RATE_LIMIT_COOLDOWN_SECONDS` — ограничения на размер контекста и анти-спам cooldown после 429
@@ -24,15 +23,11 @@
    ```bash
    pip install -r requirements.txt
    ```
-3. Запустите WebSocket API (терминал №1):
-   ```bash
-   uvicorn backend.ws_api:app --app-dir . --host 0.0.0.0 --port 8052
-   ```
-4. Запустите Streamlit UI (терминал №2):
+3. Запустите Streamlit UI:
    ```bash
    streamlit run frontend/app.py --server.port 8051 --server.address 0.0.0.0
    ```
-5. Откройте `http://localhost:8051`:
+4. Откройте `http://localhost:8051`:
    - сначала появится экран `Вход / Регистрация` (логин+пароль, без SMS/2FA),
    - после авторизации откроется основной интерфейс ассистента.
 
@@ -40,8 +35,7 @@
 - В `sidebar` есть кнопки навигации по окнам: `Чат`, `US1`, `US2`, `US3`, `US4`, `US5`, `US13`, `US14`, `US15`.
 - Кнопка `Выход` завершает пользовательскую сессию в UI (аккаунт и история не удаляются).
 - Каждый US-экран открывается отдельно в основной области, чтобы не перегружать один sidebar.
-- Вводите текстовые запросы в чат — ассистент работает через built-in Superset MCP.
-- В режиме `WebSocket (stream)` в чате появляется `WebSocket trace` с этапами `status/chunk/done`.
+- Вводите текстовые запросы в чат — Streamlit обрабатывает их через встроенный backend-agent путь и built-in Superset MCP.
 - История чата сохраняется по пользователю и подгружается после повторного входа.
 - После успешного входа логин сохраняется в стандартной session-cookie браузера: при повторном открытии ссылки в том же браузерном сеансе повторный вход не требуется.
 - Если нет ответа, проверьте, что built-in MCP runtime запускается и переменные окружения заданы верно.

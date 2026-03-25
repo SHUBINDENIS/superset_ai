@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 import streamlit as st
 import streamlit.components.v1 as components
 from dotenv import load_dotenv
-import websockets
 from urllib.parse import unquote
 
 # --- Path & env --------------------------------------------------------------
@@ -62,8 +61,6 @@ WINDOW_LABELS = {
     WINDOW_US15: "🔗 Шеринг",
 }
 
-CHAT_TRANSPORT_HTTP = "http"
-CHAT_TRANSPORT_WS = "websocket"
 AUTH_COOKIE_NAME = "ai_assistant_auth_token"
 
 
@@ -274,15 +271,6 @@ def init_state():
         "messages": [],
         "session_id": None,
         "agent_initialized": False,
-        "chat_transport": CHAT_TRANSPORT_WS,
-        "chat_ws_base_url": os.getenv(
-            "AI_ASSISTANT_WS_BASE_URL",
-            "ws://localhost:8052/ws/chat",
-        ).strip(),
-        "chat_last_trace": [],
-        "chat_last_trace_error": "",
-        "chat_last_latency_ms": 0,
-        "chat_last_finish_reason": "",
         "active_window": WINDOW_CHAT,
         "pending_input": None,
         "us1_scan_result": None,
@@ -637,10 +625,6 @@ def _current_username() -> str:
     return str(st.session_state.get("auth_username", "")).strip()
 
 
-def _current_auth_token() -> str:
-    return str(st.session_state.get("auth_token", "")).strip()
-
-
 def _apply_authenticated_state(auth_result: Dict[str, Any], *, persist_cookie: bool = True) -> None:
     username = str(auth_result.get("username", "")).strip()
     role = str(auth_result.get("role", "")).strip() or "analyst"
@@ -673,10 +657,6 @@ def _apply_authenticated_state(auth_result: Dict[str, Any], *, persist_cookie: b
     st.session_state.messages = messages
     st.session_state.pending_input = None
     st.session_state.active_window = WINDOW_CHAT
-    st.session_state.chat_last_trace = []
-    st.session_state.chat_last_trace_error = ""
-    st.session_state.chat_last_latency_ms = 0
-    st.session_state.chat_last_finish_reason = ""
     if persist_cookie:
         _schedule_auth_cookie_set(auth_token)
 
@@ -717,10 +697,6 @@ def logout_user() -> None:
     st.session_state.active_window = WINDOW_CHAT
     st.session_state.messages = []
     st.session_state.pending_input = None
-    st.session_state.chat_last_trace = []
-    st.session_state.chat_last_trace_error = ""
-    st.session_state.chat_last_latency_ms = 0
-    st.session_state.chat_last_finish_reason = ""
     st.rerun()
 
 
@@ -797,37 +773,8 @@ def _queue_message(text: str, switch_to_chat: bool = True) -> None:
         except Exception:
             pass
     st.session_state.pending_input = clean
-    st.session_state.chat_last_trace = []
-    st.session_state.chat_last_trace_error = ""
-    st.session_state.chat_last_latency_ms = 0
-    st.session_state.chat_last_finish_reason = ""
     if switch_to_chat:
         st.session_state.active_window = WINDOW_CHAT
-
-
-def _build_ws_chat_url(session_id: str) -> str:
-    raw_base = str(st.session_state.get("chat_ws_base_url", "")).strip()
-    if not raw_base:
-        raw_base = "ws://localhost:8052/ws/chat"
-    return f"{raw_base.rstrip('/')}/{session_id}"
-
-
-def _ws_trace_to_rows(trace: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    rows: List[Dict[str, Any]] = []
-    for idx, event in enumerate(trace):
-        if not isinstance(event, dict):
-            continue
-        rows.append(
-            {
-                "#": idx + 1,
-                "type": str(event.get("type", "")).strip(),
-                "stage": str(event.get("stage", "")).strip(),
-                "message": str(event.get("message", "")).strip(),
-                "timestamp": str(event.get("timestamp", "")).strip(),
-            }
-        )
-    return rows
-
 
 def sidebar():
     with st.sidebar:
@@ -853,20 +800,6 @@ def sidebar():
         else:
             st.warning("Сессия не создана")
 
-        st.markdown('<div class="sidebar-section">Транспорт чата</div>', unsafe_allow_html=True)
-        st.selectbox(
-            "Режим",
-            [CHAT_TRANSPORT_WS, CHAT_TRANSPORT_HTTP],
-            key="chat_transport",
-            format_func=lambda x: "WebSocket (stream)" if x == CHAT_TRANSPORT_WS else "HTTP (single response)",
-        )
-        st.text_input(
-            "WS base URL",
-            key="chat_ws_base_url",
-            help="Формат: ws://host:8052/ws/chat",
-        )
-
-        st.divider()
         st.markdown('<div class="sidebar-section">Навигация</div>', unsafe_allow_html=True)
         active = st.session_state.active_window
         for window_id in (
@@ -907,10 +840,6 @@ def sidebar():
                     except Exception:
                         pass
                 st.session_state.messages = []
-                st.session_state.chat_last_trace = []
-                st.session_state.chat_last_trace_error = ""
-                st.session_state.chat_last_latency_ms = 0
-                st.session_state.chat_last_finish_reason = ""
                 st.rerun()
         with col3:
             if st.button("🚪 Выход", use_container_width=True, type="secondary"):
@@ -952,16 +881,11 @@ def render_chat_window():
             },
             {
                 "label": "Транспорт",
-                "value": "WebSocket" if st.session_state.get("chat_transport") == CHAT_TRANSPORT_WS else "HTTP",
-                "meta": "Текущий канал доставки ответа",
-            },
-            {
-                "label": "Latency (последний ответ)",
-                "value": f"{int(st.session_state.get('chat_last_latency_ms', 0) or 0)} ms",
-                "meta": "Из события done",
+                "value": "HTTP / backend agent",
+                "meta": "Единый встроенный путь обработки чата",
             },
         ],
-        max_columns=5,
+        max_columns=4,
     )
 
     st.markdown("### Быстрые вопросы")
@@ -989,17 +913,6 @@ def render_chat_window():
     else:
         for msg in st.session_state.messages:
             render_message(msg["role"], msg["content"])
-
-    if st.session_state.get("chat_transport") == CHAT_TRANSPORT_WS:
-        trace = st.session_state.get("chat_last_trace", [])
-        if trace:
-            st.markdown("### WebSocket trace (last request)")
-            trace_rows = _ws_trace_to_rows(trace)
-            if trace_rows:
-                st.dataframe(trace_rows, hide_index=True, use_container_width=True)
-        trace_error = str(st.session_state.get("chat_last_trace_error", "")).strip()
-        if trace_error:
-            st.error(f"WS ошибка: {trace_error}")
 
     user_text = st.chat_input("Введите запрос…")
     if user_text:
@@ -4414,7 +4327,6 @@ def render_us15_window():
 async def ensure_session():
     manager = get_session_manager()
     auth_service = get_auth_service()
-    transport = st.session_state.get("chat_transport")
     username = _current_username()
     if not username:
         return False, "Пользователь не авторизован."
@@ -4425,11 +4337,6 @@ async def ensure_session():
         except Exception as exc:
             return False, str(exc)
         st.session_state.agent_initialized = False
-
-    if transport == CHAT_TRANSPORT_WS:
-        # In WebSocket mode, initialization happens in backend/ws_api.py.
-        st.session_state.agent_initialized = True
-        return True, None
 
     try:
         agent = await manager.get_agent(st.session_state.session_id, owner=username)
@@ -4472,7 +4379,7 @@ async def handle_message(text: str):
         if not st.session_state.get("agent_initialized"):
             ok = await agent.initialize()
             if not ok:
-                raise RuntimeError("Не удалось инициализировать агента для fallback HTTP.")
+                raise RuntimeError("Не удалось инициализировать агента.")
             st.session_state.agent_initialized = True
 
     reply = await agent.chat(st.session_state.messages)
@@ -4483,92 +4390,6 @@ async def handle_message(text: str):
         "role": "assistant",
         "content": content,
     })
-    try:
-        get_auth_service().save_chat_message(
-            username=username,
-            session_id=session_id,
-            role="assistant",
-            content=content,
-        )
-    except Exception:
-        pass
-
-
-async def handle_message_ws(text: str):
-    username = _current_username()
-    if not username:
-        raise ValueError("User is not authenticated.")
-
-    session_id = str(st.session_state.get("session_id", "")).strip()
-    if not session_id:
-        raise ValueError("Session ID is missing.")
-
-    auth_token = _current_auth_token()
-    if not auth_token:
-        raise ValueError("Auth token is missing.")
-
-    ws_url = _build_ws_chat_url(session_id)
-    trace: List[Dict[str, Any]] = []
-    chunks: List[str] = []
-    done_content = ""
-    done_latency_ms = 0
-    done_finish_reason = ""
-
-    payload = {
-        "type": "chat",
-        "message": text,
-        "messages": st.session_state.get("messages", []),
-        "auth_token": auth_token,
-    }
-
-    async with websockets.connect(
-        ws_url,
-        open_timeout=12,
-        ping_interval=20,
-        ping_timeout=20,
-        max_size=2_000_000,
-    ) as socket:
-        await socket.send(json.dumps(payload, ensure_ascii=False))
-        while True:
-            raw = await asyncio.wait_for(socket.recv(), timeout=180)
-            if isinstance(raw, bytes):
-                raw = raw.decode("utf-8", errors="ignore")
-
-            event: Dict[str, Any]
-            try:
-                parsed = json.loads(raw)
-                event = parsed if isinstance(parsed, dict) else {"type": "raw", "payload": parsed}
-            except Exception:
-                event = {"type": "raw", "payload": str(raw)}
-
-            trace.append(event)
-            event_type = str(event.get("type", "")).strip().lower()
-
-            if event_type == "chunk":
-                chunks.append(str(event.get("text", "")))
-            elif event_type == "done":
-                done_content = str(event.get("content", "")).strip()
-                done_latency_ms = int(event.get("latency_ms", 0) or 0)
-                done_finish_reason = str(event.get("finish_reason", "")).strip()
-                break
-            elif event_type == "error":
-                message = str(event.get("message", "")).strip() or "WebSocket processing error."
-                raise RuntimeError(message)
-
-    content = done_content or "".join(chunks).strip()
-    if not content:
-        content = "Пустой ответ ассистента."
-
-    st.session_state.chat_last_trace = trace
-    st.session_state.chat_last_trace_error = ""
-    st.session_state.chat_last_latency_ms = done_latency_ms
-    st.session_state.chat_last_finish_reason = done_finish_reason
-    st.session_state.messages.append(
-        {
-            "role": "assistant",
-            "content": content,
-        }
-    )
     try:
         get_auth_service().save_chat_message(
             username=username,
@@ -4595,10 +4416,6 @@ def reset_session():
     st.session_state.active_window = WINDOW_CHAT
     st.session_state.messages = []
     st.session_state.pending_input = None
-    st.session_state.chat_last_trace = []
-    st.session_state.chat_last_trace_error = ""
-    st.session_state.chat_last_latency_ms = 0
-    st.session_state.chat_last_finish_reason = ""
     st.session_state.us4_draft_query = ""
     st.session_state.us4_entity_to_apply = None
     st.session_state.us4_submit_draft_requested = False
@@ -4692,36 +4509,15 @@ def process_pending_input():
     if not text:
         return False
     st.session_state.pending_input = None
-    transport = str(st.session_state.get("chat_transport", CHAT_TRANSPORT_WS)).strip().lower()
-    st.session_state.chat_last_trace = []
-    st.session_state.chat_last_trace_error = ""
-    st.session_state.chat_last_latency_ms = 0
-    st.session_state.chat_last_finish_reason = ""
     try:
-        if transport == CHAT_TRANSPORT_WS:
-            asyncio.run(handle_message_ws(text))
-        else:
-            asyncio.run(handle_message(text))
+        asyncio.run(handle_message(text))
     except Exception as exc:
-        if transport == CHAT_TRANSPORT_WS:
-            st.session_state.chat_last_trace_error = str(exc)
-            # Fallback to legacy request/response mode when WS endpoint is unavailable.
-            try:
-                asyncio.run(handle_message(text))
-            except Exception as fallback_exc:
-                st.session_state.messages.append(
-                    {
-                        "role": "assistant",
-                        "content": f"Ошибка WS и fallback HTTP: {fallback_exc}",
-                    }
-                )
-        else:
-            st.session_state.messages.append(
-                {
-                    "role": "assistant",
-                    "content": f"Ошибка при обработке запроса: {exc}",
-                }
-            )
+        st.session_state.messages.append(
+            {
+                "role": "assistant",
+                "content": f"Ошибка при обработке запроса: {exc}",
+            }
+        )
     return True
 
 

@@ -17,6 +17,6 @@ COPY superset-ai-assistant-mcp ./superset-ai-assistant-mcp
 # env
 ENV PYTHONPATH=/app
 
-EXPOSE 8051 8052
+EXPOSE 8051
 
 CMD ["bash", "superset-ai-assistant-mcp/start_assistant_stack.sh"]

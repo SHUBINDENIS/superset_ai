@@ -1,8 +1,15 @@
 # Схема Развёртывания
 
-Документ описывает схему Deployment для проекта `superset_ai` в формате: **облако → сервер → контейнеры**.
+Документ описывает актуальную схему deployment для проекта `superset_ai` в формате:
+**облако → сервер → контейнеры**.
 
-## 1) Диаграмма развёртывания (Deployment: облако/сервер/контейнеры)
+Текущее состояние после упрощения транспорта:
+
+- чат ассистента работает только через HTTP/UI path
+- отдельный streaming backend больше не используется
+- Streamlit вызывает backend-модули и `AI Agent` внутри того же процесса
+
+## 1) Диаграмма развёртывания
 
 ```mermaid
 flowchart TB
@@ -20,9 +27,8 @@ flowchart TB
                 end
 
                 subgraph aistack[AI Assistant deployment]
-                    streamlit[Container/Process: Streamlit UI<br/>superset-ai-assistant-mcp<br/>:8051]
-                    wsapi[Process: WebSocket API<br/>backend/ws_api.py<br/>:8052]
-                    agent[Process: AI Agent<br/>backend/ai_agent.py]
+                    streamlit[Container/Process: Streamlit UI + backend services<br/>superset-ai-assistant-mcp<br/>:8051]
+                    agent[In-process AI Agent<br/>backend/ai_agent.py]
                     mcp[Process: Built-in Superset MCP<br/>superset.mcp_service<br/>stdio or HTTP]
                 end
             end
@@ -33,12 +39,9 @@ flowchart TB
 
     user -->|HTTPS/HTTP| streamlit
     user -->|HTTPS/HTTP| superset_app
-
-    streamlit -->|WebSocket| wsapi
-    streamlit -->|HTTP fallback| agent
-    wsapi --> agent
+    streamlit -->|in-process backend call| agent
     agent -->|LLM API| openai
-    agent -->|spawn + stdio| mcp
+    agent -->|spawn + stdio or HTTP| mcp
     mcp -->|Superset internals / DAO / RBAC| superset_app
 
     superset_app --> superset_db
@@ -55,16 +58,15 @@ flowchart TB
 | Облако / датацентр | VM / сервер | IaaS/VPS или физический сервер |
 | Сервер (OS) | Docker Engine | Linux host |
 | Контейнеры Superset | `superset_app`, `superset_db`, `superset_cache`, `superset_worker`, `superset_worker_beat` | Один docker network (`docker-compose-image-tag.yml`) |
-| Контейнер/процесс AI | Streamlit UI + backend сервисы + built-in MCP runtime | Отдельный контейнер `ai_superset` или локальный процесс |
+| Контейнер/процесс AI | Streamlit UI + встроенный backend agent + built-in MCP runtime | Отдельный контейнер `ai_superset` или локальный процесс |
 | Внешние сервисы | OpenAI API | Внешнее облако (SaaS API) |
 
 ## 3) Компоненты и их назначение
 
 | Компонент | Расположение | Назначение |
 |---|---|---|
-| Streamlit UI | `superset-ai-assistant-mcp/frontend/app.py` | Пользовательский интерфейс ассистента |
-| WebSocket API | `superset-ai-assistant-mcp/backend/ws_api.py` | Real-time канал событий `status/chunk/done` для чата |
-| AI Agent | `superset-ai-assistant-mcp/backend/ai_agent.py` | Оркестрация запроса, guardrails, работа с LLM и MCP |
+| Streamlit UI | `superset-ai-assistant-mcp/frontend/app.py` | Пользовательский интерфейс и HTTP-only точка входа ассистента |
+| AI Agent | `superset-ai-assistant-mcp/backend/ai_agent.py` | Оркестрация запроса, guardrails, работа с LLM и built-in MCP внутри процесса Streamlit |
 | MCP Server | `superset/superset/mcp_service` | Built-in MCP runtime для работы с Superset tools / DAO / RBAC |
 | Superset App | `superset_app` | BI-платформа, SQL Lab, charts/dashboards |
 | Superset DB | `superset_db` | Метаданные Superset (PostgreSQL) |
@@ -77,7 +79,6 @@ flowchart TB
 | Endpoint | Порт | Использование |
 |---|---|---|
 | `http://<host>:8051` | 8051 | UI ассистента (Streamlit) |
-| `ws://<host>:8052/ws/chat/<session_id>` | 8052 | WebSocket transport для stream-ответов чата |
 | `http://<host>:8088` | 8088 | Apache Superset |
 | `superset_db` | 5432 | Внутренняя БД Superset |
 | `superset_cache` | 6379 | Внутренний Redis |
@@ -87,16 +88,16 @@ flowchart TB
 ## 5) Потоки данных
 
 1. Пользователь отправляет запрос в `Streamlit`.
-2. `Streamlit` открывает WebSocket к `backend/ws_api.py` и передаёт payload чата.
-3. `WS API` вызывает `AI Agent`, который применяет guardrails и готовит контекст.
+2. `Streamlit` вызывает встроенный `AI Agent` через backend-модули внутри того же процесса.
+3. Агент применяет guardrails и готовит контекст.
 4. Агент вызывает `OpenAI API` для генерации/интерпретации.
 5. Для операций Superset агент вызывает built-in MCP-инструменты (`superset.mcp_service`).
 6. Built-in MCP использует внутренние Superset tools / DAO / RBAC вместо legacy REST-прокси.
-7. `WS API` отдаёт в поток события `status/chunk/done`, Streamlit рендерит ответ и trace.
+7. `Streamlit` рендерит итоговый ответ без отдельного transport layer для чата.
 
 ## 6) Переменные окружения, критичные для развёртывания
 
-Основные переменные (см. `superset-ai-assistant-mcp/.env.example` или `supersetai-assistant-mcp/.env`):
+Основные переменные:
 
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
@@ -107,34 +108,29 @@ flowchart TB
 - `SUPERSET_BASE_URL`
 - `SUPERSET_PUBLIC_URL`
 - `US15_SHARE_BASE_URL`
-- `AI_ASSISTANT_WS_BASE_URL`
+- `AUTH_DB_PATH`
+- `AUTH_JWT_SECRET`
 
-## 7) Минимальный сценарий запуска (для этой схемы)
+## 7) Минимальный сценарий запуска
 
 1. Поднять Superset стек:
    - `cd superset`
    - `docker compose -f docker-compose-image-tag.yml up -d`
 2. Поднять ассистент:
-   - локально: `uvicorn backend.ws_api:app --app-dir . --host 0.0.0.0 --port 8052` + `streamlit run frontend/app.py --server.port 8051 --server.address 0.0.0.0`
-   или
-   - контейнером `ai_superset` на портах `8051` и `8052`
+   - локально: `streamlit run frontend/app.py --server.port 8051 --server.address 0.0.0.0`
+   - или контейнером `ai_superset` на порту `8051`
 3. Проверить доступность:
    - `http://<host>:8088` (Superset)
    - `http://<host>:8051` (Assistant)
-   - `http://<host>:8052/health` (WS API health)
 
 ## 8) Ограничения текущего deployment
 
 - Конфигурация ориентирована на MVP/демо и учебный контур.
 - Для production требуются отдельные меры: TLS, секреты, hardening, отказоустойчивость, мониторинг/алертинг, backup-политики.
 
-## 9) Как показать WebSocket на практике
+## 9) Как показать текущий HTTP-only assistant path на практике
 
-1. Поднять `WS API` и `Streamlit`, открыть `http://<host>:8051`.
-2. В sidebar выбрать транспорт `WebSocket (stream)` и проверить `WS base URL`.
-3. Отправить длинный запрос в чате (чтобы ответ приходил частями).
-4. Показать блок `WebSocket trace (last request)`:
-   - события `status` (этапы обработки),
-   - события `chunk` (поток текста),
-   - событие `done` (`latency_ms`, `finish_reason`).
-5. Для сравнения переключить транспорт на `HTTP (single response)` и показать, что trace не заполняется и ответ приходит одним блоком.
+1. Поднять `Streamlit` и открыть `http://<host>:8051`.
+2. Пройти авторизацию.
+3. Отправить запрос в чате.
+4. Показать, что ответ приходит через встроенный backend-agent путь без выбора транспорта и без отдельного streaming trace слоя.
