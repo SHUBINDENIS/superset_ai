@@ -8,6 +8,7 @@
 - чат ассистента работает только через HTTP/UI path
 - отдельный streaming backend больше не используется
 - Streamlit вызывает backend-модули и `AI Agent` внутри того же процесса
+- поддерживаемый Docker-сценарий остаётся split-моделью: Superset через compose, ассистент отдельным процессом/контейнером
 
 ## 1) Диаграмма развёртывания
 
@@ -83,7 +84,7 @@ flowchart TB
 | `superset_db` | 5432 | Внутренняя БД Superset |
 | `superset_cache` | 6379 | Внутренний Redis |
 
-Примечание: built-in MCP в текущем проекте обычно запускается как subprocess через `stdio`, но также поддерживается режим `built_in_http`.
+Примечание: built-in MCP в текущем проекте обычно запускается как subprocess через `stdio`, но также поддерживается режим `built_in_http`. Отдельный assistant Docker image не включает код `superset.mcp_service`, поэтому для контейнерного запуска нужен либо `built_in_http`, либо явный stdio launcher.
 
 ## 5) Потоки данных
 
@@ -115,10 +116,11 @@ flowchart TB
 
 1. Поднять Superset стек:
    - `cd superset`
-   - `docker compose -f docker-compose-image-tag.yml up -d`
+   - `docker compose -f docker-compose-image-tag.yml up -d db redis superset-init superset superset-worker superset-worker-beat`
+   - `docker compose -f docker-compose-image-tag.yml config --services`
 2. Поднять ассистент:
    - локально: `streamlit run frontend/app.py --server.port 8051 --server.address 0.0.0.0`
-   - или контейнером `ai_superset` на порту `8051`
+   - или контейнером `ai_superset` на порту `8051` из `superset-ai-assistant-mcp/Dockerfile`
 3. Проверить доступность:
    - `http://<host>:8088` (Superset)
    - `http://<host>:8051` (Assistant)

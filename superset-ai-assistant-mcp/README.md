@@ -7,6 +7,10 @@
 - Ключ OpenAI (`OPENAI_API_KEY`)
 - Запущенный Superset с доступным built-in MCP runtime (`superset.mcp_service`)
 
+Текущая модель запуска разделена:
+- Superset поднимается отдельно через `superset/docker-compose-image-tag.yml`
+- этот каталог запускает только ассистентский UI/backend слой
+
 ## Как запустить
 1. Скопируйте `.env.example` в `.env` и заполните:
    - `OPENAI_API_KEY` — ключ OpenAI
@@ -30,6 +34,24 @@
 4. Откройте `http://localhost:8051`:
    - сначала появится экран `Вход / Регистрация` (логин+пароль, без SMS/2FA),
    - после авторизации откроется основной интерфейс ассистента.
+
+## Docker-режим ассистента
+
+Сборка выполняется из корня репозитория:
+
+```bash
+cd /home/superset_ai
+docker build -t ai_superset -f superset-ai-assistant-mcp/Dockerfile .
+docker run --rm -p 8051:8051 --env-file superset-ai-assistant-mcp/.env ai_superset
+```
+
+Проверенный факт:
+- образ собирается и поднимает Streamlit UI на `:8051`
+
+Важно:
+- этот образ не поднимает Superset
+- этот образ не содержит код `superset.mcp_service`
+- для контейнерного запуска ассистента обычно нужен либо `built_in_http`, либо явный `SUPERSET_BUILT_IN_MCP_COMMAND`
 
 ## Как пользоваться
 - В `sidebar` есть кнопки навигации по окнам: `Чат`, `US1`, `US2`, `US3`, `US4`, `US5`, `US13`, `US14`, `US15`.
@@ -97,6 +119,9 @@
 - Для `built_in_http`:
   - задайте `SUPERSET_BUILT_IN_MCP_URL`,
   - проверьте, что endpoint built-in MCP доступен из среды ассистента.
+- Для отдельного assistant Docker image:
+  - не рассчитывайте на `built_in_stdio` без явного launcher,
+  - по умолчанию безопаснее документировать `built_in_http` или явно заданный stdio launcher.
 - Ошибка про ключ: убедитесь, что `OPENAI_API_KEY` есть в `.env`.
 - Ошибка `GRAPH_RECURSION_LIMIT`: увеличьте `AI_AGENT_MAX_STEPS` и `AI_AGENT_RECURSION_LIMIT` в `.env`.
 - Ошибка `429 rate_limit_exceeded`: используйте `OPENAI_MODEL=gpt-4o-mini`, уменьшите контекст (`AI_AGENT_HISTORY_*`, `AI_AGENT_CONTEXT_CHARS`) и повторите запрос после cooldown.

@@ -272,6 +272,23 @@ def build_session_reset_state(new_session_id: str | None) -> dict[str, Any]:
     return clone_state_values(values)
 
 
+def build_feedback_state(
+    *,
+    status_key: str,
+    error_key: str,
+    status_message: str = "",
+    error_message: str = "",
+    extra_values: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    values: dict[str, Any] = {
+        status_key: status_message,
+        error_key: error_message,
+    }
+    if extra_values:
+        values.update(extra_values)
+    return clone_state_values(values)
+
+
 def build_logout_state() -> dict[str, Any]:
     values = build_session_reset_state(new_session_id=None)
     values.update(

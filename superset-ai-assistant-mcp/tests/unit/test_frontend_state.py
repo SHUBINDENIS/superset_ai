@@ -3,6 +3,7 @@ import unittest
 from frontend.state import (
     APP_STATE_DEFAULTS,
     build_authenticated_state,
+    build_feedback_state,
     build_logout_state,
     build_session_reset_state,
     ensure_state_defaults,
@@ -57,6 +58,30 @@ class TestFrontendState(unittest.TestCase):
         self.assertEqual(state["auth_token"], "")
         self.assertIsNone(state["session_id"])
         self.assertEqual(state["messages"], [])
+
+    def test_build_feedback_state_sets_status_and_extra_values(self):
+        state = build_feedback_state(
+            status_key="us15_status_message",
+            error_key="us15_error_message",
+            status_message="done",
+            extra_values={"us15_result": {"chart_id": 5}},
+        )
+
+        self.assertEqual(state["us15_status_message"], "done")
+        self.assertEqual(state["us15_error_message"], "")
+        self.assertEqual(state["us15_result"], {"chart_id": 5})
+
+    def test_build_feedback_state_copies_mutable_extra_values(self):
+        payload = {"items": ["a"]}
+
+        state = build_feedback_state(
+            status_key="status",
+            error_key="error",
+            extra_values={"payload": payload},
+        )
+        payload["items"].append("b")
+
+        self.assertEqual(state["payload"], {"items": ["a"]})
 
 
 if __name__ == "__main__":

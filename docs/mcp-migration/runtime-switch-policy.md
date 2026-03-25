@@ -57,6 +57,14 @@ Supported override env vars:
 Use these to point the assistant at a known-good launcher script or wrapper command
 for the built-in MCP service.
 
+Deployment note:
+
+- the standalone assistant Docker image in `superset-ai-assistant-mcp/` does not
+  bundle the Superset source tree
+- in that image, `built_in_stdio` therefore requires an explicit launcher
+  override or a custom image that contains `superset.mcp_service`
+- if such a launcher is not available, use `built_in_http`
+
 If no explicit command override is provided, the assistant uses the direct Python
 module strategy:
 

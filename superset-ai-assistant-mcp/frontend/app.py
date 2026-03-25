@@ -42,6 +42,7 @@ from frontend.state import (
     WINDOW_US15,
     apply_state_patch,
     build_authenticated_state,
+    build_feedback_state,
     build_logout_state,
     build_session_reset_state,
     ensure_state_defaults,
@@ -270,6 +271,35 @@ def _persist_chat_message(role: str, content: str) -> None:
         pass
 
 
+def _set_feedback(
+    *,
+    status_key: str,
+    error_key: str,
+    status_message: str = "",
+    error_message: str = "",
+    extra_values: Optional[Dict[str, Any]] = None,
+) -> None:
+    apply_state_patch(
+        st.session_state,
+        build_feedback_state(
+            status_key=status_key,
+            error_key=error_key,
+            status_message=status_message,
+            error_message=error_message,
+            extra_values=extra_values,
+        ),
+    )
+
+
+def _render_feedback(status_key: str, error_key: str) -> None:
+    error_message = str(st.session_state.get(error_key, "")).strip()
+    status_message = str(st.session_state.get(status_key, "")).strip()
+    if error_message:
+        st.error(error_message)
+    elif status_message:
+        st.success(status_message)
+
+
 def _apply_authenticated_state(auth_result: Dict[str, Any], *, persist_cookie: bool = True) -> None:
     username = str(auth_result.get("username", "")).strip()
     role = str(auth_result.get("role", "")).strip() or "analyst"
@@ -402,6 +432,30 @@ def _queue_message(text: str, switch_to_chat: bool = True) -> None:
     st.session_state.pending_input = clean
     if switch_to_chat:
         st.session_state.active_window = WINDOW_CHAT
+
+
+async def _get_session_agent(
+    session_id: str,
+    username: str,
+    *,
+    create_if_missing: bool,
+) -> tuple[Any, bool]:
+    manager = get_session_manager()
+    try:
+        agent = await manager.get_agent(session_id, owner=username)
+    except PermissionError as exc:
+        raise RuntimeError("Доступ к сессии запрещён.") from exc
+
+    created = False
+    if not agent and create_if_missing:
+        try:
+            agent = await manager.get_or_create_agent(session_id, owner=username)
+        except PermissionError as exc:
+            raise RuntimeError("Доступ к сессии запрещён.") from exc
+        created = agent is not None
+
+    return agent, created
+
 
 def sidebar():
     with st.sidebar:
@@ -3087,10 +3141,7 @@ def render_us13_window():
         "запустите preview и получите объяснение полей."
     )
 
-    if st.session_state.us13_error_message:
-        st.error(st.session_state.us13_error_message)
-    elif st.session_state.us13_status_message:
-        st.success(st.session_state.us13_status_message)
+    _render_feedback("us13_status_message", "us13_error_message")
 
     action_col1, action_col2, action_col3 = st.columns(3)
     with action_col1:
@@ -3104,14 +3155,18 @@ def render_us13_window():
         try:
             databases = _refresh_us13_databases()
             datasets = _refresh_us13_datasets()
-            st.session_state.us13_error_message = ""
-            st.session_state.us13_status_message = (
-                f"Источники обновлены: БД={len(databases)}, датасетов={len(datasets)}."
+            _set_feedback(
+                status_key="us13_status_message",
+                error_key="us13_error_message",
+                status_message=f"Источники обновлены: БД={len(databases)}, датасетов={len(datasets)}.",
             )
             st.rerun()
         except Exception as exc:
-            st.session_state.us13_status_message = ""
-            st.session_state.us13_error_message = str(exc)
+            _set_feedback(
+                status_key="us13_status_message",
+                error_key="us13_error_message",
+                error_message=str(exc),
+            )
             st.rerun()
 
     if not st.session_state.get("us13_databases"):
@@ -3250,12 +3305,18 @@ def render_us13_window():
                 preview_limit=int(st.session_state.get("us13_preview_limit", 20) or 20),
             )
             st.session_state.us13_sql = sql_text
-            st.session_state.us13_error_message = ""
-            st.session_state.us13_status_message = "SQL-шаблон подставлен."
+            _set_feedback(
+                status_key="us13_status_message",
+                error_key="us13_error_message",
+                status_message="SQL-шаблон подставлен.",
+            )
             st.rerun()
         except Exception as exc:
-            st.session_state.us13_status_message = ""
-            st.session_state.us13_error_message = str(exc)
+            _set_feedback(
+                status_key="us13_status_message",
+                error_key="us13_error_message",
+                error_message=str(exc),
+            )
             st.rerun()
 
     st.markdown("### SQL и запуск")
@@ -3273,12 +3334,18 @@ def render_us13_window():
         limit = int(st.session_state.get("us13_preview_limit", 20) or 20)
 
         if database_id <= 0:
-            st.session_state.us13_status_message = ""
-            st.session_state.us13_error_message = "Выберите database_id для предпросмотра."
+            _set_feedback(
+                status_key="us13_status_message",
+                error_key="us13_error_message",
+                error_message="Выберите database_id для предпросмотра.",
+            )
             st.rerun()
         if not sql:
-            st.session_state.us13_status_message = ""
-            st.session_state.us13_error_message = "SQL не должен быть пустым."
+            _set_feedback(
+                status_key="us13_status_message",
+                error_key="us13_error_message",
+                error_message="SQL не должен быть пустым.",
+            )
             st.rerun()
 
         try:
@@ -3290,13 +3357,16 @@ def render_us13_window():
                     schema=schema,
                     preview_limit=limit,
                 )
-            st.session_state.us13_preview_result = preview
-            st.session_state.us13_error_message = ""
-            st.session_state.us13_status_message = (
-                f"Preview готов: {preview.get('rows_count', 0)} строк."
+            _set_feedback(
+                status_key="us13_status_message",
+                error_key="us13_error_message",
+                status_message=f"Preview готов: {preview.get('rows_count', 0)} строк.",
+                extra_values={
+                    "us13_preview_result": preview,
+                    "us13_column_focus": "",
+                    "us13_column_type_filter": "all",
+                },
             )
-            st.session_state.us13_column_focus = ""
-            st.session_state.us13_column_type_filter = "all"
 
             columns = preview.get("columns", [])
             numeric = [c["column"] for c in columns if c.get("inferred_type") == "numeric"]
@@ -3317,8 +3387,11 @@ def render_us13_window():
                 st.session_state.us15_time_column = temporal[0]
             st.rerun()
         except Exception as exc:
-            st.session_state.us13_status_message = ""
-            st.session_state.us13_error_message = str(exc)
+            _set_feedback(
+                status_key="us13_status_message",
+                error_key="us13_error_message",
+                error_message=str(exc),
+            )
             st.rerun()
 
     preview = st.session_state.get("us13_preview_result")
@@ -3519,10 +3592,7 @@ def render_us14_window():
         "На основе предпросмотра выбираем подходящий тип графика и сразу применяем его в конструкторе/виджете."
     )
 
-    if st.session_state.us14_error_message:
-        st.error(st.session_state.us14_error_message)
-    elif st.session_state.us14_status_message:
-        st.success(st.session_state.us14_status_message)
+    _render_feedback("us14_status_message", "us14_error_message")
 
     preview = st.session_state.get("us13_preview_result")
     if not isinstance(preview, dict):
@@ -3596,9 +3666,12 @@ def render_us14_window():
         clear_btn = st.button("Сбросить рекомендацию", use_container_width=True)
 
     if clear_btn:
-        st.session_state.us14_recommendation = None
-        st.session_state.us14_status_message = "Рекомендация очищена."
-        st.session_state.us14_error_message = ""
+        _set_feedback(
+            status_key="us14_status_message",
+            error_key="us14_error_message",
+            status_message="Рекомендация очищена.",
+            extra_values={"us14_recommendation": None},
+        )
         st.rerun()
 
     if recommend_btn:
@@ -3613,14 +3686,20 @@ def render_us14_window():
             )
             st.session_state.us14_recommendation = recommendation
             recommended = str(recommendation.get("recommended", "table")).strip() or "table"
-            st.session_state.us14_error_message = ""
-            st.session_state.us14_status_message = f"Рекомендуемый тип: {recommended}."
+            _set_feedback(
+                status_key="us14_status_message",
+                error_key="us14_error_message",
+                status_message=f"Рекомендуемый тип: {recommended}.",
+            )
             st.session_state.us5_chart_type = recommended
             st.session_state.us15_viz_type = recommended
             st.rerun()
         except Exception as exc:
-            st.session_state.us14_status_message = ""
-            st.session_state.us14_error_message = str(exc)
+            _set_feedback(
+                status_key="us14_status_message",
+                error_key="us14_error_message",
+                error_message=str(exc),
+            )
             st.rerun()
 
     recommendation = st.session_state.get("us14_recommendation")
@@ -3692,10 +3771,11 @@ def render_us14_window():
             if st.button("Применить тип", use_container_width=True):
                 st.session_state.us5_chart_type = apply_type
                 st.session_state.us15_viz_type = apply_type
-                st.session_state.us14_status_message = (
-                    f"Тип '{apply_type}' применён в Конструкторе и Виджете."
+                _set_feedback(
+                    status_key="us14_status_message",
+                    error_key="us14_error_message",
+                    status_message=f"Тип '{apply_type}' применён в Конструкторе и Виджете.",
                 )
-                st.session_state.us14_error_message = ""
                 st.rerun()
         with apply_col2:
             if st.button("Перейти к созданию виджета", use_container_width=True):
@@ -3709,10 +3789,7 @@ def render_us15_window():
         "Создайте chart на основе выбранного датасета, привяжите его к dashboard и получите ссылки для открытия."
     )
 
-    if st.session_state.us15_error_message:
-        st.error(st.session_state.us15_error_message)
-    elif st.session_state.us15_status_message:
-        st.success(st.session_state.us15_status_message)
+    _render_feedback("us15_status_message", "us15_error_message")
 
     top_col1, top_col2, top_col3 = st.columns(3)
     with top_col1:
@@ -3723,20 +3800,29 @@ def render_us15_window():
         create_widget_btn = st.button("Создать виджет", use_container_width=True)
 
     if clear_result_btn:
-        st.session_state.us15_result = None
-        st.session_state.us15_status_message = "Результат очищен."
-        st.session_state.us15_error_message = ""
+        _set_feedback(
+            status_key="us15_status_message",
+            error_key="us15_error_message",
+            status_message="Результат очищен.",
+            extra_values={"us15_result": None},
+        )
         st.rerun()
 
     if refresh_datasets_btn:
         try:
             datasets = _refresh_us15_datasets()
-            st.session_state.us15_error_message = ""
-            st.session_state.us15_status_message = f"Датасетов получено: {len(datasets)}."
+            _set_feedback(
+                status_key="us15_status_message",
+                error_key="us15_error_message",
+                status_message=f"Датасетов получено: {len(datasets)}.",
+            )
             st.rerun()
         except Exception as exc:
-            st.session_state.us15_status_message = ""
-            st.session_state.us15_error_message = str(exc)
+            _set_feedback(
+                status_key="us15_status_message",
+                error_key="us15_error_message",
+                error_message=str(exc),
+            )
             st.rerun()
 
     if not st.session_state.get("us15_datasets"):
@@ -3895,8 +3981,11 @@ def render_us15_window():
     if create_widget_btn:
         dataset_id = int(st.session_state.get("us15_dataset_id", 0) or 0)
         if dataset_id <= 0:
-            st.session_state.us15_status_message = ""
-            st.session_state.us15_error_message = "Выберите dataset_id для создания chart."
+            _set_feedback(
+                status_key="us15_status_message",
+                error_key="us15_error_message",
+                error_message="Выберите dataset_id для создания chart.",
+            )
             st.rerun()
         try:
             svc = get_us13_15_viz_service()
@@ -3912,13 +4001,19 @@ def render_us15_window():
                     row_limit=int(st.session_state.us15_row_limit),
                     description=st.session_state.us15_description,
                 )
-            st.session_state.us15_result = result
-            st.session_state.us15_error_message = ""
-            st.session_state.us15_status_message = "Виджет создан и привязан к дашборду."
+            _set_feedback(
+                status_key="us15_status_message",
+                error_key="us15_error_message",
+                status_message="Виджет создан и привязан к дашборду.",
+                extra_values={"us15_result": result},
+            )
             st.rerun()
         except Exception as exc:
-            st.session_state.us15_status_message = ""
-            st.session_state.us15_error_message = str(exc)
+            _set_feedback(
+                status_key="us15_status_message",
+                error_key="us15_error_message",
+                error_message=str(exc),
+            )
             st.rerun()
 
     result = st.session_state.get("us15_result")
@@ -3952,7 +4047,6 @@ def render_us15_window():
 
 # --- Backend interaction -----------------------------------------------------
 async def ensure_session():
-    manager = get_session_manager()
     auth_service = get_auth_service()
     username = _current_username()
     if not username:
@@ -3966,15 +4060,15 @@ async def ensure_session():
         st.session_state.agent_initialized = False
 
     try:
-        agent = await manager.get_agent(st.session_state.session_id, owner=username)
-    except PermissionError:
-        return False, "Доступ к сессии запрещён."
-
+        agent, _ = await _get_session_agent(
+            st.session_state.session_id,
+            username,
+            create_if_missing=True,
+        )
+    except RuntimeError as exc:
+        return False, str(exc)
     if not agent:
-        try:
-            agent = await manager.get_or_create_agent(st.session_state.session_id, owner=username)
-        except PermissionError:
-            return False, "Доступ к сессии запрещён."
+        return False, "Не удалось получить сессию агента."
 
     if not st.session_state.agent_initialized:
         with st.spinner("Инициализация агента..."):
@@ -3987,7 +4081,6 @@ async def ensure_session():
 
 
 async def handle_message(text: str):
-    manager = get_session_manager()
     username = _current_username()
     if not username:
         raise ValueError("User is not authenticated.")
@@ -3996,13 +4089,14 @@ async def handle_message(text: str):
     if not session_id:
         raise ValueError("Session ID is missing.")
 
-    try:
-        agent = await manager.get_agent(session_id, owner=username)
-    except PermissionError as exc:
-        raise RuntimeError("Доступ к сессии запрещён.") from exc
-
+    agent, created = await _get_session_agent(
+        session_id,
+        username,
+        create_if_missing=True,
+    )
     if not agent:
-        agent = await manager.get_or_create_agent(session_id, owner=username)
+        raise RuntimeError("Не удалось получить сессию агента.")
+    if created:
         if not st.session_state.get("agent_initialized"):
             ok = await agent.initialize()
             if not ok:
