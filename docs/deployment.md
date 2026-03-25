@@ -96,7 +96,7 @@ flowchart TB
 
 ## 6) Переменные окружения, критичные для развёртывания
 
-Основные переменные (см. `superset-ai-assistant-mcp/.env.example`):
+Основные переменные (см. `superset-ai-assistant-mcp/.env.example` или `supersetai-assistant-mcp/.env`):
 
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`

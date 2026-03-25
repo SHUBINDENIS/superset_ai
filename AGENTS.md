@@ -145,6 +145,7 @@ Suggested new paths:
 - `docs/mcp-migration/legacy-contract.md`
 - `docs/mcp-migration/tool-matrix.csv`
 - `docs/mcp-migration/CODEX_MIGRATION_CHECKLIST.md`
+- `docs/mcp-migration/IMPORTANT_LEGACY_RELIABILITY_NOTE.md`
 - `superset-ai-assistant-mcp/backend/mcp_client/`
 - `superset-ai-assistant-mcp/tests/unit/mcp_client/`
 - `tests/integration/mcp_migration/`
