@@ -11,6 +11,11 @@
 - Superset поднимается отдельно через `superset/docker-compose-image-tag.yml`
 - этот каталог запускает только ассистентский UI/backend слой
 
+Также в корне репозитория есть optional unified local dev stack:
+- `docker-compose.dev.yml`
+- он поднимает Superset + built-in MCP HTTP + assistant одной командой
+- он не заменяет split deployment, а лишь упрощает локальный dev/demo запуск
+
 ## Как запустить
 1. Скопируйте `.env.example` в `.env` и заполните:
    - `OPENAI_API_KEY` — ключ OpenAI
@@ -53,6 +58,25 @@ docker run --rm -p 8051:8051 --env-file superset-ai-assistant-mcp/.env ai_supers
 - этот образ не поднимает Superset
 - этот образ не содержит код `superset.mcp_service`
 - для контейнерного запуска ассистента обычно нужен либо `built_in_http`, либо явный `SUPERSET_BUILT_IN_MCP_COMMAND`
+
+## Unified local dev stack
+
+Для удобного локального dev/demo запуска из корня репозитория:
+
+```bash
+cd /home/superset_ai
+cp .env.dev.example .env.dev
+docker compose --env-file .env.dev -f docker-compose.dev.yml up -d
+```
+
+Этот сценарий:
+- оставляет текущую split-модель основной
+- поднимает `superset`, `mcp-http`, `assistant`, `db`, `redis`, `superset-init`
+- подключает ассистент к built-in MCP по HTTP
+
+Если порты заняты локально, переопределите в `.env.dev`:
+- `DEV_SUPERSET_PORT`
+- `DEV_ASSISTANT_PORT`
 
 ## Как пользоваться
 - В `sidebar` есть кнопки навигации по окнам: `Чат`, `US1`, `US2`, `US3`, `US4`, `US5`, `US13`, `US14`, `US15`.

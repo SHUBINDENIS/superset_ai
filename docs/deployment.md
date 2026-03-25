@@ -9,6 +9,7 @@
 - отдельный streaming backend больше не используется
 - Streamlit вызывает backend-модули и `AI Agent` внутри того же процесса
 - поддерживаемый Docker-сценарий остаётся split-моделью: Superset через compose, ассистент отдельным процессом/контейнером
+- дополнительно доступен optional unified local dev stack через `docker-compose.dev.yml`
 - Celery worker/beat оставлены только как опциональный профиль для фоновых задач Superset, а не как обязательная часть базового запуска проекта
 
 ## 1) Диаграмма развёртывания
@@ -128,12 +129,49 @@ flowchart TB
    - `http://<host>:8088` (Superset)
    - `http://<host>:8051` (Assistant)
 
-## 8) Ограничения текущего deployment
+## 8) Опциональный unified local dev stack
+
+Этот вариант предназначен для локальной разработки/демо одной командой и не заменяет split-модель как базовый deployment.
+
+Состав:
+- `db`
+- `redis`
+- `superset-init`
+- `superset`
+- `mcp-http`
+- `assistant`
+- optional profile `async`: `superset-worker`, `superset-worker-beat`
+
+Ключевое решение:
+- MCP для ассистента подключается по `built_in_http`
+- `assistant` использует `SUPERSET_BUILT_IN_MCP_URL=http://mcp-http:5008/mcp/`
+- контейнер `mcp-http` запускает built-in MCP из локального дерева `superset/`, а не из assistant image
+
+Запуск:
+```bash
+cd /home/superset_ai
+cp .env.dev.example .env.dev
+docker compose --env-file .env.dev -f docker-compose.dev.yml up -d
+```
+
+Проверка:
+```bash
+docker compose --env-file .env.dev -f docker-compose.dev.yml ps
+curl -I http://127.0.0.1:8088
+curl -I http://127.0.0.1:8051
+```
+
+Примечания:
+- по умолчанию используется `SUPERSET_LOAD_EXAMPLES=no`, чтобы первый запуск не зависал на загрузке sample datasets
+- если локально уже занят `8088` или `8051`, задайте `DEV_SUPERSET_PORT` и `DEV_ASSISTANT_PORT` в `.env.dev`
+- verified path: compose config, container startup, HTTP-ответы Superset и assistant, и подключение assistant runtime к built-in MCP endpoint внутри compose-сети
+
+## 9) Ограничения текущего deployment
 
 - Конфигурация ориентирована на MVP/демо и учебный контур.
 - Для production требуются отдельные меры: TLS, секреты, hardening, отказоустойчивость, мониторинг/алертинг, backup-политики.
 
-## 9) Как показать текущий HTTP-only assistant path на практике
+## 10) Как показать текущий HTTP-only assistant path на практике
 
 1. Поднять `Streamlit` и открыть `http://<host>:8051`.
 2. Пройти авторизацию.

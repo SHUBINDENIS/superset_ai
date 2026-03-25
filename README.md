@@ -37,6 +37,12 @@
   - `requirements.txt`, `Dockerfile`, `.env.example`.
 - `.github/workflows/ci.yml`
   - CI workflow: автоматический запуск линтеров.
+- `docker-compose.dev.yml`
+  - опциональный unified local dev stack для Superset + built-in MCP HTTP + assistant.
+- `docker/dev/`
+  - dev-only helper scripts и overrides для unified compose stack.
+- `.env.dev.example`
+  - пример переменных окружения для `docker-compose.dev.yml`.
 - `ruff.toml`
   - конфигурация линтера Ruff.
 - `superset-mcp/`
@@ -64,6 +70,13 @@
 
 Ассистент не входит в текущий `docker compose` стек Superset.
 `superset-worker` и `superset-worker-beat` больше не считаются обязательной частью базового проекта; они оставлены как opt-in профиль для фоновых задач Superset.
+
+Дополнительно есть **опциональный** unified local dev stack:
+
+- файл: `docker-compose.dev.yml`
+- цель: локальный демо/дев-контур одной командой
+- модель MCP: `built_in_http`
+- baseline split deployment при этом остаётся основной и поддерживаемой схемой
 
 ## Быстрый запуск (рекомендуемый порядок)
 Сначала запускается Superset, затем отдельно запускается ассистент.
@@ -145,6 +158,45 @@ curl -I http://127.0.0.1:8051
 - он не поднимает Superset и не включает в себя код `superset.mcp_service`
 - для рабочего MCP-подключения внутри такого контейнера нужен либо доступный `built_in_http` endpoint, либо явно заданный stdio launcher
 
+### 5) Опциональный unified local dev stack
+Этот сценарий добавлен для локальной разработки и демо, но не заменяет split deployment.
+
+Что поднимает `docker-compose.dev.yml`:
+- `db`
+- `redis`
+- `superset-init`
+- `superset`
+- `mcp-http`
+- `assistant`
+- опционально: `superset-worker`, `superset-worker-beat` через профиль `async`
+
+Как запустить:
+```bash
+cd /home/superset_ai
+cp .env.dev.example .env.dev
+docker compose --env-file .env.dev -f docker-compose.dev.yml up -d
+```
+
+Проверка:
+```bash
+docker compose --env-file .env.dev -f docker-compose.dev.yml ps
+curl -I http://127.0.0.1:8088
+curl -I http://127.0.0.1:8051
+```
+
+Что реально проверено:
+- `docker compose -f docker-compose.dev.yml config`
+- unified stack стартует в контейнерах
+- Superset отвечает на HTTP
+- Streamlit assistant отвечает на HTTP
+- assistant runtime подключается к built-in MCP по `http://mcp-http:5008/mcp/`
+
+Важные детали:
+- unified stack использует `SUPERSET_PRODUCT_MCP_RUNTIME=built_in_http`
+- `mcp-http` запускает built-in MCP из локального дерева `superset/`, примонтированного в dev-контур
+- по умолчанию рекомендуется `SUPERSET_LOAD_EXAMPLES=no`, чтобы первый `up -d` был быстрее и детерминированнее
+- если `8088` или `8051` уже заняты, задайте `DEV_SUPERSET_PORT` и `DEV_ASSISTANT_PORT` в `.env.dev`
+
 ## Линтеры и CI
 В репозитории настроен рабочий pipeline/workflow для автоматического запуска линтеров:
 
@@ -186,6 +238,7 @@ PYTHONPATH=./superset-ai-assistant-mcp python -m unittest discover -s superset-a
 - Ошибка built-in MCP запуска в assistant Docker image: image не содержит исходники Superset, поэтому для `built_in_stdio` нужен явный launcher; без него используйте `built_in_http`.
 - Ошибка built-in MCP запуска в локальном процессе: либо обеспечьте доступность `python -m superset.mcp_service` в текущей среде, либо задайте `SUPERSET_BUILT_IN_MCP_COMMAND` и при необходимости `SUPERSET_BUILT_IN_MCP_ARGS`.
 - Для HTTP-транспорта задайте `SUPERSET_PRODUCT_MCP_RUNTIME=built_in_http` и `SUPERSET_BUILT_IN_MCP_URL`.
+- Для unified local dev stack используйте `docker compose --env-file .env.dev -f docker-compose.dev.yml up -d`; если host-порты заняты, переопределите `DEV_SUPERSET_PORT` и `DEV_ASSISTANT_PORT`.
 - Пустые списки таблиц/датасетов: убедиться, что в Superset созданы подключения БД и datasets.
 
 ## Вклад команды

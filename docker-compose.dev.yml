@@ -1,0 +1,164 @@
+name: superset_ai_dev
+
+x-superset-image: &superset-image apachesuperset.docker.scarf.sh/apache/superset:${TAG:-latest-dev}
+x-superset-env: &superset-env
+  env_file:
+    - path: ./superset/docker/.env
+      required: true
+    - path: ./superset/docker/.env-local
+      required: false
+  environment:
+    SUPERSET_LOAD_EXAMPLES: ${SUPERSET_LOAD_EXAMPLES:-no}
+x-superset-volumes: &superset-volumes
+  - ./superset/docker:/app/docker
+  - ./superset/pyproject.toml:/app/pyproject.toml:ro
+  - ./superset/uv.lock:/app/uv.lock:ro
+  - ./superset/superset-core:/app/superset-core
+  - ./superset/superset:/app/pythonpath/superset:ro
+  - ./docker/dev:/app/docker/dev:ro
+  - ./docker/dev/superset_config_docker.py:/app/docker/pythonpath_dev/superset_config_docker.py:ro
+  - ./docker/dev/requirements-local.txt:/app/docker/requirements-local.txt:ro
+  - superset_dev_home:/app/superset_home
+
+services:
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    volumes:
+      - redis_dev:/data
+
+  db:
+    <<: *superset-env
+    image: postgres:16
+    restart: unless-stopped
+    volumes:
+      - db_dev_home:/var/lib/postgresql/data
+      - ./superset/docker/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d
+
+  superset-init:
+    <<: *superset-env
+    image: *superset-image
+    command: ["/app/docker/dev/docker-init-with-sentinel.sh"]
+    depends_on:
+      db:
+        condition: service_started
+      redis:
+        condition: service_started
+    user: "root"
+    volumes: *superset-volumes
+    healthcheck:
+      disable: true
+
+  superset:
+    <<: *superset-env
+    image: *superset-image
+    command:
+      - /app/docker/dev/wait-for-init-and-run.sh
+      - /app/docker/docker-bootstrap.sh
+      - app-gunicorn
+    depends_on:
+      db:
+        condition: service_started
+      redis:
+        condition: service_started
+    user: "root"
+    restart: unless-stopped
+    ports:
+      - "${DEV_SUPERSET_PORT:-8088}:8088"
+    volumes: *superset-volumes
+    healthcheck:
+      test:
+        ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8088/health', timeout=5)\""]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  mcp-http:
+    <<: *superset-env
+    image: *superset-image
+    command:
+      - /app/docker/dev/wait-for-init-and-run.sh
+      - /app/docker/dev/start-mcp-http.sh
+    depends_on:
+      db:
+        condition: service_started
+      redis:
+        condition: service_started
+    user: "root"
+    restart: unless-stopped
+    environment:
+      FASTMCP_TRANSPORT: streamable-http
+      FASTMCP_HOST: 0.0.0.0
+      FASTMCP_PORT: "5008"
+    volumes: *superset-volumes
+    healthcheck:
+      test:
+        ["CMD-SHELL", "python -c \"import socket; s=socket.create_connection(('127.0.0.1', 5008), 5); s.close()\""]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
+  superset-worker:
+    <<: *superset-env
+    image: *superset-image
+    profiles: ["async"]
+    command: ["/app/docker/docker-bootstrap.sh", "worker"]
+    depends_on:
+      superset-init:
+        condition: service_completed_successfully
+    user: "root"
+    restart: unless-stopped
+    volumes: *superset-volumes
+
+  superset-worker-beat:
+    <<: *superset-env
+    image: *superset-image
+    profiles: ["async"]
+    command: ["/app/docker/docker-bootstrap.sh", "beat"]
+    depends_on:
+      superset-init:
+        condition: service_completed_successfully
+    user: "root"
+    restart: unless-stopped
+    volumes: *superset-volumes
+
+  assistant:
+    build:
+      context: .
+      dockerfile: superset-ai-assistant-mcp/Dockerfile
+    depends_on:
+      superset:
+        condition: service_healthy
+      mcp-http:
+        condition: service_healthy
+    restart: unless-stopped
+    ports:
+      - "${DEV_ASSISTANT_PORT:-8051}:8051"
+    environment:
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-replace_me}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      SUPERSET_PRODUCT_MCP_RUNTIME: built_in_http
+      SUPERSET_BUILT_IN_MCP_URL: http://mcp-http:5008/mcp/
+      SUPERSET_BASE_URL: http://superset:8088
+      SUPERSET_PUBLIC_URL: ${SUPERSET_PUBLIC_URL:-http://localhost:8088}
+      US15_SHARE_BASE_URL: ${SUPERSET_PUBLIC_URL:-http://localhost:8088}
+      AUTH_DB_PATH: /app/superset-ai-assistant-mcp/data/auth.db
+      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-secret-change-me}
+      AUTH_JWT_TTL_HOURS: ${AUTH_JWT_TTL_HOURS:-12}
+      AUTH_PASSWORD_MIN_LENGTH: ${AUTH_PASSWORD_MIN_LENGTH:-8}
+      AUTH_HISTORY_MAX_MESSAGES: ${AUTH_HISTORY_MAX_MESSAGES:-500}
+      GLOSSARY_DB_PATH: /app/superset-ai-assistant-mcp/data/glossary.db
+      US3_RULES_DB_PATH: /app/superset-ai-assistant-mcp/data/us3_mapping_rules.db
+      US5_DB_PATH: /app/superset-ai-assistant-mcp/data/us5_query_builder.db
+      US10_12_DB_PATH: /app/superset-ai-assistant-mcp/data/us10_12_guardrails.db
+      STREAMLIT_PORT: "8051"
+    volumes:
+      - assistant_dev_data:/app/superset-ai-assistant-mcp/data
+
+volumes:
+  superset_dev_home:
+  db_dev_home:
+  redis_dev:
+  assistant_dev_data:
