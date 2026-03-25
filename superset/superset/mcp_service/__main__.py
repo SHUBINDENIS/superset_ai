@@ -41,9 +41,6 @@ if os.environ.get("FASTMCP_TRANSPORT", "stdio") == "stdio":
     click.secho = secho_to_stderr
     click.echo = lambda *args, **kwargs: click.echo(*args, file=sys.stderr, **kwargs)
 
-from superset.mcp_service.app import init_fastmcp_server, mcp
-
-
 def main() -> None:
     """
     Run the MCP service in stdio mode with proper output suppression.
@@ -93,6 +90,8 @@ def main() -> None:
 
         # Temporarily redirect stdout during Flask app creation
         with contextlib.redirect_stdout(captured_output):
+            from superset.mcp_service.app import init_fastmcp_server, mcp
+
             flask_app = get_flask_app()
             # Initialize the FastMCP server
             # Disable auth config for stdio mode to avoid Flask app output
@@ -116,6 +115,8 @@ def main() -> None:
                 sys.stderr.write(f"[MCP] Client disconnected: {e}\n")
                 sys.exit(0)
     else:
+        from superset.mcp_service.app import init_fastmcp_server, mcp
+
         # For other transports, use normal initialization
         init_fastmcp_server()
 
@@ -123,6 +124,7 @@ def main() -> None:
         if transport == "streamable-http":
             host = os.environ.get("FASTMCP_HOST", "127.0.0.1")
             port = int(os.environ.get("FASTMCP_PORT", "5008"))
+            os.environ.setdefault("FASTMCP_STATELESS_HTTP", "true")
             mcp.run(transport=transport, host=host, port=port)
         else:
             mcp.run(transport=transport)

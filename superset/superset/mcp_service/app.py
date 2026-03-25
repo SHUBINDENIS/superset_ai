@@ -259,8 +259,18 @@ def create_mcp_app(
     return mcp_instance
 
 
-# Create default MCP instance for backward compatibility
-mcp = create_mcp_app(stateless_http=True)
+# Create default MCP instance for backward compatibility.
+# HTTP statelessness is configured at server run time so stdio remains
+# compatible with both FastMCP 2.x and 3.x.
+mcp = create_mcp_app()
+
+# Replace abstract decorators in superset-core before importing MCP modules
+# that register prompts and tools at import time.
+from superset.core.mcp.core_mcp_injection import (  # noqa: E402
+    initialize_core_mcp_dependencies,
+)
+
+initialize_core_mcp_dependencies()
 
 # Import all MCP tools to register them with the mcp instance
 # NOTE: Always add new tool imports here when creating new MCP tools.
