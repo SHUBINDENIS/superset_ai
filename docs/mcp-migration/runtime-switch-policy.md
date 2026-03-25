@@ -87,3 +87,18 @@ Legacy runtime code remains available because:
 - migration safety requires a controlled fallback until built-in checks are green
 
 Do not treat this note as approval to keep legacy as the long-term default.
+
+## Phase 5 Stabilization Status
+
+Current phase 5 assessment:
+
+- built-in MCP remains the default runtime
+- legacy remains temporary fallback only
+- `open_sql_lab_with_context` is now part of the validated target tool surface
+  and has live integration coverage
+- the remaining normal product runtime that still bypasses the unified MCP layer
+  is the US1 schema-profiler flow in
+  `superset-ai-assistant-mcp/backend/us1_schema_profiler.py`
+
+This means fallback removal is still blocked on the remaining direct-REST US1
+path and the final legacy cleanup pass.
