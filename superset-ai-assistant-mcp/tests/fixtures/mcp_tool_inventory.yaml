@@ -1,0 +1,108 @@
+tools:
+  - name: list_dashboards
+    layer: builtin
+    use_cases:
+      - browse_datasets_charts_dashboards
+    covered_by:
+      - superset-ai-assistant-mcp/tests/integration/mcp_client/test_built_in_live.py::TestBuiltInMCPLive.test_live_stdio_startup_and_core_readonly_tools
+  - name: get_dashboard_info
+    layer: builtin
+    use_cases:
+      - fetch_detailed_asset_info
+    covered_by:
+      - superset-ai-assistant-mcp/tests/integration/mcp_client/test_built_in_live.py::TestBuiltInMCPLive.test_live_stdio_startup_and_core_readonly_tools
+  - name: list_charts
+    layer: builtin
+    use_cases:
+      - browse_datasets_charts_dashboards
+    covered_by:
+      - superset-ai-assistant-mcp/tests/integration/mcp_client/test_built_in_live.py::TestBuiltInMCPLive.test_live_stdio_startup_and_core_readonly_tools
+  - name: get_chart_info
+    layer: builtin
+    use_cases:
+      - fetch_detailed_asset_info
+    covered_by:
+      - superset-ai-assistant-mcp/tests/integration/mcp_client/test_built_in_live.py::TestBuiltInMCPLive.test_live_stdio_startup_and_core_readonly_tools
+  - name: list_datasets
+    layer: builtin
+    use_cases:
+      - browse_datasets_charts_dashboards
+    covered_by:
+      - superset-ai-assistant-mcp/tests/integration/mcp_client/test_built_in_live.py::TestBuiltInMCPLive.test_live_stdio_startup_and_core_readonly_tools
+  - name: get_dataset_info
+    layer: builtin
+    use_cases:
+      - fetch_detailed_asset_info
+    covered_by:
+      - superset-ai-assistant-mcp/tests/integration/mcp_client/test_built_in_live.py::TestBuiltInMCPLive.test_live_stdio_startup_and_core_readonly_tools
+  - name: execute_sql
+    layer: builtin
+    use_cases:
+      - execute_sql
+      - dml_denied
+    covered_by:
+      - superset-ai-assistant-mcp/tests/unit/mcp_client/test_error_normalization.py::TestBuiltInClientErrorNormalization.test_normalizes_error_categories
+      - superset-ai-assistant-mcp/tests/integration/mcp_client/test_built_in_live.py::TestBuiltInMCPLive.test_live_stdio_startup_and_core_readonly_tools
+      - superset-ai-assistant-mcp/tests/test_us13_15_viz_service.py::TestUS13To15VizService.test_preview_sql_uses_execute_sql_through_mcp
+  - name: open_sql_lab_with_context
+    layer: builtin
+    use_cases:
+      - open_sql_lab_with_context
+    covered_by:
+      - superset-ai-assistant-mcp/tests/integration/mcp_client/test_built_in_live.py::TestBuiltInMCPLive.test_live_stdio_startup_and_core_readonly_tools
+  - name: generate_chart
+    layer: builtin
+    use_cases:
+      - generate_or_update_chart_flow
+    covered_by:
+      - superset-ai-assistant-mcp/tests/integration/mcp_client/test_built_in_live.py::TestBuiltInMCPLive.test_live_mutation_tools_and_product_service_flows
+      - superset-ai-assistant-mcp/tests/test_us13_15_viz_service.py::TestUS13To15VizService.test_create_dashboard_widget_with_share_uses_built_in_mcp_flow
+  - name: update_chart
+    layer: builtin
+    use_cases:
+      - generate_or_update_chart_flow
+    covered_by:
+      - superset-ai-assistant-mcp/tests/integration/mcp_client/test_built_in_live.py::TestBuiltInMCPLive.test_live_mutation_tools_and_product_service_flows
+  - name: generate_dashboard
+    layer: builtin
+    use_cases:
+      - generate_or_update_dashboard_flow
+    covered_by:
+      - superset-ai-assistant-mcp/tests/integration/mcp_client/test_built_in_live.py::TestBuiltInMCPLive.test_live_mutation_tools_and_product_service_flows
+  - name: add_chart_to_existing_dashboard
+    layer: builtin
+    use_cases:
+      - generate_or_update_dashboard_flow
+    covered_by:
+      - superset-ai-assistant-mcp/tests/integration/mcp_client/test_built_in_live.py::TestBuiltInMCPLive.test_live_mutation_tools_and_product_service_flows
+      - superset-ai-assistant-mcp/tests/test_us13_15_viz_service.py::TestUS13To15VizService.test_create_dashboard_widget_with_share_uses_built_in_mcp_flow
+  - name: generate_explore_link
+    layer: builtin
+    use_cases:
+      - explore_link_flow
+    covered_by:
+      - superset-ai-assistant-mcp/tests/integration/mcp_client/test_built_in_live.py::TestBuiltInMCPLive.test_live_mutation_tools_and_product_service_flows
+      - superset-ai-assistant-mcp/tests/test_us13_15_viz_service.py::TestUS13To15VizService.test_generate_explore_link_uses_built_in_tool
+  - name: mcp_ext.list_databases
+    layer: custom_extension
+    use_cases:
+      - browse_databases_for_scope
+    covered_by:
+      - superset/tests/unit_tests/mcp_service/extensions/tool/test_list_databases.py::test_list_databases_filters_to_accessible_results
+      - superset-ai-assistant-mcp/tests/integration/mcp_client/test_built_in_live.py::TestBuiltInMCPLive.test_live_stdio_startup_and_core_readonly_tools
+      - superset-ai-assistant-mcp/tests/test_us13_15_viz_service.py::TestUS13To15VizService.test_list_databases_uses_mcp_extension_instead_of_rest
+  - name: mcp_ext.create_empty_dashboard
+    layer: custom_extension
+    use_cases:
+      - generate_or_update_dashboard_flow
+    covered_by:
+      - superset/tests/unit_tests/mcp_service/extensions/tool/test_create_empty_dashboard.py::test_create_empty_dashboard_uses_empty_layout
+      - superset-ai-assistant-mcp/tests/integration/mcp_client/test_built_in_live.py::TestBuiltInMCPLive.test_live_mutation_tools_and_product_service_flows
+      - superset-ai-assistant-mcp/tests/test_us13_15_viz_service.py::TestUS13To15VizService.test_create_dashboard_widget_with_share_uses_built_in_mcp_flow
+  - name: mcp_ext.legacy_chart_create
+    layer: custom_extension
+    use_cases:
+      - generate_or_update_chart_flow
+    covered_by:
+      - superset/tests/unit_tests/mcp_service/extensions/tool/test_legacy_chart_create.py::test_legacy_chart_create_uses_server_side_command
+      - superset-ai-assistant-mcp/tests/test_us13_15_viz_service.py::TestUS13To15VizService.test_create_dashboard_widget_with_share_uses_compat_chart_extension_for_pie

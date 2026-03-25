@@ -177,6 +177,7 @@ class TestBuiltInMCPLive(unittest.IsolatedAsyncioTestCase):
                 "list_dashboards",
                 "get_dashboard_info",
                 "execute_sql",
+                "open_sql_lab_with_context",
                 "mcp_ext.list_databases",
                 "mcp_ext.create_empty_dashboard",
                 "mcp_ext.legacy_chart_create",
@@ -216,6 +217,23 @@ class TestBuiltInMCPLive(unittest.IsolatedAsyncioTestCase):
         first_dashboard = dashboard_items[0]
         dashboard_info = await self.client.get_dashboard_info(int(first_dashboard["id"]))
         self.assertEqual(int(dashboard_info["id"]), int(first_dashboard["id"]))
+
+        sql_lab_result = await self.client.open_sql_lab_with_context(
+            {
+                "database_connection_id": database_id,
+                "schema_name": str(first_dataset.get("schema") or ""),
+                "dataset_in_context": str(
+                    first_dataset.get("table_name")
+                    or dataset_info.get("table_name")
+                    or ""
+                ),
+                "title": "MCP SQL Lab Context",
+            }
+        )
+        self.assertIsNone(sql_lab_result.get("error"))
+        self.assertEqual(int(sql_lab_result["database_id"]), database_id)
+        self.assertIn("/sqllab?", str(sql_lab_result["url"]))
+        self.assertIn("dbid=", str(sql_lab_result["url"]))
 
         sql_result = await self.client.execute_sql(
             {

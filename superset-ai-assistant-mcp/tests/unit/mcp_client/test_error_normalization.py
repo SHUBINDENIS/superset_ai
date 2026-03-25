@@ -16,6 +16,12 @@ class FakeTransport(ToolTransport):
         return self.responses[tool_name]
 
 
+class FakeToolResult:
+    def __init__(self, structured_content, *, is_error=False):
+        self.structured_content = structured_content
+        self.isError = is_error
+
+
 class TestBuiltInClientErrorNormalization(unittest.IsolatedAsyncioTestCase):
     async def test_unwraps_single_result_mapping_for_info_tools(self):
         client = BuiltInMCPClient(
@@ -78,6 +84,26 @@ class TestBuiltInClientErrorNormalization(unittest.IsolatedAsyncioTestCase):
             await client.execute_sql({"database_id": 1, "sql": "SELECT 1"})
 
         self.assertEqual(ctx.exception.code, MCPErrorCode.TIMEOUT)
+
+    async def test_normalizes_is_error_results_into_typed_errors(self):
+        client = BuiltInMCPClient(
+            FakeTransport(
+                responses={
+                    "execute_sql": FakeToolResult(
+                        {
+                            "error": "Permission denied for database",
+                            "error_type": "PermissionError",
+                        },
+                        is_error=True,
+                    )
+                }
+            )
+        )
+
+        with self.assertRaises(MCPClientError) as ctx:
+            await client.execute_sql({"database_id": 1, "sql": "SELECT 1"})
+
+        self.assertEqual(ctx.exception.code, MCPErrorCode.ACCESS_DENIED)
 
     async def test_redacts_token_material_from_error_details(self):
         client = BuiltInMCPClient(
