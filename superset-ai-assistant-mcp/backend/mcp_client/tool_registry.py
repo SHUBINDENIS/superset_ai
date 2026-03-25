@@ -53,6 +53,7 @@ INITIAL_DIRECT_BUILTIN_TOOLS: tuple[str, ...] = (
 REQUIRED_CUSTOM_EXTENSION_TOOLS: tuple[str, ...] = (
     "mcp_ext.list_databases",
     "mcp_ext.create_empty_dashboard",
+    "mcp_ext.legacy_chart_create",
 )
 
 

@@ -66,3 +66,51 @@ class BaseProductMCPClient(ABC):
 
     async def execute_sql(self, request: Mapping[str, Any]) -> dict[str, Any]:
         return await self.call_tool("execute_sql", {"request": dict(request)})
+
+    async def list_databases(
+        self, request: Mapping[str, Any] | None = None
+    ) -> dict[str, Any]:
+        return await self.call_tool(
+            "mcp_ext.list_databases",
+            {"request": dict(request or {})},
+        )
+
+    async def create_empty_dashboard(
+        self, request: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        return await self.call_tool(
+            "mcp_ext.create_empty_dashboard",
+            {"request": dict(request)},
+        )
+
+    async def open_sql_lab_with_context(
+        self, request: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        return await self.call_tool("open_sql_lab_with_context", {"request": dict(request)})
+
+    async def generate_chart(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        return await self.call_tool("generate_chart", {"request": dict(request)})
+
+    async def update_chart(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        return await self.call_tool("update_chart", {"request": dict(request)})
+
+    async def generate_dashboard(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        return await self.call_tool("generate_dashboard", {"request": dict(request)})
+
+    async def add_chart_to_existing_dashboard(
+        self, request: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        return await self.call_tool(
+            "add_chart_to_existing_dashboard",
+            {"request": dict(request)},
+        )
+
+    async def generate_explore_link(
+        self, request: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        return await self.call_tool("generate_explore_link", {"request": dict(request)})
+
+    async def legacy_chart_create(
+        self, request: Mapping[str, Any]
+    ) -> dict[str, Any]:
+        return await self.call_tool("mcp_ext.legacy_chart_create", {"request": dict(request)})
