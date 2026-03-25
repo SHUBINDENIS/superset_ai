@@ -6,6 +6,7 @@ from backend.mcp_client.tool_registry import (
     DEFAULT_RUNTIME,
     build_built_in_stdio_server_config,
     get_runtime_attempt_order,
+    normalize_runtime_name,
 )
 
 
@@ -39,6 +40,8 @@ class TestRuntimeSwitch(unittest.IsolatedAsyncioTestCase):
     def test_default_runtime_is_built_in_stdio(self):
         self.assertEqual(DEFAULT_RUNTIME, "built_in_stdio")
         self.assertEqual(get_runtime_attempt_order(), ("built_in_stdio",))
+        with self.assertRaises(ValueError):
+            normalize_runtime_name("legacy")
 
     def test_stdio_command_override(self):
         with patch.dict(
@@ -64,41 +67,29 @@ class TestRuntimeSwitch(unittest.IsolatedAsyncioTestCase):
             with patch("backend.mcp_client.runtime.McpUseToolTransport", FakeToolTransport):
                 runtime = await create_product_mcp_runtime(
                     requested_runtime="built_in_stdio",
-                    fallback_runtime="legacy",
-                    legacy_python_resolver=lambda: "/usr/bin/python3",
-                    legacy_server_path_resolver=lambda: "/tmp/legacy.py",
                 )
 
         self.assertEqual(runtime.runtime_name, "built_in_stdio")
-        self.assertIsNotNone(runtime.product_client)
-        self.assertIsNotNone(runtime.legacy_adapter)
         self.assertEqual(runtime.tool_names, ("list_datasets", "get_dataset_info"))
         await runtime.close()
 
-    def test_runtime_attempt_order_supports_explicit_legacy_fallback(self):
+    def test_runtime_attempt_order_supports_explicit_built_in_fallback(self):
         self.assertEqual(
             get_runtime_attempt_order(
                 runtime="built_in_stdio",
-                fallback_runtime="legacy",
+                fallback_runtime="built_in_http",
             ),
-            ("built_in_stdio", "legacy"),
+            ("built_in_stdio", "built_in_http"),
         )
 
-    async def test_runtime_creation_falls_back_to_legacy(self):
+    async def test_runtime_creation_surfaces_startup_failure_without_legacy_fallback(self):
         def fake_from_dict(config):
             return FakeMCPClient(config)
 
         FakeToolTransport.should_fail = True
         with patch("backend.mcp_client.runtime.MCPClient.from_dict", side_effect=fake_from_dict):
             with patch("backend.mcp_client.runtime.McpUseToolTransport", FakeToolTransport):
-                runtime = await create_product_mcp_runtime(
-                    requested_runtime="built_in_stdio",
-                    fallback_runtime="legacy",
-                    legacy_python_resolver=lambda: "/usr/bin/python3",
-                    legacy_server_path_resolver=lambda: "/tmp/legacy.py",
-                )
-
-        self.assertEqual(runtime.runtime_name, "legacy")
-        self.assertIsNone(runtime.product_client)
-        self.assertIsNone(runtime.legacy_adapter)
-        await runtime.close()
+                with self.assertRaisesRegex(RuntimeError, "built-in startup failed"):
+                    await create_product_mcp_runtime(
+                        requested_runtime="built_in_stdio",
+                    )

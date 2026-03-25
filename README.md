@@ -8,7 +8,7 @@
 
 ## Что уже реализовано
 - Базовая платформа: Apache Superset в Docker.
-- MCP-интеграция: отдельный сервер `superset-mcp` для программного доступа к API Superset.
+- MCP-интеграция: built-in Superset MCP service (`superset/superset/mcp_service`) для программного доступа к Superset tools / DAO / RBAC.
 - UI продукта: `Streamlit`-приложение `superset-ai-assistant-mcp`.
 - Реализованы продуктовые окна и сценарии для US1–US5, US10–US15 (скан схем, глоссарий, маппинг, подсказки, конструктор, guardrails, preview, рекомендации графиков, создание share-ссылок).
 - Защитные механизмы US10–US12: anti prompt-injection, ограничение нерелевантных запросов, read-only/безопасность SQL, базовые квоты.
@@ -18,12 +18,6 @@
 
 - `superset/`
   - инфраструктура Apache Superset (docker-compose, конфиги, upstream-код).
-- `superset-mcp/`
-  - MCP-сервер для вызовов Superset API.
-  - ключевые файлы:
-    - `superset-mcp/main.py`
-    - `superset-mcp/pyproject.toml`
-    - `superset-mcp/Dockerfile`
 - `superset-ai-assistant-mcp/`
   - основной продукт (frontend + backend).
   - `frontend/`: UI Streamlit.
@@ -47,7 +41,7 @@
 ## Архитектура (кратко)
 - Пользователь работает в `Streamlit UI`.
 - UI отправляет задачи в `AI Agent`.
-- AI Agent использует `superset-mcp` для безопасных API-вызовов в Superset.
+- AI Agent использует built-in Superset MCP service.
 - Superset выполняет SQL/строит графики/дашборды в подключённых источниках данных.
 
 Подробная схема развёртывания (Deployment): `docs/deployment.md`.
@@ -82,11 +76,10 @@ cp .env.example .env
 Минимально проверьте в `.env`:
 - `OPENAI_API_KEY=...`
 - `OPENAI_MODEL=gpt-4o-mini` (рекомендуется для уменьшения 429)
+- `SUPERSET_PRODUCT_MCP_RUNTIME=built_in_stdio`
+- `SUPERSET_BUILT_IN_MCP_COMMAND=...` и `SUPERSET_BUILT_IN_MCP_ARGS=...` только если текущая среда не умеет запускать `python -m superset.mcp_service` напрямую
 - `SUPERSET_BASE_URL=http://<host>:8088`
 - `SUPERSET_PUBLIC_URL=http://<host>:8088`
-- `SUPERSET_USERNAME=...`
-- `SUPERSET_PASSWORD=...`
-- `SUPERSET_MCP_PATH=/home/superset_ai/superset-mcp/main.py`
 - `AI_ASSISTANT_WS_BASE_URL=ws://<host>:8052/ws/chat`
 - `AUTH_DB_PATH=/home/superset_ai/superset-ai-assistant-mcp/data/auth.db`
 - `AUTH_JWT_SECRET=...` (обязательно поменять с дефолтного значения)
@@ -94,13 +87,7 @@ cp .env.example .env
 - `AUTH_PASSWORD_MIN_LENGTH=8`
 - `AUTH_HISTORY_MAX_MESSAGES=500`
 
-### 3) Запустить MCP сервер (локально)
-```bash
-cd /home/superset_ai/superset-mcp
-python main.py
-```
-
-### 4) Запустить WS API и UI ассистента (локально)
+### 3) Запустить WS API и UI ассистента (локально)
 ```bash
 cd /home/superset_ai/superset-ai-assistant-mcp
 pip install -r requirements.txt
@@ -112,7 +99,7 @@ streamlit run frontend/app.py --server.port 8051 --server.address 0.0.0.0
 Открыть: `http://localhost:8051`, пройти `Вход/Регистрацию`, затем выбрать транспорт `WebSocket (stream)`.
 
 ## Запуск через Docker (ассистент)
-Сборку нужно делать из корня репозитория (контекст включает оба каталога `superset-ai-assistant-mcp` и `superset-mcp`):
+Сборку нужно делать из корня репозитория:
 
 ```bash
 cd /home/superset_ai
@@ -131,8 +118,8 @@ docker run --rm -p 8051:8051 -p 8052:8052 --env-file superset-ai-assistant-mcp/.
 ```bash
 cd /home/superset_ai
 python3 -m pip install ruff
-ruff check superset-ai-assistant-mcp/backend superset-ai-assistant-mcp/frontend superset-ai-assistant-mcp/tests superset-mcp/main.py
-python3 -m compileall superset-ai-assistant-mcp/backend superset-ai-assistant-mcp/frontend superset-ai-assistant-mcp/tests superset-mcp/main.py
+ruff check superset-ai-assistant-mcp/backend superset-ai-assistant-mcp/frontend superset-ai-assistant-mcp/tests
+python3 -m compileall superset-ai-assistant-mcp/backend superset-ai-assistant-mcp/frontend superset-ai-assistant-mcp/tests
 ```
 
 ## Тесты
@@ -155,9 +142,8 @@ pytest tests -q
 ## Troubleshooting
 - Ошибка `429` от OpenAI: уменьшить частоту запросов, использовать более экономичную модель, сократить контекст.
 - Ошибка авторизации Superset: проверить `SUPERSET_BASE_URL`, логин/пароль и доступность Superset.
-- Ошибка MCP (`python not found`): используйте `SUPERSET_MCP_PYTHON` с абсолютным путём до интерпретатора; код также пытается fallback на `sys.executable` и `python3`.
-- Ошибка MCP (`No such file or directory: 'python'`): задайте `SUPERSET_MCP_PYTHON` абсолютным путём (`/usr/bin/python3` или путь до `.venv/bin/python`).
-- Ошибка MCP (`SUPERSET_MCP_PATH does not exist`): для локального запуска используйте `/home/superset_ai/superset-mcp/main.py`, для docker — `/app/superset-mcp/main.py`.
+- Ошибка built-in MCP запуска: либо обеспечьте доступность `python -m superset.mcp_service` в текущей среде, либо задайте `SUPERSET_BUILT_IN_MCP_COMMAND` и при необходимости `SUPERSET_BUILT_IN_MCP_ARGS`.
+- Для HTTP-транспорта задайте `SUPERSET_PRODUCT_MCP_RUNTIME=built_in_http` и `SUPERSET_BUILT_IN_MCP_URL`.
 - Пустые списки таблиц/датасетов: убедиться, что в Superset созданы подключения БД и datasets.
 
 ## Вклад команды

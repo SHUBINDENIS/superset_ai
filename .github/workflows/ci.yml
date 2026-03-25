@@ -27,16 +27,14 @@ jobs:
           ruff check \
             superset-ai-assistant-mcp/backend \
             superset-ai-assistant-mcp/frontend \
-            superset-ai-assistant-mcp/tests \
-            superset-mcp/main.py
+            superset-ai-assistant-mcp/tests
 
       - name: Python compile check
         run: |
           python -m compileall \
             superset-ai-assistant-mcp/backend \
             superset-ai-assistant-mcp/frontend \
-            superset-ai-assistant-mcp/tests \
-            superset-mcp/main.py
+            superset-ai-assistant-mcp/tests
 
   assistant-unit:
     runs-on: ubuntu-latest

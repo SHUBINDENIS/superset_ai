@@ -1,10 +1,10 @@
 # MCP Migration Parity Report
 
-Status: phase 6 cleanup snapshot before the dedicated legacy-removal commit.
+Status: final legacy runtime removal pass complete.
 
 This report describes the current migration state of the assistant product from
-`superset-mcp/main.py` to the built-in Superset MCP service. It is a parity and
-stability report, not final legacy-removal approval.
+`superset-mcp/main.py` to the built-in Superset MCP service. This report now
+describes the post-removal state.
 
 ## Validated Green Paths
 
@@ -55,29 +55,26 @@ them:
 
 ## Remaining Legacy or Direct-REST Dependencies
 
-The migration is not fully removed yet. The remaining legacy-specific items are now
-isolated cleanup targets rather than normal runtime dependencies:
+The legacy MCP runtime path is now removed.
 
-- `superset-ai-assistant-mcp/backend/mcp_client/runtime.py`
-  and `superset-ai-assistant-mcp/backend/mcp_client/tool_registry.py`
-  still carry low-level `legacy` runtime support for the final dedicated removal pass.
-- `superset-ai-assistant-mcp/backend/us13_15_viz_service.py`
-  still contains isolated legacy-only helper branches, but they are no longer part
-  of the standard runtime path after default fallback removal.
+There are no remaining normal-runtime dependencies on:
+
 - `superset-mcp/main.py`
-  still exists because the final removal commit has not been executed yet.
+- legacy runtime selection in the assistant MCP layer
+- legacy subprocess launcher env vars
+- direct REST login/CSRF fallbacks in the migrated product flows
 
 ## Legacy-Only Items Still Present
 
-Current legacy-only or legacy-specific items that are still present:
+Some compatibility-oriented names remain by design, but they are not a legacy runtime:
 
-- runtime name `legacy`
-- `build_legacy_stdio_server_config()` and explicit legacy mapping code in the unified client layer
-- isolated legacy branches in `backend/us13_15_viz_service.py`
-- the runtime implementation in `superset-mcp/main.py`
+- `backend/mcp_client/legacy_compat_adapter.py`
+  - kept as the intentional contract adapter from legacy product call shapes to built-in MCP tools
+- `mcp_ext.legacy_chart_create`
+  - kept as the narrow compatibility bridge for the remaining pie-chart creation gap
 
-No normal product flow should require legacy token-based auth helpers, CSRF, raw
-`database/<id>/tables`, or legacy subprocess launcher env vars anymore.
+No normal product flow requires legacy token-based auth helpers, CSRF, raw
+`database/<id>/tables`, legacy subprocess launchers, or the deleted external MCP server.
 
 ## `open_sql_lab_with_context` Status
 
@@ -86,13 +83,15 @@ integration coverage. There is still no dedicated frontend call site for it in
 the current Streamlit product runtime, so it is covered as a required migration
 capability rather than as a newly-added UI flow.
 
-## Removal Plan
+## Removal Outcome
 
-The remaining dedicated removal sequence is:
+Completed in this pass:
 
-1. Delete the remaining low-level `legacy` runtime mode and its isolated compatibility branches.
-2. Remove `superset-mcp/main.py` in a dedicated final commit.
-3. Re-run the parity and stability suites after that dedicated removal commit.
+1. Removed the low-level assistant runtime mode named `legacy`.
+2. Removed the legacy-only branches from `backend/us13_15_viz_service.py`.
+3. Deleted `superset-mcp/main.py`.
+4. Updated CI so lint/compile no longer target the deleted file.
+5. Re-ran the parity and stability suites on the built-in-only path.
 
 ## Current Gate Assessment
 
@@ -103,4 +102,5 @@ The remaining dedicated removal sequence is:
 - Target product tool inventory is enforced by tests: yes
 - Superset-side extension tools have standalone CI coverage: yes
 - All normal product runtime paths are migrated off direct REST: yes
-- Legacy runtime can be removed now: yes, but only in a dedicated final removal commit
+- Legacy runtime can be removed now: yes
+- Legacy runtime path is fully removed: yes

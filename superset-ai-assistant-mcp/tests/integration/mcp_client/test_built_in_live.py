@@ -320,8 +320,6 @@ class TestBuiltInMCPLive(unittest.IsolatedAsyncioTestCase):
 
         service = US13To15VizService(
             base_url="http://localhost:8088",
-            username="",
-            password="",
             timeout_seconds=5.0,
             default_preview_limit=20,
             share_base_url="http://localhost:9001",

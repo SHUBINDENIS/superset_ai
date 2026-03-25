@@ -306,10 +306,6 @@ class SupersetUS1SchemaProfiler:
             self._mcp_runtime = await create_product_mcp_runtime(
                 fallback_runtime="none"
             )
-        if self._mcp_runtime.product_client is None:
-            raise RuntimeError(
-                "Built-in MCP runtime is required for the US1 schema scan."
-            )
         return self._mcp_runtime.product_client
 
     async def _call_product_client(

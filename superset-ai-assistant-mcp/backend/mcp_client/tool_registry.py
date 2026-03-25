@@ -20,7 +20,6 @@ DEFAULT_FALLBACK_RUNTIME = "none"
 SUPPORTED_PRODUCT_RUNTIMES: tuple[str, ...] = (
     "built_in_stdio",
     "built_in_http",
-    "legacy",
 )
 
 
@@ -286,23 +285,9 @@ def build_built_in_http_server_config() -> dict[str, Any]:
         "sse_read_timeout": sse_read_timeout,
     }
 
-
-def build_legacy_stdio_server_config(
-    *,
-    python_resolver: Callable[[], str],
-    server_path_resolver: Callable[[], str],
-) -> dict[str, Any]:
-    return {
-        "command": python_resolver(),
-        "args": [server_path_resolver()],
-    }
-
-
 def build_agent_mcp_use_config(
     *,
     runtime: str | None = None,
-    legacy_python_resolver: Callable[[], str] | None = None,
-    legacy_server_path_resolver: Callable[[], str] | None = None,
 ) -> dict[str, Any]:
     selected_runtime = normalize_runtime_name(
         runtime or os.getenv("SUPERSET_PRODUCT_MCP_RUNTIME", DEFAULT_RUNTIME)
@@ -310,17 +295,8 @@ def build_agent_mcp_use_config(
 
     if selected_runtime == "built_in_http":
         server_config = build_built_in_http_server_config()
-    elif selected_runtime == "built_in_stdio":
+    else:
         server_config = build_built_in_stdio_server_config()
-    elif selected_runtime == "legacy":
-        if legacy_python_resolver is None or legacy_server_path_resolver is None:
-            raise ValueError(
-                "Legacy runtime requires both python and server path resolvers."
-            )
-        server_config = build_legacy_stdio_server_config(
-            python_resolver=legacy_python_resolver,
-            server_path_resolver=legacy_server_path_resolver,
-        )
 
     return {"mcpServers": {DEFAULT_SERVER_NAME: server_config}}
 

@@ -16,15 +16,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse, urlunparse
 
-import httpx
 from dotenv import load_dotenv
 
-from backend.mcp_client.built_in_client import (
-    _extract_result_payload,
-    _unwrap_single_result_mapping,
-)
 from backend.mcp_client.runtime import ProductMCPRuntime, create_product_mcp_runtime
-from backend.mcp_client.tool_registry import DEFAULT_SERVER_NAME
 
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -128,8 +122,6 @@ def _infer_unit(column_name: str) -> str:
 @dataclass
 class US13To15VizService:
     base_url: str
-    username: str
-    password: str
     timeout_seconds: float = 30.0
     default_preview_limit: int = 20
     share_base_url: str = ""
@@ -143,7 +135,6 @@ class US13To15VizService:
         init=False,
         repr=False,
     )
-    _legacy_session: Any = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.base_url = self._normalize_base_url(
@@ -159,27 +150,16 @@ class US13To15VizService:
         if self._is_localhost_netloc(share_netloc) and not self._is_localhost_netloc(base_netloc):
             # Для внешних ссылок предпочитаем публичный host Superset.
             self.share_base_url = self.base_url
-        self._token: Optional[str] = None
-        self._client = httpx.Client(
-            base_url=self.base_url,
-            timeout=self.timeout_seconds,
-            follow_redirects=True,
-            headers={"Accept": "application/json"},
-        )
 
     @classmethod
     def from_env(cls) -> "US13To15VizService":
         base_url = os.getenv("SUPERSET_BASE_URL", DEFAULT_PUBLIC_SUPERSET_URL)
-        username = os.getenv("SUPERSET_USERNAME", "")
-        password = os.getenv("SUPERSET_PASSWORD", "")
         timeout = float(os.getenv("US13_15_TIMEOUT_SECONDS", "30"))
         preview_limit = int(os.getenv("US13_PREVIEW_LIMIT", "20"))
         public_base = os.getenv("SUPERSET_PUBLIC_URL", "").strip()
         share_base = os.getenv("US15_SHARE_BASE_URL", "").strip()
         return cls(
             base_url=base_url,
-            username=username,
-            password=password,
             timeout_seconds=timeout,
             default_preview_limit=preview_limit,
             share_base_url=public_base or share_base,
@@ -191,9 +171,7 @@ class US13To15VizService:
         if self._loop is not None and not self._loop.is_closed():
             self._loop.close()
         self._mcp_runtime = None
-        self._legacy_session = None
         self._loop = None
-        self._client.close()
 
     def _get_loop(self) -> asyncio.AbstractEventLoop:
         if self._loop is None or self._loop.is_closed():
@@ -211,40 +189,10 @@ class US13To15VizService:
     def _ensure_mcp_runtime(self) -> ProductMCPRuntime:
         return self._run_async(self._ensure_mcp_runtime_async())
 
-    async def _get_legacy_session_async(self) -> Any:
-        runtime = await self._ensure_mcp_runtime_async()
-        if runtime.runtime_name != "legacy":
-            raise RuntimeError(
-                "Legacy MCP session requested while runtime is not set to legacy."
-            )
-        if self._legacy_session is None:
-            self._legacy_session = await runtime.mcp_use_client.create_session(
-                DEFAULT_SERVER_NAME
-            )
-        return self._legacy_session
-
-    def _get_legacy_session(self) -> Any:
-        return self._run_async(self._get_legacy_session_async())
-
     def _call_product_client(self, method_name: str, *args: Any) -> Dict[str, Any]:
         runtime = self._ensure_mcp_runtime()
-        if runtime.product_client is None:
-            raise RuntimeError("Built-in product MCP client is not available.")
         method = getattr(runtime.product_client, method_name)
         return self._run_async(method(*args))
-
-    def _call_legacy_tool(
-        self, tool_name: str, arguments: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
-        session = self._get_legacy_session()
-        raw_result = self._run_async(session.call_tool(tool_name, dict(arguments or {})))
-        payload = _unwrap_single_result_mapping(_extract_result_payload(raw_result))
-        if isinstance(payload, dict):
-            return payload
-        return {"result": payload}
-
-    def _runtime_name(self) -> str:
-        return self._ensure_mcp_runtime().runtime_name
 
     @staticmethod
     def _raise_if_tool_error(payload: Dict[str, Any], *, default_message: str) -> None:
@@ -254,70 +202,6 @@ class US13To15VizService:
         if payload.get("success") is False:
             fallback = _normalize_text(payload.get("message")) or default_message
             raise RuntimeError(fallback)
-
-    def authenticate(self, force: bool = False) -> str:
-        if self._token and not force:
-            return self._token
-
-        if not self.username or not self.password:
-            raise RuntimeError("SUPERSET_USERNAME/SUPERSET_PASSWORD are required.")
-
-        payload = {
-            "username": self.username,
-            "password": self.password,
-            "provider": "db",
-            "refresh": True,
-        }
-        response = self._client.post("/api/v1/security/login", json=payload)
-        response.raise_for_status()
-        data = response.json() if response.content else {}
-        token = data.get("access_token")
-        if not isinstance(token, str) or not token:
-            raise RuntimeError("Superset auth succeeded without access_token.")
-        self._token = token
-        return token
-
-    def _get_csrf_token(self) -> str:
-        self.authenticate()
-        headers = {"Authorization": f"Bearer {self._token}"}
-        response = self._client.get("/api/v1/security/csrf_token/", headers=headers)
-        response.raise_for_status()
-        payload = response.json() if response.content else {}
-        token = payload.get("result")
-        if not isinstance(token, str) or not token:
-            raise RuntimeError("Failed to get CSRF token from Superset.")
-        return token
-
-    def _request(
-        self,
-        method: str,
-        endpoint: str,
-        *,
-        params: Optional[Dict[str, Any]] = None,
-        json_body: Optional[Dict[str, Any]] = None,
-        requires_auth: bool = True,
-        needs_csrf: bool = False,
-    ) -> Dict[str, Any]:
-        headers: Dict[str, str] = {"Accept": "application/json"}
-        if requires_auth:
-            self.authenticate()
-            headers["Authorization"] = f"Bearer {self._token}"
-        if needs_csrf:
-            csrf_token = self._get_csrf_token()
-            headers["X-CSRFToken"] = csrf_token
-            headers["Content-Type"] = "application/json"
-
-        response = self._client.request(
-            method.upper(),
-            endpoint,
-            params=params,
-            json=json_body,
-            headers=headers,
-        )
-        response.raise_for_status()
-        if not response.content:
-            return {}
-        return response.json()
 
     @staticmethod
     def _normalize_database_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -464,11 +348,6 @@ class US13To15VizService:
         }
 
     def list_databases(self) -> List[Dict[str, Any]]:
-        if self._runtime_name() == "legacy":
-            payload = self._call_legacy_tool("superset_database_list")
-            items = [x for x in _extract_result_items(payload) if isinstance(x, dict)]
-            return self._normalize_database_items(items)
-
         payload = self._call_product_client(
             "list_databases",
             {"page": 1, "page_size": 1000},
@@ -480,11 +359,6 @@ class US13To15VizService:
 
     def list_datasets(self, limit: int = 200) -> List[Dict[str, Any]]:
         page_size = max(1, min(int(limit), 1000))
-        if self._runtime_name() == "legacy":
-            payload = self._call_legacy_tool("superset_dataset_list")
-            items = [x for x in _extract_result_items(payload) if isinstance(x, dict)]
-            return self._normalize_dataset_items(items[:page_size])
-
         payload = self._call_product_client(
             "list_datasets",
             {"page": 1, "page_size": page_size},
@@ -495,13 +369,6 @@ class US13To15VizService:
         return self._normalize_dataset_items([x for x in items if isinstance(x, dict)])
 
     def get_dataset_metadata(self, dataset_id: int) -> Dict[str, Any]:
-        if self._runtime_name() == "legacy":
-            payload = self._call_legacy_tool(
-                "superset_dataset_get_by_id",
-                {"dataset_id": int(dataset_id)},
-            )
-            return self._normalize_dataset_metadata_payload(payload, int(dataset_id))
-
         payload = self._call_product_client("get_dataset_info", int(dataset_id))
         return self._normalize_dataset_metadata_payload(payload, int(dataset_id))
 
@@ -525,30 +392,19 @@ class US13To15VizService:
             sql_to_run = f"{safe_sql}\nLIMIT {limit}"
 
         schema_name = _normalize_text(schema)
-        if self._runtime_name() == "legacy":
-            result = self._call_legacy_tool(
-                "superset_sqllab_execute_query",
-                {
-                    "database_id": int(database_id),
-                    "sql": sql_to_run,
-                },
-            )
-            self._raise_if_tool_error(result, default_message="SQL preview failed.")
-            rows = _extract_rows(result)
-        else:
-            result = self._call_product_client(
-                "execute_sql",
-                {
-                    "database_id": int(database_id),
-                    "sql": sql_to_run,
-                    "schema": schema_name,
-                    "limit": limit,
-                },
-            )
-            self._raise_if_tool_error(result, default_message="SQL preview failed.")
-            rows = result.get("rows", [])
-            if not isinstance(rows, list):
-                rows = []
+        result = self._call_product_client(
+            "execute_sql",
+            {
+                "database_id": int(database_id),
+                "sql": sql_to_run,
+                "schema": schema_name,
+                "limit": limit,
+            },
+        )
+        self._raise_if_tool_error(result, default_message="SQL preview failed.")
+        rows = result.get("rows", [])
+        if not isinstance(rows, list):
+            rows = []
 
         if len(rows) > limit:
             rows = rows[:limit]
@@ -961,10 +817,6 @@ class US13To15VizService:
         safe_title = _normalize_text(dashboard_title) or "AI Dashboard"
         if not chart_ids:
             return self._create_dashboard(safe_title)
-        if self._runtime_name() == "legacy":
-            raise RuntimeError(
-                "Legacy runtime does not support the migrated generate_dashboard flow."
-            )
         payload = self._call_product_client(
             "generate_dashboard",
             {
@@ -1000,10 +852,6 @@ class US13To15VizService:
         time_column: str = "",
     ) -> Dict[str, Any]:
         safe_viz = _normalize_text(viz_type).lower() or "table"
-        if self._runtime_name() == "legacy":
-            raise RuntimeError(
-                "Legacy runtime does not support the migrated update_chart flow."
-            )
         if safe_viz == "pie":
             raise RuntimeError(
                 "Pie chart updates are not yet migrated to built-in MCP semantics."
@@ -1047,10 +895,6 @@ class US13To15VizService:
         time_column: str = "",
     ) -> str:
         safe_viz = _normalize_text(viz_type).lower() or "table"
-        if self._runtime_name() == "legacy":
-            raise RuntimeError(
-                "Legacy runtime does not support the migrated generate_explore_link flow."
-            )
         if safe_viz == "pie":
             raise RuntimeError(
                 "Pie explore-link generation is not yet migrated to built-in MCP semantics."
@@ -1075,32 +919,17 @@ class US13To15VizService:
         return self._to_absolute_url(url)
 
     def _create_dashboard(self, dashboard_title: str) -> Dict[str, Any]:
-        if self._runtime_name() == "legacy":
-            result = self._call_legacy_tool(
-                "superset_dashboard_create",
-                {"dashboard_title": dashboard_title, "json_metadata": {}},
-            )
-            self._raise_if_tool_error(result, default_message="Dashboard creation failed.")
-            dashboard_id = result.get("dashboard_id")
-            if not isinstance(dashboard_id, int):
-                full_result = result.get("full_result")
-                if isinstance(full_result, dict) and isinstance(full_result.get("id"), int):
-                    dashboard_id = int(full_result["id"])
-            dashboard_url = _normalize_text(result.get("dashboard_url"))
-            if not dashboard_url and isinstance(result.get("full_result"), dict):
-                dashboard_url = _normalize_text(result["full_result"].get("url"))
-        else:
-            result = self._call_product_client(
-                "create_empty_dashboard",
-                {"dashboard_title": dashboard_title},
-            )
-            self._raise_if_tool_error(result, default_message="Dashboard creation failed.")
-            dashboard = result.get("dashboard")
-            dashboard_id = dashboard.get("id") if isinstance(dashboard, dict) else None
-            dashboard_url = _normalize_text(
-                result.get("dashboard_url")
-                or (dashboard.get("url") if isinstance(dashboard, dict) else "")
-            )
+        result = self._call_product_client(
+            "create_empty_dashboard",
+            {"dashboard_title": dashboard_title},
+        )
+        self._raise_if_tool_error(result, default_message="Dashboard creation failed.")
+        dashboard = result.get("dashboard")
+        dashboard_id = dashboard.get("id") if isinstance(dashboard, dict) else None
+        dashboard_url = _normalize_text(
+            result.get("dashboard_url")
+            or (dashboard.get("url") if isinstance(dashboard, dict) else "")
+        )
 
         if not isinstance(dashboard_id, int):
             raise RuntimeError(f"Dashboard create response does not contain id: {result}")
@@ -1129,81 +958,56 @@ class US13To15VizService:
         time_column: str = "",
     ) -> Dict[str, Any]:
         safe_viz = _normalize_text(viz_type).lower() or "table"
-        if self._runtime_name() == "legacy":
-            result = self._call_legacy_tool(
-                "superset_chart_create",
+        if safe_viz == "pie":
+            result = self._call_product_client(
+                "legacy_chart_create",
                 {
                     "slice_name": slice_name,
                     "datasource_id": int(datasource_id),
                     "datasource_type": _normalize_text(datasource_type) or "table",
                     "viz_type": safe_viz,
                     "params": params,
-                    "dashboard_id": int(dashboard_id) if dashboard_id is not None else None,
                     "description": _normalize_text(description) or None,
                 },
             )
             self._raise_if_tool_error(result, default_message="Chart creation failed.")
             chart_id = result.get("chart_id")
-            if not isinstance(chart_id, int):
-                chart_info = result.get("chart_info")
-                if isinstance(chart_info, dict) and isinstance(chart_info.get("id"), int):
-                    chart_id = int(chart_info["id"])
             chart_url = _normalize_text(result.get("chart_url"))
-            if not chart_url:
-                chart_info = result.get("chart_info")
-                if isinstance(chart_info, dict):
-                    chart_url = _normalize_text(chart_info.get("url"))
         else:
-            if safe_viz == "pie":
-                result = self._call_product_client(
-                    "legacy_chart_create",
+            result = self._call_product_client(
+                "generate_chart",
+                {
+                    "dataset_id": int(datasource_id),
+                    "config": self._build_mcp_chart_config(
+                        dataset_id=int(datasource_id),
+                        viz_type=safe_viz,
+                        metric_column=metric_column,
+                        dimension_column=dimension_column,
+                        time_column=time_column,
+                    ),
+                    "save_chart": True,
+                    "generate_preview": False,
+                },
+            )
+            self._raise_if_tool_error(result, default_message="Chart creation failed.")
+            chart = result.get("chart")
+            chart_id = chart.get("id") if isinstance(chart, dict) else None
+            chart_url = _normalize_text(
+                result.get("explore_url")
+                or (chart.get("url") if isinstance(chart, dict) else "")
+            )
+            if dashboard_id is not None and isinstance(chart_id, int):
+                attach_result = self._call_product_client(
+                    "add_chart_to_existing_dashboard",
                     {
-                        "slice_name": slice_name,
-                        "datasource_id": int(datasource_id),
-                        "datasource_type": _normalize_text(datasource_type) or "table",
-                        "viz_type": safe_viz,
-                        "params": params,
-                        "description": _normalize_text(description) or None,
+                        "dashboard_id": int(dashboard_id),
+                        "chart_id": int(chart_id),
                     },
                 )
-                self._raise_if_tool_error(result, default_message="Chart creation failed.")
-                chart_id = result.get("chart_id")
-                chart_url = _normalize_text(result.get("chart_url"))
-            else:
-                result = self._call_product_client(
-                    "generate_chart",
-                    {
-                        "dataset_id": int(datasource_id),
-                        "config": self._build_mcp_chart_config(
-                            dataset_id=int(datasource_id),
-                            viz_type=safe_viz,
-                            metric_column=metric_column,
-                            dimension_column=dimension_column,
-                            time_column=time_column,
-                        ),
-                        "save_chart": True,
-                        "generate_preview": False,
-                    },
+                self._raise_if_tool_error(
+                    attach_result,
+                    default_message="Attaching chart to dashboard failed.",
                 )
-                self._raise_if_tool_error(result, default_message="Chart creation failed.")
-                chart = result.get("chart")
-                chart_id = chart.get("id") if isinstance(chart, dict) else None
-                chart_url = _normalize_text(
-                    result.get("explore_url")
-                    or (chart.get("url") if isinstance(chart, dict) else "")
-                )
-                if dashboard_id is not None and isinstance(chart_id, int):
-                    attach_result = self._call_product_client(
-                        "add_chart_to_existing_dashboard",
-                        {
-                            "dashboard_id": int(dashboard_id),
-                            "chart_id": int(chart_id),
-                        },
-                    )
-                    self._raise_if_tool_error(
-                        attach_result,
-                        default_message="Attaching chart to dashboard failed.",
-                    )
 
         if not isinstance(chart_id, int):
             raise RuntimeError(f"Chart create response does not contain id: {result}")

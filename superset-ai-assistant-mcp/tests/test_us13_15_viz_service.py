@@ -10,8 +10,6 @@ class TestUS13To15VizService(unittest.TestCase):
     def setUp(self):
         self.service = US13To15VizService(
             base_url="http://localhost:8088",
-            username="admin",
-            password="admin",
             timeout_seconds=5.0,
             default_preview_limit=20,
             share_base_url="http://localhost:8088",
@@ -125,9 +123,7 @@ class TestUS13To15VizService(unittest.TestCase):
                 }
             raise AssertionError(f"unexpected method {method_name}")
 
-        self.service._runtime_name = lambda: "built_in_stdio"
         self.service._call_product_client = fake_call_product_client
-        self.service._request = lambda *args, **kwargs: self.fail("REST fallback should not be used")
 
         databases = self.service.list_databases()
 
@@ -150,9 +146,7 @@ class TestUS13To15VizService(unittest.TestCase):
                 }
             raise AssertionError(f"unexpected method {method_name}")
 
-        self.service._runtime_name = lambda: "built_in_stdio"
         self.service._call_product_client = fake_call_product_client
-        self.service._request = lambda *args, **kwargs: self.fail("REST fallback should not be used")
 
         preview = self.service.preview_sql(database_id=7, sql="SELECT ds, sales FROM fact_sales")
 
@@ -183,9 +177,7 @@ class TestUS13To15VizService(unittest.TestCase):
                 }
             raise AssertionError(f"unexpected method {method_name}")
 
-        self.service._runtime_name = lambda: "built_in_stdio"
         self.service._call_product_client = fake_call_product_client
-        self.service._request = lambda *args, **kwargs: self.fail("REST fallback should not be used")
 
         result = self.service.create_dashboard_widget_with_share(
             dataset_id=7,
@@ -222,9 +214,7 @@ class TestUS13To15VizService(unittest.TestCase):
                 }
             raise AssertionError(f"unexpected method {method_name}")
 
-        self.service._runtime_name = lambda: "built_in_stdio"
         self.service._call_product_client = fake_call_product_client
-        self.service._request = lambda *args, **kwargs: self.fail("REST fallback should not be used")
 
         result = self.service.create_dashboard_widget_with_share(
             dataset_id=7,
@@ -249,7 +239,6 @@ class TestUS13To15VizService(unittest.TestCase):
                 return {"url": "http://localhost:8088/explore/?form_data_key=abc"}
             raise AssertionError(f"unexpected method {method_name}")
 
-        self.service._runtime_name = lambda: "built_in_stdio"
         self.service._call_product_client = fake_call_product_client
         self.service.get_dataset_metadata = lambda dataset_id: {
             "id": dataset_id,
