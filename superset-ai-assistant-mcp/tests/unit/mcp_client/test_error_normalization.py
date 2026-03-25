@@ -17,6 +17,27 @@ class FakeTransport(ToolTransport):
 
 
 class TestBuiltInClientErrorNormalization(unittest.IsolatedAsyncioTestCase):
+    async def test_unwraps_single_result_mapping_for_info_tools(self):
+        client = BuiltInMCPClient(
+            FakeTransport(
+                responses={
+                    "get_dataset_info": {
+                        "result": {
+                            "id": 25,
+                            "table_name": "birth_names",
+                            "database_id": 1,
+                        }
+                    }
+                }
+            )
+        )
+
+        payload = await client.get_dataset_info(25)
+
+        self.assertEqual(payload["id"], 25)
+        self.assertEqual(payload["table_name"], "birth_names")
+        self.assertEqual(payload["database_id"], 1)
+
     async def test_normalizes_error_categories(self):
         scenarios = [
             (

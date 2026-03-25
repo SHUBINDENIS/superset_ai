@@ -8,7 +8,7 @@ import time
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional, Callable, Awaitable
 from langchain_openai import ChatOpenAI
-from mcp_use import MCPAgent, MCPClient
+from mcp_use import MCPAgent
 import logging
 import sys
 import os
@@ -19,8 +19,8 @@ from .us4_query_assistant import get_us4_query_assistant_service
 from .us5_query_builder import get_us5_query_builder_service
 from .us10_12_guardrails import get_us10_12_guardrails_service
 from .us13_15_viz_service import get_us13_15_viz_service
+from .mcp_client.runtime import ProductMCPRuntime, create_product_mcp_runtime
 from .mcp_client.tool_registry import (
-    build_agent_mcp_use_config,
     build_agent_runtime_guidance,
 )
 
@@ -59,11 +59,11 @@ backend_logger.info("Модуль ai_agent инициализирован")
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Global MCP client (shared across sessions)
-_global_mcp_client: Optional[MCPClient] = None
-_global_mcp_client_loop_id: Optional[int] = None
-_global_mcp_client_lock: Optional[asyncio.Lock] = None
-_global_mcp_client_lock_loop_id: Optional[int] = None
+# Global product MCP runtime (shared across sessions)
+_global_mcp_runtime: Optional[ProductMCPRuntime] = None
+_global_mcp_runtime_loop_id: Optional[int] = None
+_global_mcp_runtime_lock: Optional[asyncio.Lock] = None
+_global_mcp_runtime_lock_loop_id: Optional[int] = None
 
 AgentEventCallback = Callable[[Dict[str, Any]], Awaitable[None]]
 
@@ -73,15 +73,15 @@ def _current_loop_id() -> int:
 
 
 def _get_global_mcp_client_lock() -> asyncio.Lock:
-    global _global_mcp_client_lock, _global_mcp_client_lock_loop_id
+    global _global_mcp_runtime_lock, _global_mcp_runtime_lock_loop_id
     loop_id = _current_loop_id()
     if (
-        _global_mcp_client_lock is None
-        or _global_mcp_client_lock_loop_id != loop_id
+        _global_mcp_runtime_lock is None
+        or _global_mcp_runtime_lock_loop_id != loop_id
     ):
-        _global_mcp_client_lock = asyncio.Lock()
-        _global_mcp_client_lock_loop_id = loop_id
-    return _global_mcp_client_lock
+        _global_mcp_runtime_lock = asyncio.Lock()
+        _global_mcp_runtime_lock_loop_id = loop_id
+    return _global_mcp_runtime_lock
 
 
 class SupersetAIAgent:
@@ -144,6 +144,10 @@ class SupersetAIAgent:
         # Agent components (will be initialized later)
         self._initialized = False
         self.mcp_client = None
+        self.product_mcp_client = None
+        self.legacy_mcp_adapter = None
+        self.active_mcp_runtime = ""
+        self.available_mcp_tools: List[str] = []
         self.agent = None
         
         # Session-specific locks
@@ -262,7 +266,11 @@ class SupersetAIAgent:
             "table_name": table_name,
         }
 
-    def _resolve_dataset_for_scope(self, scope: Dict[str, str]) -> Dict[str, Any]:
+    @staticmethod
+    def _select_scope_dataset_candidate(
+        datasets: List[Dict[str, Any]],
+        scope: Dict[str, str],
+    ) -> Dict[str, Any]:
         if not isinstance(scope, dict):
             return {}
         table_name = str(scope.get("table_name", "")).strip().casefold()
@@ -271,15 +279,6 @@ class SupersetAIAgent:
         db_scope = str(scope.get("database", "")).strip().casefold()
         schema_scope = str(scope.get("schema", "")).strip().casefold()
         table_scope_full = str(scope.get("table", "")).strip().casefold()
-
-        try:
-            svc = get_us13_15_viz_service()
-            datasets = svc.list_datasets(limit=1000)
-        except Exception as exc:
-            backend_logger.warning(
-                f"Session {self.session_id}: failed to list datasets for scope resolution: {exc}"
-            )
-            return {}
 
         candidates: List[Dict[str, Any]] = []
         for item in datasets:
@@ -327,8 +326,25 @@ class SupersetAIAgent:
 
         if not candidates:
             return {}
-        candidates.sort(key=lambda x: (int(x.get("score", 0)), int(x.get("dataset_id", 0))), reverse=True)
-        best = dict(candidates[0])
+        candidates.sort(
+            key=lambda x: (int(x.get("score", 0)), int(x.get("dataset_id", 0))),
+            reverse=True,
+        )
+        return dict(candidates[0])
+
+    def _resolve_dataset_for_scope_via_rest(self, scope: Dict[str, str]) -> Dict[str, Any]:
+        try:
+            svc = get_us13_15_viz_service()
+            datasets = svc.list_datasets(limit=1000)
+        except Exception as exc:
+            backend_logger.warning(
+                f"Session {self.session_id}: failed to list datasets for scope resolution: {exc}"
+            )
+            return {}
+
+        best = self._select_scope_dataset_candidate(datasets, scope)
+        if not best:
+            return {}
 
         try:
             svc = get_us13_15_viz_service()
@@ -349,6 +365,59 @@ class SupersetAIAgent:
             )
         return best
 
+    async def _resolve_dataset_for_scope_via_mcp(
+        self, scope: Dict[str, str]
+    ) -> Dict[str, Any]:
+        if self.product_mcp_client is None:
+            return {}
+
+        payload = await self.product_mcp_client.list_datasets(
+            {"page": 1, "page_size": 1000}
+        )
+        datasets = list(payload.get("datasets", []) or [])
+        best = self._select_scope_dataset_candidate(datasets, scope)
+        if not best:
+            return {}
+
+        metadata = await self.product_mcp_client.get_dataset_info(int(best["dataset_id"]))
+        columns = metadata.get("columns", [])
+        metrics = metadata.get("metrics", [])
+        if isinstance(columns, list):
+            best["columns"] = [
+                str(
+                    item.get("column_name")
+                    or item.get("name")
+                    or ""
+                ).strip()
+                for item in columns
+                if isinstance(item, dict)
+                and str(item.get("column_name") or item.get("name") or "").strip()
+            ][:15]
+        if isinstance(metrics, list):
+            best["metrics"] = [
+                str(
+                    item.get("metric_name")
+                    or item.get("name")
+                    or ""
+                ).strip()
+                for item in metrics
+                if isinstance(item, dict)
+                and str(item.get("metric_name") or item.get("name") or "").strip()
+            ][:10]
+        best["database_id"] = metadata.get("database_id", best.get("database_id"))
+        return best
+
+    async def _resolve_dataset_for_scope(self, scope: Dict[str, str]) -> Dict[str, Any]:
+        if self.product_mcp_client is not None:
+            try:
+                return await self._resolve_dataset_for_scope_via_mcp(scope)
+            except Exception as exc:
+                backend_logger.warning(
+                    f"Session {self.session_id}: built-in MCP scope resolution failed, "
+                    f"falling back to REST helper: {exc}"
+                )
+        return await asyncio.to_thread(self._resolve_dataset_for_scope_via_rest, scope)
+
     def _build_scope_context(
         self,
         user_message: str,
@@ -362,7 +431,7 @@ class SupersetAIAgent:
             "US Scope (из запроса пользователя):",
             f"- database={scope.get('database', '-')}; table={scope.get('table', '-')}",
         ]
-        resolved = resolved_dataset or self._resolve_dataset_for_scope(scope)
+        resolved = resolved_dataset or {}
         if resolved:
             lines.append(
                 "- Scope-resolved dataset: "
@@ -694,39 +763,36 @@ class SupersetAIAgent:
             f"Tried: {attempted}. Set SUPERSET_MCP_PATH to a valid main.py path."
         )
     
-    async def _get_or_create_mcp_client(self):
-        """Get or create global MCP client (shared across sessions)"""
-        global _global_mcp_client, _global_mcp_client_loop_id
-        
+    async def _get_or_create_mcp_runtime(self) -> ProductMCPRuntime:
+        """Get or create the shared product MCP runtime."""
+        global _global_mcp_runtime, _global_mcp_runtime_loop_id
+
         mcp_client_lock = _get_global_mcp_client_lock()
         async with mcp_client_lock:
             current_loop_id = _current_loop_id()
             if (
-                _global_mcp_client is None
-                or _global_mcp_client_loop_id != current_loop_id
+                _global_mcp_runtime is None
+                or _global_mcp_runtime_loop_id != current_loop_id
             ):
-                if _global_mcp_client is not None:
+                if _global_mcp_runtime is not None:
                     try:
-                        await _global_mcp_client.close()
+                        await _global_mcp_runtime.close()
                     except Exception as exc:
                         logger.warning(
-                            f"Failed closing stale global MCP client: {exc}"
+                            f"Failed closing stale global MCP runtime: {exc}"
                         )
 
-                mcp_config = build_agent_mcp_use_config(
+                _global_mcp_runtime = await create_product_mcp_runtime(
                     legacy_python_resolver=self._resolve_mcp_python_command,
                     legacy_server_path_resolver=self._resolve_mcp_server_path,
                 )
                 backend_logger.debug(
-                    "Resolved MCP runtime config using product client layer"
+                    "Resolved product MCP runtime using product client layer: %s",
+                    _global_mcp_runtime.runtime_name,
                 )
-                
-                backend_logger.debug("Creating global MCP client...")
-                _global_mcp_client = MCPClient.from_dict(mcp_config)
-                _global_mcp_client_loop_id = current_loop_id
-                backend_logger.debug("Global MCP client created")
-            
-            return _global_mcp_client
+                _global_mcp_runtime_loop_id = current_loop_id
+
+            return _global_mcp_runtime
     
     async def initialize(self):
         """Initialize the agent for this session"""
@@ -739,8 +805,12 @@ class SupersetAIAgent:
             try:
                 backend_logger.debug(f"Initializing agent for session {self.session_id}")
                 
-                # Get shared MCP client
-                self.mcp_client = await self._get_or_create_mcp_client()
+                runtime = await self._get_or_create_mcp_runtime()
+                self.mcp_client = runtime.mcp_use_client
+                self.product_mcp_client = runtime.product_client
+                self.legacy_mcp_adapter = runtime.legacy_adapter
+                self.active_mcp_runtime = runtime.runtime_name
+                self.available_mcp_tools = list(runtime.tool_names)
                 
                 # Create agent with the client
                 self.agent = MCPAgent(
@@ -754,6 +824,12 @@ class SupersetAIAgent:
                     f"Session {self.session_id}: MCPAgent configured "
                     f"max_steps={self.agent.max_steps}, "
                     f"recursion_limit={self.agent.recursion_limit}"
+                )
+                backend_logger.info(
+                    "Session %s: active MCP runtime=%s, built-in tools=%s",
+                    self.session_id,
+                    self.active_mcp_runtime,
+                    len(self.available_mcp_tools),
                 )
 
                 # Wait for tools to be populated
@@ -1160,7 +1236,7 @@ class SupersetAIAgent:
             try:
                 scope_payload = self._parse_scope_from_text(last_user_message)
                 if scope_payload:
-                    scope_dataset = self._resolve_dataset_for_scope(scope_payload)
+                    scope_dataset = await self._resolve_dataset_for_scope(scope_payload)
                     scope_context = self._build_scope_context(
                         last_user_message,
                         resolved_dataset=scope_dataset,
@@ -1283,11 +1359,15 @@ class SupersetAIAgent:
     async def close(self):
         """Close session-specific resources"""
         backend_logger.debug(f"Closing agent for session {self.session_id}")
-        # Don't close shared MCP client
+        # Don't close shared MCP runtime here; just drop references.
         self._initialized = False
         self._bound_loop_id = None
         self.agent = None
-        self.mcp_client = None  # Just drop reference, don't close
+        self.mcp_client = None
+        self.product_mcp_client = None
+        self.legacy_mcp_adapter = None
+        self.active_mcp_runtime = ""
+        self.available_mcp_tools = []
 
 
 # Agent session manager

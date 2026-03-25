@@ -15,7 +15,13 @@ from backend.mcp_client.errors import (
 
 DEFAULT_SERVER_NAME = "superset"
 DEFAULT_LIST_PAGE_SIZE = 1000
-DEFAULT_RUNTIME = "legacy"
+DEFAULT_RUNTIME = "built_in_stdio"
+DEFAULT_FALLBACK_RUNTIME = "legacy"
+SUPPORTED_PRODUCT_RUNTIMES: tuple[str, ...] = (
+    "built_in_stdio",
+    "built_in_http",
+    "legacy",
+)
 
 
 REQUIRED_DIRECT_BUILTIN_TOOLS: tuple[str, ...] = (
@@ -203,7 +209,49 @@ def get_legacy_mapping(tool_name: str) -> LegacyToolMapping:
     return mapping
 
 
+def normalize_runtime_name(value: str | None) -> str:
+    normalized = str(value or "").strip().casefold()
+    if normalized not in SUPPORTED_PRODUCT_RUNTIMES:
+        raise ValueError(
+            "Unsupported SUPERSET_PRODUCT_MCP_RUNTIME value: "
+            f"{value!r}"
+        )
+    return normalized
+
+
+def get_runtime_attempt_order(
+    runtime: str | None = None,
+    fallback_runtime: str | None = None,
+) -> tuple[str, ...]:
+    primary = normalize_runtime_name(
+        runtime or os.getenv("SUPERSET_PRODUCT_MCP_RUNTIME", DEFAULT_RUNTIME)
+    )
+    raw_fallback = (
+        fallback_runtime
+        if fallback_runtime is not None
+        else os.getenv("SUPERSET_PRODUCT_MCP_FALLBACK_RUNTIME", DEFAULT_FALLBACK_RUNTIME)
+    )
+    normalized_fallback = str(raw_fallback or "").strip().casefold()
+    if not normalized_fallback or normalized_fallback in {"none", "off", "disabled"}:
+        return (primary,)
+    secondary = normalize_runtime_name(normalized_fallback)
+    if secondary == primary:
+        return (primary,)
+    return (primary, secondary)
+
+
 def build_built_in_stdio_server_config() -> dict[str, Any]:
+    explicit_command = str(os.getenv("SUPERSET_BUILT_IN_MCP_COMMAND", "")).strip()
+    explicit_args = shlex.split(str(os.getenv("SUPERSET_BUILT_IN_MCP_ARGS", "")).strip())
+    if explicit_command:
+        return {
+            "command": explicit_command,
+            "args": explicit_args,
+            "env": {
+                "FASTMCP_TRANSPORT": "stdio",
+            },
+        }
+
     python_cmd = str(
         os.getenv("SUPERSET_BUILT_IN_MCP_PYTHON", "") or sys.executable
     ).strip() or sys.executable
@@ -255,9 +303,9 @@ def build_agent_mcp_use_config(
     legacy_python_resolver: Callable[[], str] | None = None,
     legacy_server_path_resolver: Callable[[], str] | None = None,
 ) -> dict[str, Any]:
-    selected_runtime = str(
+    selected_runtime = normalize_runtime_name(
         runtime or os.getenv("SUPERSET_PRODUCT_MCP_RUNTIME", DEFAULT_RUNTIME)
-    ).strip().casefold()
+    )
 
     if selected_runtime == "built_in_http":
         server_config = build_built_in_http_server_config()
@@ -271,11 +319,6 @@ def build_agent_mcp_use_config(
         server_config = build_legacy_stdio_server_config(
             python_resolver=legacy_python_resolver,
             server_path_resolver=legacy_server_path_resolver,
-        )
-    else:
-        raise ValueError(
-            "Unsupported SUPERSET_PRODUCT_MCP_RUNTIME value: "
-            f"{selected_runtime!r}"
         )
 
     return {"mcpServers": {DEFAULT_SERVER_NAME: server_config}}

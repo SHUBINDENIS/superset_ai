@@ -51,6 +51,17 @@ def _extract_result_payload(result: Any) -> Any:
     return _coerce_payload(result)
 
 
+def _unwrap_single_result_mapping(payload: Any) -> Any:
+    if not isinstance(payload, Mapping):
+        return payload
+    if tuple(payload.keys()) != ("result",):
+        return payload
+    inner = payload.get("result")
+    if isinstance(inner, Mapping):
+        return dict(inner)
+    return payload
+
+
 class McpUseToolTransport(ToolTransport):
     def __init__(
         self,
@@ -103,7 +114,9 @@ class BuiltInMCPClient(BaseProductMCPClient):
         except Exception as exc:
             raise normalize_mcp_error(tool_name=tool_name, exc=exc) from exc
 
-        payload = redact_sensitive_data(_extract_result_payload(result))
+        payload = redact_sensitive_data(
+            _unwrap_single_result_mapping(_extract_result_payload(result))
+        )
         is_error = bool(
             getattr(result, "isError", False) or getattr(result, "is_error", False)
         )

@@ -9,6 +9,7 @@ from backend.mcp_client.errors import (
     redact_sensitive_data,
 )
 from backend.mcp_client.legacy_compat_adapter import LegacyCompatAdapter
+from backend.mcp_client.runtime import ProductMCPRuntime, create_product_mcp_runtime
 
 __all__ = [
     "BaseProductMCPClient",
@@ -19,4 +20,6 @@ __all__ = [
     "MCPErrorCode",
     "redact_sensitive_data",
     "LegacyCompatAdapter",
+    "ProductMCPRuntime",
+    "create_product_mcp_runtime",
 ]
