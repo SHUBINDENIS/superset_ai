@@ -10,6 +10,8 @@ import json
 import uuid
 from pathlib import Path
 
+from mcp_use import MCPClient
+
 from backend.mcp_client.built_in_client import BuiltInMCPClient, McpUseToolTransport
 from backend.mcp_client.tool_registry import build_agent_mcp_use_config
 from backend.us1_schema_profiler import SupersetUS1SchemaProfiler
@@ -199,6 +201,27 @@ class TestBuiltInMCPLive(unittest.IsolatedAsyncioTestCase):
         self.assertIn("instance_summary", instance_info)
         self.assertIn("database_breakdown", instance_info)
 
+        dataset_filters = await self.client.call_tool(
+            "get_dataset_available_filters",
+            {"request": {}},
+        )
+        self.assertIn("column_operators", dataset_filters)
+        self.assertGreater(len(dataset_filters["column_operators"]), 0)
+
+        chart_filters = await self.client.call_tool(
+            "get_chart_available_filters",
+            {"request": {}},
+        )
+        self.assertIn("column_operators", chart_filters)
+        self.assertGreater(len(chart_filters["column_operators"]), 0)
+
+        dashboard_filters = await self.client.call_tool(
+            "get_dashboard_available_filters",
+            {"request": {}},
+        )
+        self.assertIn("column_operators", dashboard_filters)
+        self.assertGreater(len(dashboard_filters["column_operators"]), 0)
+
         for _ in range(3):
             charts_result, datasets_result, dashboards_result = await asyncio.gather(
                 self.client.list_charts({"page": 1, "page_size": 5}),
@@ -295,6 +318,20 @@ class TestBuiltInMCPLive(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIn("/explore/?", str(explore.get("url", "")))
 
+        updated_preview = await self.client.call_tool(
+            "update_chart_preview",
+            {
+                "request": {
+                    "form_data_key": str(explore.get("form_data_key") or "missing"),
+                    "dataset_id": dataset_id,
+                    "config": table_config,
+                    "generate_preview": False,
+                }
+            },
+        )
+        self.assertTrue(updated_preview["success"])
+        self.assertIsNone(updated_preview.get("error"))
+
         unique = uuid.uuid4().hex[:8]
         empty_dashboard = await self.client.create_empty_dashboard(
             {"dashboard_title": f"MCP Empty {unique}"}
@@ -312,6 +349,21 @@ class TestBuiltInMCPLive(unittest.IsolatedAsyncioTestCase):
         )
         self.assertTrue(chart_result["success"])
         chart_id = int(chart_result["chart"]["id"])
+
+        chart_data = await self.client.call_tool(
+            "get_chart_data",
+            {"request": {"identifier": chart_id, "limit": 5}},
+        )
+        self.assertGreaterEqual(len(list(chart_data.get("data", []) or [])), 0)
+        self.assertEqual(int(chart_data["chart_id"]), chart_id)
+
+        table_preview = await self.client.call_tool(
+            "get_chart_preview",
+            {"request": {"identifier": chart_id, "format": "table"}},
+        )
+        self.assertEqual(int(table_preview["chart_id"]), chart_id)
+        self.assertEqual(str(table_preview["format"]), "table")
+        self.assertTrue(str(table_preview.get("table_data", "")))
 
         updated_chart = await self.client.update_chart(
             {
@@ -384,6 +436,32 @@ class TestBuiltInMCPLive(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(int(updated["chart_id"]), int(widget["chart_id"]))
         finally:
             await asyncio.to_thread(service.close)
+
+    async def test_live_resources_run_inside_app_context(self):
+        raw_client = MCPClient.from_dict(
+            build_agent_mcp_use_config(runtime="built_in_stdio")
+        )
+        session = await raw_client.create_session("superset")
+        try:
+            resources = await session.list_resources()
+            resource_uris = {str(getattr(resource, "uri", "")) for resource in resources}
+            self.assertIn("chart://configs", resource_uris)
+            self.assertIn("instance://metadata", resource_uris)
+
+            chart_configs = await session.read_resource("chart://configs")
+            instance_metadata = await session.read_resource("instance://metadata")
+
+            chart_text = "".join(
+                getattr(item, "text", "") for item in getattr(chart_configs, "contents", [])
+            )
+            metadata_text = "".join(
+                getattr(item, "text", "") for item in getattr(instance_metadata, "contents", [])
+            )
+
+            self.assertIn("line_chart", chart_text)
+            self.assertIn("instance_summary", metadata_text)
+        finally:
+            await raw_client.close_all_sessions()
 
     async def test_live_us1_schema_scan_uses_built_in_runtime(self):
         profiler = SupersetUS1SchemaProfiler(

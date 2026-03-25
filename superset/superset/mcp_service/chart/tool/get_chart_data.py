@@ -28,6 +28,7 @@ from superset_core.mcp import tool
 if TYPE_CHECKING:
     from superset.models.slice import Slice
 
+from superset.mcp_service.chart.query_utils import execute_chart_query
 from superset.mcp_service.chart.schemas import (
     ChartData,
     ChartError,
@@ -121,11 +122,6 @@ async def get_chart_data(  # noqa: C901
 
         try:
             await ctx.report_progress(2, 4, "Preparing data query")
-            # Get chart data using the existing API
-            from superset.commands.chart.data.get_data_command import ChartDataCommand
-            from superset.common.query_context_factory import QueryContextFactory
-
-            # Parse the form_data to get query context
             form_data = utils_json.loads(chart.params) if chart.params else {}
             await ctx.debug(
                 "Chart form data parsed: has_filters=%s, has_groupby=%s, has_metrics=%s"
@@ -134,26 +130,6 @@ async def get_chart_data(  # noqa: C901
                     bool(form_data.get("groupby")),
                     bool(form_data.get("metrics")),
                 )
-            )
-
-            # Create a proper QueryContext using the factory with cache control
-            factory = QueryContextFactory()
-            query_context = factory.create(
-                datasource={"id": chart.datasource_id, "type": chart.datasource_type},
-                queries=[
-                    {
-                        "filters": form_data.get("filters", []),
-                        "columns": form_data.get("groupby", []),
-                        "metrics": form_data.get("metrics", []),
-                        "row_limit": request.limit or 100,
-                        "order_desc": True,
-                        # Apply cache control from request
-                        "cache_timeout": request.cache_timeout,
-                    }
-                ],
-                form_data=form_data,
-                # Use cache unless force_refresh is True
-                force=request.force_refresh,
             )
 
             await ctx.report_progress(3, 4, "Executing data query")
@@ -168,24 +144,12 @@ async def get_chart_data(  # noqa: C901
                 )
             )
 
-            # Execute the query
-            command = ChartDataCommand(query_context)
-            result = command.run()
-
-            # Handle empty query results for certain chart types
-            if not result or ("queries" not in result) or len(result["queries"]) == 0:
-                await ctx.warning(
-                    "Empty query results: chart_id=%s, chart_type=%s"
-                    % (chart.id, chart.viz_type)
-                )
-                return ChartError(
-                    error=f"No query results returned for chart {chart.id}. "
-                    f"This may occur with chart types like big_number.",
-                    error_type="EmptyQuery",
-                )
-
-            # Extract data from result (we've already validated it exists above)
-            query_result = result["queries"][0]
+            query_result = execute_chart_query(
+                chart,
+                row_limit=request.limit or 100,
+                force_refresh=request.force_refresh,
+                cache_timeout=request.cache_timeout,
+            )
             data = query_result.get("data", [])
             raw_columns = query_result.get("colnames", [])
 

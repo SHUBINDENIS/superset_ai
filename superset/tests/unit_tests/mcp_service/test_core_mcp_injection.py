@@ -21,7 +21,10 @@ from unittest.mock import Mock, patch
 import pytest
 from flask import current_app
 
-from superset.core.mcp.core_mcp_injection import create_tool_decorator
+from superset.core.mcp.core_mcp_injection import (
+    create_resource_decorator,
+    create_tool_decorator,
+)
 from superset.mcp_service.flask_singleton import get_flask_app
 
 
@@ -49,3 +52,30 @@ async def test_create_tool_decorator_pushes_app_context_for_async_tools():
 
     assert result == expected_app_name
     fake_mcp.add_tool.assert_called_once()
+
+
+def test_create_resource_decorator_pushes_app_context_for_sync_resources():
+    flask_app = get_flask_app()
+    expected_app_name = flask_app.config.get("APP_NAME", "Superset")
+
+    fake_mcp = SimpleNamespace(
+        resource=Mock(side_effect=lambda *args, **kwargs: (lambda func: func))
+    )
+
+    with patch("superset.mcp_service.app.mcp", fake_mcp):
+        with patch("superset.mcp_service.auth.get_user_from_request") as mock_user:
+            mock_user.return_value = SimpleNamespace(
+                id=1,
+                username="admin",
+                roles=[],
+                groups=[],
+            )
+
+            @create_resource_decorator("instance://metadata", protect=True)
+            def context_resource() -> str:
+                return current_app.config.get("APP_NAME", "missing")
+
+            result = context_resource()
+
+    assert result == expected_app_name
+    fake_mcp.resource.assert_called_once()

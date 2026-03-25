@@ -21,14 +21,12 @@ System resources for providing instance configuration and stats
 
 import logging
 
-from superset.mcp_service.app import mcp
-from superset.mcp_service.auth import mcp_auth_hook
+from superset.core.mcp.core_mcp_injection import create_resource_decorator
 
 logger = logging.getLogger(__name__)
 
 
-@mcp.resource("instance://metadata")
-@mcp_auth_hook
+@create_resource_decorator("instance://metadata", protect=True)
 def get_instance_metadata_resource() -> str:
     """
     Provide comprehensive metadata about the instance.

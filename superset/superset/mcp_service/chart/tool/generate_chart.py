@@ -31,6 +31,7 @@ from superset.mcp_service.chart.chart_utils import (
     generate_chart_name,
     map_config_to_form_data,
 )
+from superset.mcp_service.chart.query_utils import build_chart_query_context_json
 from superset.mcp_service.chart.schemas import (
     AccessibilityMetadata,
     GenerateChartRequest,
@@ -252,6 +253,12 @@ async def generate_chart(  # noqa: C901
                     }
                 )
 
+            runtime_form_data = {
+                **form_data,
+                "datasource": f"{dataset.id}__table",
+                "viz_type": form_data["viz_type"],
+            }
+
             try:
                 command = CreateChartCommand(
                     {
@@ -260,6 +267,11 @@ async def generate_chart(  # noqa: C901
                         "datasource_id": dataset.id,
                         "datasource_type": "table",
                         "params": json.dumps(form_data),
+                        "query_context": build_chart_query_context_json(
+                            form_data=runtime_form_data,
+                            force_refresh=False,
+                            cache_timeout=None,
+                        ),
                     }
                 )
 
