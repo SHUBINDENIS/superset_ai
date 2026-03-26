@@ -1,6 +1,6 @@
 # Dual-Run Parity And Cutover Readiness
 
-Status: continue dual-run; core-flow logging blocker closed, but keep cutover gated on one explicit dual-run smoke signoff.
+Status: repo prepared for phased primary-frontend cutover; keep Streamlit available as fallback/admin path until the actual switch decision is executed.
 
 Этот документ фиксирует repo-backed audit между:
 - текущим Streamlit UI
@@ -120,14 +120,14 @@ Repo-backed evidence для этого аудита:
 
 ### Current recommendation
 - Safe to continue dual-run: `yes`
-- Safe to cut over the primary user-facing core flow today: `almost, but run one explicit dual-run smoke signoff first`
+- Repo is prepared for a phased primary core-flow cutover: `yes`
+- Safe to remove Streamlit: `no`
 
-### Why still not automatically yes
-The main repo-backed blocker is closed, but this document still recommends one
-more explicit dual-run smoke pass before changing the default route:
-- confirm the new `frontend.log` events appear during real Next.js usage
-- confirm `trace_id` / `request_id` match the downstream backend logs
-- confirm no regression in the existing Streamlit fallback path
+### What still gates the actual switch
+С этого момента речь уже не о repo blocker, а об operational decision:
+- выполнить финальный signoff по `docs/phased-cutover-plan.md`
+- подтвердить, какой URL/entrypoint становится primary для пользователей
+- сохранить Streamlit доступным как fallback/admin console на время rollout window
 
 ### What is already strong enough
 - Core demo path exists in the new stack:
@@ -170,17 +170,17 @@ They are helper/admin flows, not part of the current core demo baseline.
 They remain blockers for the later milestone “remove Streamlit entirely”.
 
 So the practical decision is:
-- primary core-flow cutover: possible after one final dual-run smoke signoff
+- primary core-flow cutover: repo-prepared and ready for switch planning
 - Streamlit decommission: not possible until US2-US5 are either migrated or formally dropped
 
 ## Dual-Run Decision
 
 Recommended near-term mode:
-1. Keep Streamlit running as fallback/admin console.
-2. Treat Next.js/FastAPI as the candidate primary UX for the core path.
-3. Re-run `docs/manual-smoke-checklist.md` against both stacks.
-4. Use `docs/demo-query-pack.md` for the live Pagila demo path on both stacks.
-5. Use the new Next.js frontend logs as part of the signoff evidence before default-route cutover.
+1. Treat Next.js/FastAPI as the primary core UX candidate and default test target.
+2. Keep Streamlit running as fallback/admin console for `US2-US5`.
+3. Run `docs/manual-smoke-checklist.md` as the main signoff for the Next.js core path.
+4. Run the fallback sanity from `docs/phased-cutover-plan.md` against Streamlit.
+5. Use `docs/demo-query-pack.md` and frontend/backend trace correlation as signoff evidence.
 
 ## Minimal Evidence Collected In This Audit
 
@@ -196,8 +196,10 @@ These checks support:
 
 ## Safe Next Step Before Cutover
 
-One more scoped iteration should focus on:
-- running one explicit dual-run smoke signoff using `docs/manual-smoke-checklist.md`
-- deciding whether to switch the default core route after that signoff
+Следующий шаг теперь уже не про подготовку репозитория, а про операционное решение:
+1. выполнить signoff по `docs/phased-cutover-plan.md`
+2. выбрать фактический primary URL/entrypoint для пользователей
+3. провести rollout с сохранением Streamlit fallback path
 
-After that, the repo should be in a position to make a safer primary-frontend cutover decision.
+То есть следующая итерация может быть уже про сам switch/no-switch decision,
+а не про дополнительное снятие архитектурной неопределённости.

@@ -2,16 +2,21 @@
 
 Цель документа: дать команде один воспроизводимый manual smoke перед merge, deploy и MUP defence demo.
 
-Во время dual-run этот checklist нужно проходить по одному и тому же сценарию
-для обеих UI-веток:
-- Streamlit UI
-- Next.js/FastAPI UI
+Для phased primary-frontend cutover этот checklist является главным signoff
+для migrated core flows в `Next.js/FastAPI`.
+
+Streamlit в этой фазе используется как fallback/helper-admin path для `US2-US5`,
+поэтому для него нужен отдельный fallback sanity-check из
+`docs/phased-cutover-plan.md`, а не полный core-flow прогон по умолчанию.
+
+Если нужно повторить именно parity-сравнение UI-в-UI, этот же checklist можно
+дополнительно прогнать и против Streamlit.
 
 ## Scope
 
 Проверяем именно текущий продуктовый контур:
-- Streamlit assistant
-- Next.js/FastAPI assistant
+- primary Next.js/FastAPI assistant
+- Streamlit fallback/admin assistant
 - built-in MCP path
 - Superset
 - Pagila PostgreSQL demo-source

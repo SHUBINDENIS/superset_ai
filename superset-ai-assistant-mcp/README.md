@@ -1,6 +1,7 @@
 # Superset AI Assistant (прототип)
 
-Коротко: простой чат на Streamlit, который через MCP ходит в ваш Apache Superset.
+Коротко: primary core UI path теперь готовится как `Next.js + FastAPI`, а
+`Streamlit` остаётся fallback/helper-admin UI для `US2-US5` и rollback-сценариев.
 
 ## Что нужно
 - Python 3.10+
@@ -10,13 +11,17 @@
 Текущая модель запуска разделена:
 - Superset поднимается отдельно через `superset/docker-compose-image-tag.yml`
 - этот каталог запускает только ассистентский UI/backend слой
+- phased cutover scope сейчас такой:
+  - primary core UI: `FastAPI + frontend-next`
+  - Streamlit fallback/admin UI: `frontend/app.py` для `US2-US5`
 
 Также в корне репозитория есть optional unified local dev stack:
 - `docker-compose.dev.yml`
 - он поднимает Superset + built-in MCP HTTP + assistant одной командой
 - он не заменяет split deployment, а лишь упрощает локальный dev/demo запуск
+- в этой фазе unified stack по-прежнему поднимает Streamlit fallback console; Next.js primary path стартует отдельно
 
-## Как запустить
+## Как запустить primary core UI
 1. Скопируйте `.env.example` в `.env` и заполните:
    - `OPENAI_API_KEY` — ключ OpenAI
    - `OPENAI_MODEL` — рекомендуемо `gpt-5.4-mini` для снижения риска 429 TPM
@@ -28,17 +33,48 @@
    - `AUTH_PASSWORD_MIN_LENGTH`, `AUTH_HISTORY_MAX_MESSAGES` — политика паролей и лимит загружаемой истории чата
    - `AI_AGENT_MAX_STEPS`, `AI_AGENT_RECURSION_LIMIT` — лимиты шагов/рекурсии агента
    - `AI_AGENT_HISTORY_*`, `AI_AGENT_CONTEXT_CHARS`, `AI_AGENT_RATE_LIMIT_COOLDOWN_SECONDS` — ограничения на размер контекста и анти-спам cooldown после 429
-2. Установите зависимости:
+2. Создайте `.venv` и установите зависимости:
    ```bash
-   pip install -r requirements.txt
+   python3 -m venv .venv
+   .venv/bin/pip install -r requirements.txt
    ```
-3. Запустите Streamlit UI:
+3. Запустите FastAPI backend:
    ```bash
-   streamlit run frontend/app.py --server.port 8051 --server.address 0.0.0.0
+   cd /home/superset_ai/superset-ai-assistant-mcp
+   .venv/bin/python -m uvicorn api.main:app --host 0.0.0.0 --port 8100
    ```
-4. Откройте `http://localhost:8051`:
+4. В отдельном терминале запустите Next.js frontend:
+   ```bash
+   cd /home/superset_ai/superset-ai-assistant-mcp/frontend-next
+   npm install
+   NEXT_PUBLIC_API_URL=http://127.0.0.1:8100 npm run dev -- --hostname 0.0.0.0 --port 3001
+   ```
+5. Откройте `http://localhost:3001/login`:
    - сначала появится экран `Вход / Регистрация` (логин+пароль, без SMS/2FA),
-   - после авторизации откроется основной интерфейс ассистента.
+   - после авторизации откроется основной интерфейс ассистента на `http://localhost:3001/app/chat`.
+6. Production-like локальный старт для cutover signoff:
+   ```bash
+   cd /home/superset_ai/superset-ai-assistant-mcp/frontend-next
+   npm run build
+   NEXT_PUBLIC_API_URL=http://127.0.0.1:8100 npm run start -- --hostname 0.0.0.0 --port 3001
+   ```
+
+## Streamlit fallback/admin UI
+
+Поднимайте Streamlit отдельно только если нужно проверить или использовать
+оставшиеся Streamlit-only helper/admin окна:
+- `US2: Глоссарий`
+- `US3: Правила маппинга`
+- `US4: Подсказки запросов`
+- `US5: Конструктор запроса`
+
+Запуск:
+```bash
+cd /home/superset_ai/superset-ai-assistant-mcp
+streamlit run frontend/app.py --server.port 8051 --server.address 0.0.0.0
+```
+
+Открыть: `http://localhost:8051`
 
 ## Docker-режим ассистента
 
@@ -51,11 +87,12 @@ docker run --rm -p 8051:8051 --env-file superset-ai-assistant-mcp/.env ai_supers
 ```
 
 Проверенный факт:
-- образ собирается и поднимает Streamlit UI на `:8051`
+- образ собирается и поднимает Streamlit fallback UI на `:8051`
 - в образ попадают только runtime-модули (`backend/`, `frontend/`, `.streamlit/`, `start_assistant_stack.sh`), без тестов, локальных БД и логов
 
 Важно:
 - этот образ не поднимает Superset
+- этот образ пока не поднимает Next.js primary core UI
 - этот образ не содержит код `superset.mcp_service`
 - для контейнерного запуска ассистента обычно нужен либо `built_in_http`, либо явный `SUPERSET_BUILT_IN_MCP_COMMAND`
 
@@ -74,6 +111,8 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml up -d
 - поднимает `superset`, `mcp-http`, `assistant`, `db`, `pagila-db`, `redis`, `superset-init`
 - подключает ассистент к built-in MCP по HTTP
 - автоматически регистрирует `Pagila Demo (PostgreSQL)` и ключевые datasets для demo-сценариев
+- поднимает Streamlit fallback/admin console на `:8051`
+- не поднимает Next.js primary core UI, его нужно запускать отдельно
 
 Если порты заняты локально, переопределите в `.env.dev`:
 - `DEV_SUPERSET_PORT`
@@ -85,11 +124,12 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml up -d
 - `docs/manual-smoke-checklist.md`
 - `docs/demo-query-pack.md`
 - `docs/dual-run-parity-readiness.md`
+- `docs/phased-cutover-plan.md`
 
-## Экспериментальный Next.js frontend
+## Primary core UI: Next.js + FastAPI
 
-Новая миграционная ветка UI живёт в `frontend-next/`. В текущей фазе там уже
-перенесены:
+Новая primary ветка core UI живёт в `frontend-next/` и `api/`. В текущей фазе
+там уже перенесены:
 - auth shell с cookie-based FastAPI auth,
 - `/app/chat` с multi-chat sidebar,
 - отправка сообщений через FastAPI `/api/chats/...`,
@@ -110,27 +150,34 @@ cd /home/superset_ai/superset-ai-assistant-mcp
 ```bash
 cd /home/superset_ai/superset-ai-assistant-mcp/frontend-next
 npm install
-NEXT_PUBLIC_API_URL=http://127.0.0.1:8100 npm run dev -- --hostname 0.0.0.0 --port 3000
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8100 npm run dev -- --hostname 0.0.0.0 --port 3001
 ```
 
 Открыть:
-- `http://127.0.0.1:3000/login`
-- после входа основной маршрут: `http://127.0.0.1:3000/app/chat`
+- `http://127.0.0.1:3001/login`
+- после входа основной маршрут: `http://127.0.0.1:3001/app/chat`
 - demo-critical аналитические страницы:
-  - `http://127.0.0.1:3000/app/preview`
-  - `http://127.0.0.1:3000/app/recommend`
-  - `http://127.0.0.1:3000/app/share`
-  - `http://127.0.0.1:3000/app/scan`
+  - `http://127.0.0.1:3001/app/preview`
+  - `http://127.0.0.1:3001/app/recommend`
+  - `http://127.0.0.1:3001/app/share`
+  - `http://127.0.0.1:3001/app/scan`
 
 Важно:
-- Streamlit UI остаётся рабочим и не заменяется этим запуском;
+- Next.js/FastAPI теперь считается primary core UI path для migrated routes;
+- Streamlit UI остаётся рабочим fallback/admin path и не удаляется этим запуском;
 - `chat/preview/recommend/share/scan` уже доступны и в Next.js;
 - core Next.js routes теперь тоже пишут structured frontend events в `data/logs/frontend.log` через FastAPI `/api/frontend/logs`;
 - для correlation Next.js прокидывает `x-trace-id` / `x-request-id` в chat/viz/scan API-вызовы, поэтому `frontend.log` можно сопоставлять с `agent.log`, `mcp.log` и `artifact.log`;
 - Streamlit US1 тоже остаётся рабочим и не отключается этим запуском.
-- helper/admin окна `US2-US5` пока остаются Streamlit-only; их cutover-статус зафиксирован в `docs/dual-run-parity-readiness.md`.
+- helper/admin окна `US2-US5` пока остаются Streamlit-only; phased cutover scope зафиксирован в `docs/phased-cutover-plan.md`.
 
-## Как пользоваться
+Полезные runbook’и:
+- `docs/dual-run-parity-readiness.md`
+- `docs/manual-smoke-checklist.md`
+- `docs/demo-query-pack.md`
+- `docs/phased-cutover-plan.md`
+
+## Как пользоваться Streamlit fallback path
 - В `sidebar` есть кнопки навигации по окнам: `Чат`, `US1`, `US2`, `US3`, `US4`, `US5`, `US13`, `US14`, `US15`.
 - Кнопка `Выход` завершает пользовательскую сессию в UI (аккаунт и история не удаляются).
 - Каждый US-экран открывается отдельно в основной области, чтобы не перегружать один sidebar.
@@ -175,6 +222,8 @@ NEXT_PUBLIC_API_URL=http://127.0.0.1:8100 npm run dev -- --hostname 0.0.0.0 --po
   - US12: квоты (rate-limit) и ограничение сложности запроса.
 
 ## Структура
+- `api/` — FastAPI auth/chat/viz/scan/frontend-logs routes для primary core UI
+- `frontend-next/` — Next.js primary core UI
 - `frontend/app.py` — entrypoint Streamlit UI
 - `frontend/state.py` — единые state defaults и reset/auth helpers
 - `frontend/ui_helpers.py` — общие UI helpers и theme

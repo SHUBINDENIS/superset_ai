@@ -9,7 +9,8 @@
 ## Что уже реализовано
 - Базовая платформа: Apache Superset в Docker.
 - MCP-интеграция: built-in Superset MCP service (`superset/superset/mcp_service`) для программного доступа к Superset tools / DAO / RBAC.
-- UI продукта: `Streamlit`-приложение `superset-ai-assistant-mcp`.
+- Primary core UI path: `Next.js + FastAPI` стек в `superset-ai-assistant-mcp/frontend-next` и `superset-ai-assistant-mcp/api` для auth, chat, preview, recommend, share и schema scan.
+- Fallback/helper-admin UI path: `Streamlit`-приложение `superset-ai-assistant-mcp/frontend` для US2-US5 и rollback-сценариев во время phased cutover.
 - Реализованы продуктовые окна и сценарии для US1–US5, US10–US15 (скан схем, глоссарий, маппинг, подсказки, конструктор, guardrails, preview, рекомендации графиков, создание share-ссылок).
 - Защитные механизмы US10–US12: anti prompt-injection, ограничение нерелевантных запросов, read-only/безопасность SQL, базовые квоты.
 
@@ -20,6 +21,8 @@
   - инфраструктура Apache Superset (docker-compose, конфиги, upstream-код).
 - `superset-ai-assistant-mcp/`
   - основной продукт (frontend + backend).
+  - `api/`: FastAPI auth/chat/viz/scan/logging endpoints для primary core UI path.
+  - `frontend-next/`: Next.js primary core UI для migrated routes.
   - `frontend/`: UI Streamlit.
     - `app.py` — тонкий entrypoint Streamlit.
     - `state.py` — единый источник дефолтов и reset/auth state helpers.
@@ -45,13 +48,15 @@
   - пример переменных окружения для `docker-compose.dev.yml`.
 - `ruff.toml`
   - конфигурация линтера Ruff.
+- `docs/phased-cutover-plan.md`
+  - phased cutover plan: primary core UI, Streamlit fallback scope, dual-run validation и rollback.
 - `docs/mcp-migration/`
   - исторические материалы миграции и parity-отчёты по удалённому legacy MCP runtime.
 
 ## Архитектура (кратко)
-- Пользователь работает в `Streamlit UI`.
-- `Streamlit` вызывает backend-модули и `AI Agent` внутри того же процесса.
-- `AI Agent` использует built-in Superset MCP service.
+- Primary core path для текущего phased cutover: `Next.js UI -> FastAPI -> backend services / AI Agent -> built-in Superset MCP service`.
+- Streamlit остаётся отдельным fallback/helper-admin UI path для `US2-US5` и rollback-сценариев.
+- Оба UI path используют один и тот же built-in Superset MCP service и shared backend-модули.
 - Superset выполняет SQL, строит графики и дашборды в подключённых источниках данных.
 
 Подробная схема развёртывания (Deployment): `docs/deployment.md`.
@@ -66,7 +71,9 @@
 Текущая поддерживаемая схема развёртывания разделена на две части:
 
 - `superset/docker-compose-image-tag.yml` поднимает стек Apache Superset.
-- `superset-ai-assistant-mcp/` запускается отдельно: локально через `streamlit run` или отдельным Docker-образом.
+- `superset-ai-assistant-mcp/` запускается отдельно:
+  - primary core path: `FastAPI + Next.js`
+  - fallback/admin path: `streamlit run frontend/app.py` или отдельный Docker-образ
 
 Ассистент не входит в текущий `docker compose` стек Superset.
 `superset-worker` и `superset-worker-beat` больше не считаются обязательной частью базового проекта; они оставлены как opt-in профиль для фоновых задач Superset.
@@ -79,7 +86,8 @@
 - baseline split deployment при этом остаётся основной и поддерживаемой схемой
 
 ## Быстрый запуск (рекомендуемый порядок)
-Сначала запускается Superset, затем отдельно запускается ассистент.
+Сначала запускается Superset, затем primary core UI (`FastAPI + Next.js`).
+Streamlit поднимается отдельно только как fallback/helper-admin path.
 
 ### 1) Поднять Apache Superset
 ```bash
@@ -122,16 +130,58 @@ cp .env.example .env
 - `AUTH_PASSWORD_MIN_LENGTH=8`
 - `AUTH_HISTORY_MAX_MESSAGES=500`
 
-### 3) Запустить UI ассистента (локально)
+Если `.venv` ещё не создана:
+```bash
+cd /home/superset_ai/superset-ai-assistant-mcp
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
+
+### 3) Запустить primary FastAPI backend
+```bash
+cd /home/superset_ai/superset-ai-assistant-mcp
+.venv/bin/python -m uvicorn api.main:app --host 0.0.0.0 --port 8100
+```
+
+Проверка:
+```bash
+curl http://127.0.0.1:8100/api/health
+```
+
+### 4) Запустить primary Next.js frontend
+В отдельном терминале:
+
+```bash
+cd /home/superset_ai/superset-ai-assistant-mcp/frontend-next
+npm install
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8100 npm run dev -- --hostname 0.0.0.0 --port 3001
+```
+
+Проверка:
+```bash
+curl -I http://127.0.0.1:3001/login
+```
+
+Основные маршруты primary core UI:
+- `http://localhost:3001/login`
+- `http://localhost:3001/app/chat`
+- `http://localhost:3001/app/preview`
+- `http://localhost:3001/app/recommend`
+- `http://localhost:3001/app/share`
+- `http://localhost:3001/app/scan`
+
+### 5) Запустить Streamlit fallback/admin UI
+Только если нужно проверить `US2-US5` или держать fallback path доступным:
+
 ```bash
 cd /home/superset_ai/superset-ai-assistant-mcp
 pip install -r requirements.txt
 streamlit run frontend/app.py --server.port 8051 --server.address 0.0.0.0
 ```
 
-Открыть: `http://localhost:8051` и пройти `Вход/Регистрацию`.
+Открыть: `http://localhost:8051`.
 
-### 4) Запустить ассистент отдельным Docker-образом
+### 6) Запустить ассистент отдельным Docker-образом
 Сборку нужно делать из корня репозитория:
 
 ```bash
@@ -140,26 +190,16 @@ docker build -t ai_superset -f superset-ai-assistant-mcp/Dockerfile .
 docker run --rm -p 8051:8051 --env-file superset-ai-assistant-mcp/.env ai_superset
 ```
 
-Проверка:
-```bash
-curl -I http://127.0.0.1:8051
-```
-
-Что было реально проверено в репозитории:
-- compose-файл Superset успешно парсится:
-  - базовый стек: `db`, `redis`, `superset-init`, `superset`
-  - optional profile `async`: `superset-worker`, `superset-worker-beat`
-- assistant Docker image успешно собирается
-- контейнер `ai_superset` успешно стартует и отдаёт Streamlit UI на `:8051`
-
 Важно:
-- этот Docker image поднимает только ассистент
-- в image теперь копируются только runtime-файлы ассистента, без тестов, локальных БД и логов
+- текущий assistant Docker image по-прежнему поднимает Streamlit fallback/admin path на `:8051`
+- он не поднимает Next.js primary UI
+- в image копируются только runtime-файлы ассистента, без тестов, локальных БД и логов
 - он не поднимает Superset и не включает в себя код `superset.mcp_service`
 - для рабочего MCP-подключения внутри такого контейнера нужен либо доступный `built_in_http` endpoint, либо явно заданный stdio launcher
 
-### 5) Опциональный unified local dev stack
+### 7) Опциональный unified local dev stack
 Этот сценарий добавлен для локальной разработки и демо, но не заменяет split deployment.
+Он по-прежнему поднимает Streamlit fallback/admin console; primary Next.js/FastAPI path запускается отдельно.
 
 Что поднимает `docker-compose.dev.yml`:
 - `db`
@@ -197,12 +237,16 @@ curl -I http://127.0.0.1:8051
 - в `.env.dev.example` по умолчанию `SUPERSET_LOAD_EXAMPLES=no`, чтобы первый `up -d` был быстрее и детерминированнее
 - unified stack теперь поднимает отдельный `pagila-db` и автоматически регистрирует `Pagila Demo (PostgreSQL)` как реальный demo-source в Superset
 - если `8088` или `8051` уже заняты, задайте `DEV_SUPERSET_PORT` и `DEV_ASSISTANT_PORT` в `.env.dev`
+- чтобы валидировать phased cutover в dual-run, запустите отдельно:
+  - FastAPI на `:8100`
+  - Next.js на свободном порту, например `:3001`
 
 Подробный demo runbook и набор рекомендованных вопросов:
 - `docs/demo-pagila.md`
 - `docs/manual-smoke-checklist.md`
 - `docs/demo-query-pack.md`
 - `docs/dual-run-parity-readiness.md`
+- `docs/phased-cutover-plan.md`
 
 ## Линтеры и CI
 В репозитории настроен рабочий pipeline/workflow для автоматического запуска линтеров:
