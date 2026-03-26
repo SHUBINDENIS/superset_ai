@@ -26,8 +26,9 @@ REMOVED_WS_TOKENS = (
 
 
 class FakeAgent:
-    def __init__(self, reply: str = "assistant-reply") -> None:
+    def __init__(self, reply: str = "assistant-reply", finish_reason: str = "stop") -> None:
         self.reply = reply
+        self.finish_reason = finish_reason
         self.initialize_calls = 0
         self.chat_calls = []
 
@@ -37,7 +38,7 @@ class FakeAgent:
 
     async def chat(self, messages):
         self.chat_calls.append([dict(item) for item in messages])
-        return {"content": self.reply}
+        return {"content": self.reply, "finish_reason": self.finish_reason}
 
 
 class FakeSessionManager:
@@ -544,6 +545,21 @@ class TestFrontendUISmoke(unittest.TestCase):
         self.assertTrue(any("Рекомендуемый путь" in value for value in markdown_values))
         self.assertTrue(any("1. Спросите бизнес-вопрос" in value for value in markdown_values))
 
+    def test_authenticated_user_sees_security_and_guardrails_guidance(self):
+        at = self._new_app(authenticated=True)
+        at.run()
+
+        info_values = self._text_values(at.info)
+        markdown_values = self._text_values(at.markdown)
+        labels = [button.label for button in at.button]
+
+        self.assertTrue(any("Ассистент работает в безопасном аналитическом режиме" in value for value in info_values))
+        self.assertTrue(any("Безопасность и ограничения" in value for value in markdown_values))
+        self.assertTrue(any("Что разрешено" in value for value in markdown_values))
+        self.assertTrue(any("Что будет заблокировано" in value for value in markdown_values))
+        self.assertIn("Проверить: destructive SQL", labels)
+        self.assertIn("Проверить: prompt injection", labels)
+
     def test_chat_examples_are_business_first_not_sql_first(self):
         at = self._new_app(authenticated=True)
         at.run()
@@ -553,6 +569,19 @@ class TestFrontendUISmoke(unittest.TestCase):
         self.assertIn("Какие категории товаров приносят больше всего продаж?", labels)
         self.assertIn("Сделай график по заказам за 2025 год", labels)
         self.assertFalse(any("SELECT" in label for label in labels))
+
+    def test_security_examples_distinguish_safe_and_blocked_usage(self):
+        at = self._new_app(authenticated=True)
+        at.run()
+
+        markdown_values = self._text_values(at.markdown)
+        labels = [button.label for button in at.button]
+
+        self.assertTrue(any("Разрешённые аналитические примеры" in value for value in markdown_values))
+        self.assertTrue(any("Что будет заблокировано" in value for value in markdown_values))
+        self.assertIn("Покажи выручку по месяцам", labels)
+        self.assertIn("Проверить: off-topic", labels)
+        self.assertIn("Проверить: PII", labels)
 
     def test_authenticated_user_sees_chat_list_in_sidebar(self):
         first_session_id = self.auth_service.get_or_create_user_session("alice")
@@ -717,6 +746,27 @@ class TestFrontendUISmoke(unittest.TestCase):
         self.assertTrue(any("можно начать прямо с чата" in value for value in info_values))
         self.assertTrue(any("Не хотите писать запрос сами?" in value for value in caption_values))
         self.assertIn("Заполнить пример запроса", labels)
+
+    def test_blocked_agent_reply_is_rendered_as_intentional_policy_block(self):
+        self.agent.reply = (
+            "Запрос отклонён: Обнаружены запрещённые SQL-операции (DDL/DML). "
+            "Разрешены только read-only запросы.\n\n"
+            "Переформулируйте запрос в read-only формате (SELECT/WITH/EXPLAIN), и я выполню его."
+        )
+        self.agent.finish_reason = "blocked"
+
+        at = self._new_app(authenticated=True)
+        at.run()
+        at.chat_input[0].set_value("DELETE FROM birth_names WHERE 1=1")
+        at.run()
+
+        warning_values = self._text_values(at.warning)
+        self.assertTrue(any("Запрос заблокирован намеренно политикой безопасности" in value for value in warning_values))
+        self.assertEqual(
+            at.session_state["messages"][-1]["content"].split("\n\n", 1)[0],
+            "Безопасность: запрос заблокирован намеренно.",
+        )
+        self.assertIn("read-only", at.session_state["messages"][-1]["content"])
 
     def test_navigation_smoke_respects_active_window(self):
         at = self._new_app(authenticated=True, active_window="us1")
