@@ -179,3 +179,38 @@ jobs:
               export SUPERSET_CONFIG_PATH="$TMP_WS/docker/pythonpath_dev/superset_config.py"
               /app/.venv/bin/python -m pytest --confcutdir=tests/unit_tests/mcp_service/extensions/tool tests/unit_tests/mcp_service/extensions/tool -q
             '
+
+  superset-mcp-core-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Superset MCP core unit tests
+        env:
+          DOCKER_IMAGE: apachesuperset.docker.scarf.sh/apache/superset:latest-dev
+        run: |
+          docker run --rm -u 0:0 \
+            -v "$GITHUB_WORKSPACE/superset:/src:ro" \
+            "$DOCKER_IMAGE" \
+            /bin/bash -lc '
+              set -euo pipefail
+              export SUPERSET_SECRET_KEY=test-secret-key-for-mcp
+              TMP_WS=/tmp/workspace
+              rm -rf "$TMP_WS"
+              cp -R /src "$TMP_WS"
+              chmod -R u+w "$TMP_WS"
+              cd "$TMP_WS"
+              /app/.venv/bin/python -m pip install -e "./superset-core" "fastmcp<3" "marshmallow-union>=0.1,<1" pytest pytest-asyncio >/tmp/mcp_core_fastmcp_install.log 2>&1
+              /app/.venv/bin/python -m pip install -e . >/tmp/mcp_core_superset_install.log 2>&1
+              export PYTHONPATH="$TMP_WS/docker/pythonpath_dev"
+              export SUPERSET_CONFIG_PATH="$TMP_WS/docker/pythonpath_dev/superset_config.py"
+              /app/.venv/bin/python -m pytest \
+                --confcutdir=tests/unit_tests/mcp_service \
+                tests/unit_tests/mcp_service/test_core_mcp_injection.py \
+                tests/unit_tests/mcp_service/chart/test_query_utils.py \
+                tests/unit_tests/mcp_service/test_auth.py \
+                tests/unit_tests/mcp_service/utils/test_schema_utils.py \
+                -q
+            '

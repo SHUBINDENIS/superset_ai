@@ -15,13 +15,14 @@
 # specific language governing permissions and limitations
 # under the License.
 
+import importlib
+import sys
 from datetime import datetime
+from types import ModuleType, SimpleNamespace
 from unittest.mock import patch
 
-import pytest
-from fastmcp import Client
+import superset_core.mcp
 
-from superset.mcp_service.app import mcp
 from superset.mcp_service.system.schemas import (
     DashboardBreakdown,
     DatabaseBreakdown,
@@ -30,6 +31,22 @@ from superset.mcp_service.system.schemas import (
     PopularContent,
     RecentActivity,
 )
+
+
+def _identity_tool(func_or_name=None, **_kwargs):
+    def decorator(func):
+        return func
+
+    if callable(func_or_name):
+        return func_or_name
+    return decorator
+
+
+def _load_get_instance_info():
+    module_name = "superset.mcp_service.system.tool.get_instance_info"
+    with patch.object(superset_core.mcp, "tool", _identity_tool):
+        module = importlib.import_module(module_name)
+    return module.get_instance_info
 
 
 def _build_instance_info() -> InstanceInfo:
@@ -65,14 +82,37 @@ def _build_instance_info() -> InstanceInfo:
     )
 
 
-@pytest.mark.asyncio
-async def test_get_instance_info_accepts_empty_arguments():
+def test_get_instance_info_accepts_empty_arguments():
+    get_instance_info = _load_get_instance_info()
+    fake_chart_module = ModuleType("superset.daos.chart")
+    fake_chart_module.ChartDAO = SimpleNamespace
+    fake_dashboard_module = ModuleType("superset.daos.dashboard")
+    fake_dashboard_module.DashboardDAO = SimpleNamespace
+    fake_database_module = ModuleType("superset.daos.database")
+    fake_database_module.DatabaseDAO = SimpleNamespace
+    fake_dataset_module = ModuleType("superset.daos.dataset")
+    fake_dataset_module.DatasetDAO = SimpleNamespace
+    fake_tag_module = ModuleType("superset.daos.tag")
+    fake_tag_module.TagDAO = SimpleNamespace
+    fake_user_module = ModuleType("superset.daos.user")
+    fake_user_module.UserDAO = SimpleNamespace
+
     with patch(
         "superset.mcp_service.system.tool.get_instance_info._instance_info_core.run_tool",
         return_value=_build_instance_info(),
     ):
-        async with Client(mcp) as client:
-            result = await client.call_tool("get_instance_info", {})
+        with patch.dict(
+            sys.modules,
+            {
+                "superset.daos.chart": fake_chart_module,
+                "superset.daos.dashboard": fake_dashboard_module,
+                "superset.daos.database": fake_database_module,
+                "superset.daos.dataset": fake_dataset_module,
+                "superset.daos.tag": fake_tag_module,
+                "superset.daos.user": fake_user_module,
+            },
+        ):
+            result = get_instance_info({})
 
-    assert result.data["instance_summary"]["total_dashboards"] == 1
-    assert result.data["database_breakdown"]["by_type"]["postgresql"] == 1
+    assert result.instance_summary.total_dashboards == 1
+    assert result.database_breakdown.by_type["postgresql"] == 1

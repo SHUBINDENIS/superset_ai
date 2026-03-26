@@ -20,8 +20,6 @@ from __future__ import annotations
 import logging
 from typing import Any, Protocol
 
-from superset.charts.schemas import ChartDataQueryContextSchema
-from superset.commands.chart.data.get_data_command import ChartDataCommand
 from superset.common.chart_data import ChartDataResultFormat, ChartDataResultType
 from superset.mcp_service.utils.cache_utils import apply_cache_control_to_query_context
 from superset.migrations.shared.migrate_viz.query_functions import (
@@ -30,6 +28,18 @@ from superset.migrations.shared.migrate_viz.query_functions import (
 from superset.utils import json
 
 logger = logging.getLogger(__name__)
+
+
+def _get_chart_query_context_schema() -> Any:
+    from superset.charts.schemas import ChartDataQueryContextSchema
+
+    return ChartDataQueryContextSchema
+
+
+def _get_chart_data_command_cls() -> Any:
+    from superset.commands.chart.data.get_data_command import ChartDataCommand
+
+    return ChartDataCommand
 
 
 class ChartQuerySource(Protocol):
@@ -71,7 +81,8 @@ def build_chart_query_context(chart: ChartQuerySource) -> Any:
             return query_context
 
     form_data = build_runtime_form_data(chart)
-    return ChartDataQueryContextSchema().load(build_query_context_dict(form_data))
+    schema_cls = _get_chart_query_context_schema()
+    return schema_cls().load(build_query_context_dict(form_data))
 
 
 def execute_chart_query(
@@ -96,7 +107,8 @@ def execute_chart_query(
         if cache_timeout is not None:
             query_object.cache_timeout = cache_timeout
 
-    command = ChartDataCommand(query_context)
+    command_cls = _get_chart_data_command_cls()
+    command = command_cls(query_context)
     result = command.run()
     if not result or ("queries" not in result) or len(result["queries"]) == 0:
         raise ValueError("No query results returned")

@@ -18,14 +18,19 @@
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from flask import g
+from flask import Flask, g
 
 from superset.mcp_service.auth import get_user_from_request
-from superset.mcp_service.flask_singleton import get_flask_app
+
+
+def _build_test_flask_app() -> Flask:
+    app = Flask(__name__)
+    app.config["MCP_DEV_USERNAME"] = "admin"
+    return app
 
 
 def test_get_user_from_request_rebinds_existing_g_user():
-    flask_app = get_flask_app()
+    flask_app = _build_test_flask_app()
     detached_user = SimpleNamespace(id=7, username="admin", is_anonymous=False)
     bound_user = MagicMock(id=7, username="admin", roles=[], groups=[])
     mock_query = MagicMock()

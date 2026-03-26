@@ -15,27 +15,43 @@
 # specific language governing permissions and limitations
 # under the License.
 
-from types import SimpleNamespace
+import sys
+from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
-from flask import current_app
+from flask import current_app, Flask
 
 from superset.core.mcp.core_mcp_injection import (
     create_resource_decorator,
     create_tool_decorator,
 )
-from superset.mcp_service.flask_singleton import get_flask_app
+
+
+def _build_test_flask_app() -> Flask:
+    app = Flask(__name__)
+    app.config["APP_NAME"] = "MCP Test App"
+    return app
 
 
 @pytest.mark.asyncio
 async def test_create_tool_decorator_pushes_app_context_for_async_tools():
-    flask_app = get_flask_app()
+    flask_app = _build_test_flask_app()
     expected_app_name = flask_app.config.get("APP_NAME", "Superset")
 
     fake_mcp = SimpleNamespace(add_tool=Mock())
+    fake_app_module = ModuleType("superset.mcp_service.app")
+    fake_app_module.mcp = fake_mcp
+    fake_singleton_module = ModuleType("superset.mcp_service.flask_singleton")
+    fake_singleton_module.get_flask_app = lambda: flask_app
 
-    with patch("superset.mcp_service.app.mcp", fake_mcp):
+    with patch.dict(
+        sys.modules,
+        {
+            "superset.mcp_service.app": fake_app_module,
+            "superset.mcp_service.flask_singleton": fake_singleton_module,
+        },
+    ):
         with patch("superset.mcp_service.auth.get_user_from_request") as mock_user:
             mock_user.return_value = SimpleNamespace(
                 id=1,
@@ -55,14 +71,24 @@ async def test_create_tool_decorator_pushes_app_context_for_async_tools():
 
 
 def test_create_resource_decorator_pushes_app_context_for_sync_resources():
-    flask_app = get_flask_app()
+    flask_app = _build_test_flask_app()
     expected_app_name = flask_app.config.get("APP_NAME", "Superset")
 
     fake_mcp = SimpleNamespace(
         resource=Mock(side_effect=lambda *args, **kwargs: (lambda func: func))
     )
+    fake_app_module = ModuleType("superset.mcp_service.app")
+    fake_app_module.mcp = fake_mcp
+    fake_singleton_module = ModuleType("superset.mcp_service.flask_singleton")
+    fake_singleton_module.get_flask_app = lambda: flask_app
 
-    with patch("superset.mcp_service.app.mcp", fake_mcp):
+    with patch.dict(
+        sys.modules,
+        {
+            "superset.mcp_service.app": fake_app_module,
+            "superset.mcp_service.flask_singleton": fake_singleton_module,
+        },
+    ):
         with patch("superset.mcp_service.auth.get_user_from_request") as mock_user:
             mock_user.return_value = SimpleNamespace(
                 id=1,

@@ -55,8 +55,9 @@ def test_execute_chart_query_uses_saved_query_context_when_present():
     fake_result = {"queries": [{"data": [{"region": "EMEA"}], "colnames": ["region"]}]}
 
     with patch(
-        "superset.mcp_service.chart.query_utils.ChartDataCommand"
-    ) as chart_data_command:
+        "superset.mcp_service.chart.query_utils._get_chart_data_command_cls"
+    ) as command_factory:
+        chart_data_command = command_factory.return_value
         chart_data_command.return_value.run.return_value = fake_result
         result = execute_chart_query(
             chart,
@@ -91,12 +92,14 @@ def test_execute_chart_query_builds_query_context_from_form_data_when_missing():
     )
 
     with patch(
-        "superset.mcp_service.chart.query_utils.ChartDataQueryContextSchema"
-    ) as schema_cls:
+        "superset.mcp_service.chart.query_utils._get_chart_query_context_schema"
+    ) as schema_factory:
+        schema_cls = schema_factory.return_value
         schema_cls.return_value.load.return_value = fake_query_context
         with patch(
-            "superset.mcp_service.chart.query_utils.ChartDataCommand"
-        ) as chart_data_command:
+            "superset.mcp_service.chart.query_utils._get_chart_data_command_cls"
+        ) as command_factory:
+            chart_data_command = command_factory.return_value
             chart_data_command.return_value.run.return_value = {
                 "queries": [{"data": [], "colnames": []}]
             }
