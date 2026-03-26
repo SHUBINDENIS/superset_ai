@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, Mapping
 
 from mcp_use import MCPClient
@@ -15,6 +16,7 @@ from backend.mcp_client.tool_registry import (
     DEFAULT_SERVER_NAME,
     build_agent_mcp_use_config,
 )
+from backend.observability import emit_event
 
 
 def _coerce_payload(value: Any) -> Any:
@@ -109,10 +111,22 @@ class BuiltInMCPClient(BaseProductMCPClient):
     async def call_tool(
         self, tool_name: str, arguments: Mapping[str, Any] | None = None
     ) -> dict[str, Any]:
+        started_at = time.monotonic()
+        emit_event("mcp", "tool_call_start", tool_name=tool_name)
         try:
             result = await self.transport.call_tool(tool_name, arguments or {})
         except Exception as exc:
-            raise normalize_mcp_error(tool_name=tool_name, exc=exc) from exc
+            error = normalize_mcp_error(tool_name=tool_name, exc=exc)
+            emit_event(
+                "mcp",
+                "tool_call_end",
+                tool_name=tool_name,
+                status="error",
+                latency_ms=int((time.monotonic() - started_at) * 1000),
+                error_code=error.code.value,
+                error_message=error.message,
+            )
+            raise error from exc
 
         payload = redact_sensitive_data(
             _unwrap_single_result_mapping(_extract_result_payload(result))
@@ -122,11 +136,28 @@ class BuiltInMCPClient(BaseProductMCPClient):
         )
 
         if payload_indicates_error(payload) or is_error:
-            raise normalize_mcp_error(
+            error = normalize_mcp_error(
                 tool_name=tool_name,
                 payload=payload if isinstance(payload, Mapping) else None,
             )
+            emit_event(
+                "mcp",
+                "tool_call_end",
+                tool_name=tool_name,
+                status="error",
+                latency_ms=int((time.monotonic() - started_at) * 1000),
+                error_code=error.code.value,
+                error_message=error.message,
+            )
+            raise error
 
+        emit_event(
+            "mcp",
+            "tool_call_end",
+            tool_name=tool_name,
+            status="ok",
+            latency_ms=int((time.monotonic() - started_at) * 1000),
+        )
         if isinstance(payload, Mapping):
             return dict(payload)
         return {"result": payload}

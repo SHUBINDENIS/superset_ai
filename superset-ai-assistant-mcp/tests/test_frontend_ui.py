@@ -1,4 +1,6 @@
+import json
 import os
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -411,6 +413,7 @@ class TestFrontendUISmoke(unittest.TestCase):
         self.session_manager = FakeSessionManager(agent=self.agent)
         self.viz_service = FakeVizService()
         self.us1_result = make_us1_result()
+        self.log_dir = tempfile.TemporaryDirectory()
 
         async def fake_us1_scan():
             return self.us1_result
@@ -421,6 +424,7 @@ class TestFrontendUISmoke(unittest.TestCase):
                 {
                     "MCP_USE_ANONYMIZED_TELEMETRY": "false",
                     "AUTH_PASSWORD_MIN_LENGTH": "8",
+                    "ASSISTANT_LOG_DIR": self.log_dir.name,
                 },
                 clear=False,
             ),
@@ -432,6 +436,7 @@ class TestFrontendUISmoke(unittest.TestCase):
         for patcher in self._patchers:
             patcher.start()
         self.addCleanup(self._stop_patchers)
+        self.addCleanup(self.log_dir.cleanup)
 
     def _stop_patchers(self):
         while self._patchers:
@@ -482,6 +487,18 @@ class TestFrontendUISmoke(unittest.TestCase):
 
     def _text_values(self, items) -> list[str]:
         return [str(getattr(item, "value", "")).strip() for item in items]
+
+    def _read_log_events(self, filename: str) -> list[dict]:
+        path = Path(self.log_dir.name) / filename
+        if not path.exists():
+            return []
+        events = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            events.append(json.loads(line))
+        return events
 
     def _login(self, at: AppTest, username: str = "alice", password: str = "secret-pass") -> None:
         at.text_input(key="auth_login_username").set_value(username)
@@ -537,6 +554,29 @@ class TestFrontendUISmoke(unittest.TestCase):
         self.assertEqual(at.session_state["chat_processing_text"], "")
         sessions = self.auth_service.list_chat_sessions("alice")
         self.assertEqual(sessions[0]["title"], "Покажи доступные датасеты")
+
+    def test_frontend_emits_structured_logs_for_login_and_chat_submit(self):
+        at = self._new_app()
+        at.run()
+
+        self._login(at)
+        at.chat_input[0].set_value("Покажи выручку по месяцам")
+        at.run()
+
+        frontend_events = self._read_log_events("frontend.log")
+        event_names = [item.get("event") for item in frontend_events]
+
+        self.assertIn("auth_login_success", event_names)
+        self.assertIn("chat_submit", event_names)
+        chat_submit = next(item for item in frontend_events if item.get("event") == "chat_submit")
+        self.assertEqual(chat_submit.get("component"), "frontend")
+        self.assertEqual(chat_submit.get("session_id"), "session-alice")
+        self.assertTrue(chat_submit.get("trace_id"))
+        self.assertTrue(chat_submit.get("request_id"))
+        self.assertTrue(chat_submit.get("user_hash"))
+        serialized = json.dumps(frontend_events, ensure_ascii=False)
+        self.assertNotIn("\"username\"", serialized)
+        self.assertNotIn("secret-pass", serialized)
 
     def test_pending_chat_state_shows_user_message_and_processing_feedback(self):
         at = self._new_app(
@@ -831,6 +871,10 @@ class TestFrontendUISmoke(unittest.TestCase):
         self.assertTrue(any("Открыть dashboard" in value for value in self._text_values(assistant_message.markdown)))
         self.assertTrue(any("Открыть chart" in value for value in self._text_values(assistant_message.markdown)))
         self.assertTrue(any("Что можно сделать дальше:" in value for value in self._text_values(assistant_message.caption)))
+        artifact_events = self._read_log_events("artifact.log")
+        useful_links_event = next(item for item in artifact_events if item.get("event") == "useful_links_produced")
+        self.assertEqual(useful_links_event.get("source"), "assistant_chat")
+        self.assertEqual(useful_links_event.get("link_count"), 2)
 
     def test_navigation_smoke_respects_active_window(self):
         at = self._new_app(authenticated=True, active_window="us1")

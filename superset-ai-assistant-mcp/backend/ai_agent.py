@@ -23,6 +23,7 @@ from .mcp_client.tool_registry import (
     build_agent_runtime_guidance,
 )
 from .openai_safe_adapter import OpenAISafeLangChainAdapter
+from .observability import emit_event
 
 # Создаем и настраиваем логгер для вашего бэкенда
 backend_logger = logging.getLogger('superset_backend')
@@ -154,6 +155,17 @@ class SupersetAIAgent:
         self._bound_loop_id: Optional[int] = None
         
         backend_logger.debug(f"Created agent for session {session_id}")
+
+    def _emit_agent_event(self, event: str, *, level: str = "INFO", **fields: Any) -> None:
+        emit_event(
+            "agent",
+            event,
+            level=level,
+            model=self.model_name,
+            session_id=self.session_id,
+            chat_id=self.session_id,
+            **fields,
+        )
 
     @staticmethod
     def _truncate_text(text: str, max_chars: int) -> str:
@@ -875,12 +887,33 @@ class SupersetAIAgent:
         """
         Process a chat message for this session
         """
+        started_at = time.monotonic()
         last_user_message = messages[-1]["content"] if messages else ""
+        self._emit_agent_event(
+            "turn_start",
+            message_count=len(messages),
+            user_message_chars=len(str(last_user_message or "")),
+        )
 
         # Ensure agent is initialized
         try:
             await self._ensure_initialized()
         except Exception as e:
+            latency_ms = int((time.monotonic() - started_at) * 1000)
+            self._emit_agent_event(
+                "error_response",
+                level="ERROR",
+                finish_reason="error",
+                error_message=str(e),
+                latency_ms=latency_ms,
+            )
+            self._emit_agent_event(
+                "turn_end",
+                status="error",
+                finish_reason="error",
+                error_message=str(e),
+                latency_ms=latency_ms,
+            )
             return {
                 "content": f"Ошибка инициализации агента: {str(e)}",
                 "role": "assistant",
@@ -893,6 +926,12 @@ class SupersetAIAgent:
             # Build conversation context from history
             cooldown_left = self._get_rate_limit_remaining()
             if cooldown_left > 0:
+                self._emit_agent_event(
+                    "turn_end",
+                    status="rate_limited",
+                    finish_reason="rate_limit_cooldown",
+                    latency_ms=int((time.monotonic() - started_at) * 1000),
+                )
                 return {
                     "content": (
                         "Лимит OpenAI временно исчерпан. "
@@ -936,6 +975,23 @@ class SupersetAIAgent:
                 if not guardrails_decision.get("allowed", False):
                     reason_code = str(guardrails_decision.get("code", "")).strip()
                     reason_text = str(guardrails_decision.get("reason", "")).strip()
+                    latency_ms = int((time.monotonic() - started_at) * 1000)
+                    self._emit_agent_event(
+                        "blocked_response",
+                        status="blocked",
+                        finish_reason="blocked",
+                        error_code=reason_code,
+                        error_message=reason_text,
+                        latency_ms=latency_ms,
+                    )
+                    self._emit_agent_event(
+                        "turn_end",
+                        status="blocked",
+                        finish_reason="blocked",
+                        error_code=reason_code,
+                        error_message=reason_text,
+                        latency_ms=latency_ms,
+                    )
                     return {
                         "content": self._build_guardrail_block_reply(
                             reason_code=reason_code,
@@ -1083,7 +1139,12 @@ class SupersetAIAgent:
                     "- Выполни задачу пользователя через dataset-level инструменты."
                 )
                 result = await self._safe_agent_run(retry_prompt, max_retries=1)
-            
+            self._emit_agent_event(
+                "turn_end",
+                status="ok",
+                finish_reason="stop",
+                latency_ms=int((time.monotonic() - started_at) * 1000),
+            )
             return {
                 "content": result,
                 "role": "assistant",
@@ -1101,6 +1162,22 @@ class SupersetAIAgent:
                     default=self.rate_limit_cooldown_seconds,
                 )
                 self._set_rate_limit_cooldown(wait_seconds)
+                latency_ms = int((time.monotonic() - started_at) * 1000)
+                self._emit_agent_event(
+                    "error_response",
+                    level="ERROR",
+                    finish_reason="error",
+                    error_code="rate_limit",
+                    error_message=error_text,
+                    latency_ms=latency_ms,
+                )
+                self._emit_agent_event(
+                    "turn_end",
+                    status="error",
+                    finish_reason="error",
+                    error_code="rate_limit",
+                    latency_ms=latency_ms,
+                )
                 return {
                     "content": (
                         "Достигнут лимит запросов OpenAI (429). "
@@ -1111,6 +1188,21 @@ class SupersetAIAgent:
                     "model": self.model_name,
                     "session_id": self.session_id,
                 }
+            latency_ms = int((time.monotonic() - started_at) * 1000)
+            self._emit_agent_event(
+                "error_response",
+                level="ERROR",
+                finish_reason="error",
+                error_message=error_text,
+                latency_ms=latency_ms,
+            )
+            self._emit_agent_event(
+                "turn_end",
+                status="error",
+                finish_reason="error",
+                error_message=error_text,
+                latency_ms=latency_ms,
+            )
             return {
                 "content": self._build_error_clarification_reply(
                     user_message=last_user_message,

@@ -43,6 +43,8 @@ class TestFrontendState(unittest.TestCase):
         self.assertEqual(state["chat_rename_value"], "")
         self.assertFalse(state["chat_is_processing"])
         self.assertEqual(state["chat_processing_text"], "")
+        self.assertEqual(state["chat_trace_id"], "")
+        self.assertEqual(state["chat_request_id"], "")
         self.assertIsNone(state["pending_input"])
         self.assertFalse(state["agent_initialized"])
 
@@ -55,6 +57,8 @@ class TestFrontendState(unittest.TestCase):
         self.assertEqual(state["chat_rename_session_id"], "")
         self.assertFalse(state["chat_is_processing"])
         self.assertEqual(state["chat_processing_text"], "")
+        self.assertEqual(state["chat_trace_id"], "")
+        self.assertEqual(state["chat_request_id"], "")
         self.assertEqual(state["us13_sql"], APP_STATE_DEFAULTS["us13_sql"])
         self.assertEqual(state["us15_chart_title"], "AI Widget")
         self.assertIsNone(state["us14_recommendation"])

@@ -1,8 +1,14 @@
+import json
+import os
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from backend.mcp_client.base import ToolTransport
 from backend.mcp_client.built_in_client import BuiltInMCPClient
 from backend.mcp_client.errors import MCPClientError, MCPErrorCode
+from backend.observability import bind_log_context
 
 
 class FakeTransport(ToolTransport):
@@ -23,6 +29,27 @@ class FakeToolResult:
 
 
 class TestBuiltInClientErrorNormalization(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.log_dir = tempfile.TemporaryDirectory()
+        self.env_patcher = patch.dict(
+            os.environ,
+            {"ASSISTANT_LOG_DIR": self.log_dir.name},
+            clear=False,
+        )
+        self.env_patcher.start()
+        self.addCleanup(self.env_patcher.stop)
+        self.addCleanup(self.log_dir.cleanup)
+
+    def _read_log_events(self, filename: str) -> list[dict]:
+        path = Path(self.log_dir.name) / filename
+        if not path.exists():
+            return []
+        return [
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
+
     async def test_unwraps_single_result_mapping_for_info_tools(self):
         client = BuiltInMCPClient(
             FakeTransport(
@@ -132,3 +159,36 @@ class TestBuiltInClientErrorNormalization(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("secret-token", payload)
         self.assertNotIn("preview", payload)
         self.assertNotIn("password", payload.casefold())
+
+    async def test_emits_structured_mcp_logs_without_raw_sql_payloads(self):
+        client = BuiltInMCPClient(
+            FakeTransport(
+                responses={
+                    "execute_sql": {
+                        "success": True,
+                        "rows": [{"region": "RU", "sales": 10}],
+                    }
+                }
+            )
+        )
+
+        with bind_log_context(
+            trace_id="trace-mcp",
+            request_id="request-mcp",
+            session_id="session-alice",
+            chat_id="session-alice",
+            user_hash="userhash",
+        ):
+            payload = await client.execute_sql(
+                {"database_id": 1, "sql": "SELECT * FROM sales WHERE token='secret'"}
+            )
+
+        self.assertEqual(payload["rows"][0]["region"], "RU")
+        events = self._read_log_events("mcp.log")
+        event_names = [item.get("event") for item in events]
+        self.assertIn("tool_call_start", event_names)
+        self.assertIn("tool_call_end", event_names)
+        serialized = json.dumps(events, ensure_ascii=False)
+        self.assertIn("trace-mcp", serialized)
+        self.assertNotIn("SELECT * FROM sales", serialized)
+        self.assertNotIn("secret", serialized)

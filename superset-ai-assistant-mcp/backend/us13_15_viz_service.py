@@ -20,6 +20,7 @@ from urllib.parse import urlparse, urlunparse
 
 from dotenv import load_dotenv
 
+from backend.observability import emit_event
 from backend.mcp_client.runtime import ProductMCPRuntime, create_product_mcp_runtime
 
 
@@ -211,6 +212,9 @@ class US13To15VizService:
         runtime = self._ensure_mcp_runtime()
         method = getattr(runtime.product_client, method_name)
         return self._run_async(method(*args))
+
+    def _emit_artifact_event(self, event: str, **fields: Any) -> None:
+        emit_event("artifact", event, **fields)
 
     def _cache_now(self) -> float:
         return time.monotonic()
@@ -492,6 +496,16 @@ class US13To15VizService:
             }
             for item in columns
         ]
+
+        self._emit_artifact_event(
+            "preview_completed",
+            status="ok",
+            database_id=int(database_id),
+            schema=schema_name,
+            preview_limit=limit,
+            rows_count=len(rows),
+            column_count=len(columns),
+        )
 
         return {
             "database_id": int(database_id),
@@ -870,6 +884,14 @@ class US13To15VizService:
         dashboard_url = dashboard.get("dashboard_url") or f"/superset/dashboard/{dashboard_id}/"
         chart_id = int(chart["chart_id"])
         chart_url = chart.get("chart_url") or f"/explore/?slice_id={chart_id}"
+        self._emit_artifact_event(
+            "useful_links_produced",
+            status="ok",
+            dashboard_id=dashboard_id,
+            chart_id=chart_id,
+            link_count=2,
+            link_kinds=["chart", "dashboard"],
+        )
 
         return {
             "dashboard_id": dashboard_id,
@@ -910,6 +932,12 @@ class US13To15VizService:
         )
         if not isinstance(dashboard_id, int):
             raise RuntimeError(f"Dashboard generate response does not contain id: {payload}")
+        self._emit_artifact_event(
+            "dashboard_created",
+            status="ok",
+            artifact_type="dashboard",
+            artifact_id=dashboard_id,
+        )
         return {
             "dashboard_id": dashboard_id,
             "dashboard_url": dashboard_url or f"/superset/dashboard/{dashboard_id}/",
@@ -991,6 +1019,13 @@ class US13To15VizService:
         url = _normalize_text(payload.get("url"))
         if not url:
             raise RuntimeError(f"Explore link response does not contain url: {payload}")
+        self._emit_artifact_event(
+            "useful_links_produced",
+            status="ok",
+            dataset_id=int(dataset_id),
+            link_count=1,
+            link_kinds=["chart"],
+        )
         return self._to_absolute_url(url)
 
     def _create_dashboard(self, dashboard_title: str) -> Dict[str, Any]:
@@ -1011,6 +1046,13 @@ class US13To15VizService:
 
         if not dashboard_url:
             dashboard_url = f"/superset/dashboard/{dashboard_id}/"
+
+        self._emit_artifact_event(
+            "dashboard_created",
+            status="ok",
+            artifact_type="dashboard",
+            artifact_id=dashboard_id,
+        )
 
         return {
             "dashboard_id": dashboard_id,
@@ -1089,6 +1131,15 @@ class US13To15VizService:
 
         if not chart_url:
             chart_url = f"/explore/?slice_id={chart_id}"
+
+        self._emit_artifact_event(
+            "chart_created",
+            status="ok",
+            artifact_type="chart",
+            artifact_id=chart_id,
+            viz_type=safe_viz,
+            dashboard_id=dashboard_id,
+        )
 
         return {
             "chart_id": chart_id,

@@ -1,4 +1,9 @@
+import json
+import os
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
 
 from backend.us13_15_viz_service import (
     US13To15VizService,
@@ -8,6 +13,13 @@ from backend.us13_15_viz_service import (
 
 class TestUS13To15VizService(unittest.TestCase):
     def setUp(self):
+        self.log_dir = tempfile.TemporaryDirectory()
+        self.env_patcher = patch.dict(
+            os.environ,
+            {"ASSISTANT_LOG_DIR": self.log_dir.name},
+            clear=False,
+        )
+        self.env_patcher.start()
         self.service = US13To15VizService(
             base_url="http://localhost:8088",
             timeout_seconds=5.0,
@@ -17,6 +29,18 @@ class TestUS13To15VizService(unittest.TestCase):
 
     def tearDown(self):
         self.service.close()
+        self.env_patcher.stop()
+        self.log_dir.cleanup()
+
+    def _read_log_events(self, filename: str) -> list[dict]:
+        path = Path(self.log_dir.name) / filename
+        if not path.exists():
+            return []
+        return [
+            json.loads(line)
+            for line in path.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
 
     def test_extract_rows_from_nested_result(self):
         payload = {
@@ -251,6 +275,10 @@ class TestUS13To15VizService(unittest.TestCase):
         self.assertEqual(preview["rows_count"], 2)
         self.assertEqual(calls[0][0], "execute_sql")
         self.assertIn("LIMIT 20", calls[0][1]["sql"])
+        events = self._read_log_events("artifact.log")
+        preview_event = next(item for item in events if item.get("event") == "preview_completed")
+        self.assertEqual(preview_event.get("rows_count"), 2)
+        self.assertEqual(preview_event.get("column_count"), 2)
 
     def test_preview_sql_is_not_cached(self):
         calls = []
@@ -313,6 +341,11 @@ class TestUS13To15VizService(unittest.TestCase):
             "add_chart_to_existing_dashboard",
         ])
         self.assertNotIn("token", str(result).casefold())
+        events = self._read_log_events("artifact.log")
+        event_names = [item.get("event") for item in events]
+        self.assertIn("dashboard_created", event_names)
+        self.assertIn("chart_created", event_names)
+        self.assertIn("useful_links_produced", event_names)
 
     def test_create_dashboard_widget_with_share_uses_compat_chart_extension_for_pie(self):
         calls = []

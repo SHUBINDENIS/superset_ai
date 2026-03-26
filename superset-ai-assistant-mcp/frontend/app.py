@@ -28,6 +28,13 @@ from backend import (
     TIME_GRAIN_OPTIONS,
     COMMON_VIZ_TYPES,
 )
+from backend.observability import (
+    bind_log_context,
+    emit_event,
+    hash_user,
+    new_request_id,
+    new_trace_id,
+)
 from frontend.state import (
     AUTH_COOKIE_NAME,
     SESSION_WIDGET_KEYS_TO_CLEAR,
@@ -302,6 +309,89 @@ def _current_username() -> str:
     return str(st.session_state.get("auth_username", "")).strip()
 
 
+def _current_chat_id() -> str:
+    return str(st.session_state.get("session_id", "")).strip()
+
+
+def _build_log_context(
+    *,
+    trace_id: str = "",
+    request_id: str = "",
+    username: str = "",
+    session_id: str = "",
+) -> Dict[str, str]:
+    clean_username = str(username or _current_username()).strip()
+    clean_session_id = str(session_id or _current_chat_id()).strip()
+    return {
+        "trace_id": str(trace_id or new_trace_id()).strip(),
+        "request_id": str(request_id or new_request_id()).strip(),
+        "session_id": clean_session_id,
+        "chat_id": clean_session_id,
+        "user_hash": hash_user(clean_username),
+    }
+
+
+def _emit_frontend_event(
+    event: str,
+    *,
+    trace_id: str = "",
+    request_id: str = "",
+    username: str = "",
+    session_id: str = "",
+    level: str = "INFO",
+    **fields: Any,
+) -> Dict[str, str]:
+    context = _build_log_context(
+        trace_id=trace_id,
+        request_id=request_id,
+        username=username,
+        session_id=session_id,
+    )
+    with bind_log_context(**context):
+        emit_event("frontend", event, level=level, **fields)
+    return context
+
+
+def _store_pending_chat_log_context(trace_id: str, request_id: str) -> None:
+    apply_state_patch(
+        st.session_state,
+        {
+            "chat_trace_id": str(trace_id or "").strip(),
+            "chat_request_id": str(request_id or "").strip(),
+        },
+    )
+
+
+def _pending_chat_log_context() -> Dict[str, str]:
+    return _build_log_context(
+        trace_id=str(st.session_state.get("chat_trace_id", "")).strip(),
+        request_id=str(st.session_state.get("chat_request_id", "")).strip(),
+    )
+
+
+def _clear_pending_chat_log_context() -> None:
+    apply_state_patch(
+        st.session_state,
+        {
+            "chat_trace_id": "",
+            "chat_request_id": "",
+        },
+    )
+
+
+def _navigate_to_window(window_id: str, *, source: str) -> None:
+    target = str(window_id or "").strip() or WINDOW_CHAT
+    current = str(st.session_state.get("active_window", WINDOW_CHAT)).strip() or WINDOW_CHAT
+    if current != target:
+        _emit_frontend_event(
+            "window_navigation",
+            from_window=current,
+            to_window=target,
+            source=source,
+        )
+    st.session_state.active_window = target
+
+
 def _persist_chat_message(role: str, content: str) -> None:
     username = _current_username()
     session_id = str(st.session_state.get("session_id", "")).strip()
@@ -516,7 +606,7 @@ def _build_assistant_next_steps(content: str, links: List[Dict[str, str]]) -> Li
 
 
 def _open_preview_window() -> None:
-    st.session_state.active_window = WINDOW_US13
+    _navigate_to_window(WINDOW_US13, source="chat_preview_cta")
 
 
 def _build_us13_chat_followup(preview: Dict[str, Any]) -> str:
@@ -639,6 +729,7 @@ def _activate_chat_session(session_id: str, *, switch_to_chat: bool = True) -> N
     clean_session_id = str(session_id or "").strip()
     if not username or not clean_session_id:
         return
+    previous_session_id = _current_chat_id()
     _set_active_chat_session(clean_session_id)
     resolved_session_id, sessions, messages = _load_user_chat_state(
         username,
@@ -653,11 +744,20 @@ def _activate_chat_session(session_id: str, *, switch_to_chat: bool = True) -> N
             "pending_input": None,
             "chat_is_processing": False,
             "chat_processing_text": "",
+            "chat_trace_id": "",
+            "chat_request_id": "",
             "agent_initialized": False,
             "chat_rename_session_id": "",
             "chat_rename_value": "",
             "active_window": WINDOW_CHAT if switch_to_chat else st.session_state.get("active_window", WINDOW_CHAT),
         },
+    )
+    _emit_frontend_event(
+        "chat_switch",
+        username=username,
+        session_id=resolved_session_id,
+        previous_session_id=previous_session_id,
+        target_session_id=resolved_session_id,
     )
 
 
@@ -680,11 +780,19 @@ def _create_new_chat_session() -> None:
             "pending_input": None,
             "chat_is_processing": False,
             "chat_processing_text": "",
+            "chat_trace_id": "",
+            "chat_request_id": "",
             "agent_initialized": False,
             "chat_rename_session_id": "",
             "chat_rename_value": "",
             "active_window": WINDOW_CHAT,
         },
+    )
+    _emit_frontend_event(
+        "chat_new",
+        username=username,
+        session_id=resolved_session_id or new_session_id,
+        new_session_id=resolved_session_id or new_session_id,
     )
 
 
@@ -729,6 +837,12 @@ def _submit_chat_rename(session_id: str) -> None:
         title=str(st.session_state.get("chat_rename_value", "")).strip(),
     )
     _reload_current_chat_state(force_messages=False)
+    _emit_frontend_event(
+        "chat_rename",
+        username=username,
+        session_id=clean_session_id,
+        title_chars=len(str(st.session_state.get("chat_rename_value", "")).strip()),
+    )
     _cancel_chat_rename()
 
 
@@ -752,10 +866,18 @@ def _clear_active_chat() -> None:
             "pending_input": None,
             "chat_is_processing": False,
             "chat_processing_text": "",
+            "chat_trace_id": "",
+            "chat_request_id": "",
             "agent_initialized": False,
         },
     )
     _reload_current_chat_state(force_messages=True)
+    _emit_frontend_event(
+        "chat_clear",
+        username=username,
+        session_id=session_id,
+        cleared_session_id=session_id,
+    )
 
 
 def _apply_authenticated_state(auth_result: Dict[str, Any], *, persist_cookie: bool = True) -> None:
@@ -812,10 +934,20 @@ def _try_auto_login_from_cookie() -> bool:
         "session_id": str(token_context.get("session_id", "")).strip(),
     }
     _apply_authenticated_state(auth_result, persist_cookie=False)
+    _emit_frontend_event(
+        "auth_auto_login",
+        username=auth_result["username"],
+        session_id=auth_result["session_id"],
+    )
     return True
 
 
 def logout_user() -> None:
+    _emit_frontend_event(
+        "auth_logout",
+        username=_current_username(),
+        session_id=_current_chat_id(),
+    )
     _schedule_auth_cookie_clear()
     apply_state_patch(st.session_state, build_logout_state())
     st.rerun()
@@ -845,6 +977,11 @@ def render_auth_window() -> None:
             try:
                 auth_result = auth_service.authenticate_user(login_username, login_password)
                 _apply_authenticated_state(auth_result)
+                _emit_frontend_event(
+                    "auth_login_success",
+                    username=str(auth_result.get("username", "")).strip(),
+                    session_id=str(auth_result.get("session_id", "")).strip(),
+                )
                 st.rerun()
             except Exception as exc:
                 st.error(str(exc))
@@ -871,6 +1008,11 @@ def render_auth_window() -> None:
                     auth_service.register_user(reg_username, reg_password)
                     auth_result = auth_service.authenticate_user(reg_username, reg_password)
                     _apply_authenticated_state(auth_result)
+                    _emit_frontend_event(
+                        "auth_register_success",
+                        username=str(auth_result.get("username", "")).strip(),
+                        session_id=str(auth_result.get("session_id", "")).strip(),
+                    )
                     st.rerun()
                 except Exception as exc:
                     st.error(str(exc))
@@ -880,13 +1022,22 @@ def _queue_message(text: str, switch_to_chat: bool = True) -> None:
     clean = text.strip()
     if not clean:
         return
+    context = _emit_frontend_event(
+        "chat_submit",
+        message_chars=len(clean),
+        source_window=str(st.session_state.get("active_window", WINDOW_CHAT)).strip() or WINDOW_CHAT,
+    )
+    _store_pending_chat_log_context(
+        trace_id=context["trace_id"],
+        request_id=context["request_id"],
+    )
     st.session_state.messages.append({"role": "user", "content": clean})
     _start_chat_processing("Ассистент думает над ответом...")
     if _persist_chat_message("user", clean):
         _reload_current_chat_state(force_messages=False)
     st.session_state.pending_input = clean
     if switch_to_chat:
-        st.session_state.active_window = WINDOW_CHAT
+        _navigate_to_window(WINDOW_CHAT, source="chat_submit")
 
 
 def _render_chat_message_item(message: Dict[str, str]) -> None:
@@ -1116,7 +1267,7 @@ def sidebar():
                 use_container_width=True,
                 type="primary" if active == window_id else "secondary",
             ):
-                st.session_state.active_window = window_id
+                _navigate_to_window(window_id, source="sidebar")
                 st.rerun()
         st.caption(f"Текущее окно: {WINDOW_LABELS.get(st.session_state.active_window, '—')}")
 
@@ -2979,7 +3130,7 @@ def render_us4_window():
                         st.session_state.us13_database_id = int(item.get("database_id", 0) or 0)
                         st.session_state.us13_schema = str(item.get("schema", "")).strip()
                         st.session_state.us13_sql = str(item.get("sql", "")).strip()
-                        st.session_state.active_window = WINDOW_US13
+                        _navigate_to_window(WINDOW_US13, source="us4_open_preview")
                         st.rerun()
                 sql_tab, rows_tab = st.tabs(["SQL", "Preview"])
                 with sql_tab:
@@ -4119,13 +4270,28 @@ def render_us13_window():
             st.rerun()
 
         try:
+            preview_context = _emit_frontend_event(
+                "preview_run",
+                database_id=database_id,
+                preview_limit=limit,
+                has_schema=bool(schema),
+                sql_chars=len(sql),
+                source_window=WINDOW_US13,
+            )
             svc = get_us13_15_viz_service()
-            with st.spinner("Готовим быстрый просмотр данных и объяснение полей..."):
-                preview = svc.preview_sql(
-                    database_id=database_id,
-                    sql=sql,
-                    schema=schema,
-                    preview_limit=limit,
+            with bind_log_context(**preview_context):
+                with st.spinner("Готовим быстрый просмотр данных и объяснение полей..."):
+                    preview = svc.preview_sql(
+                        database_id=database_id,
+                        sql=sql,
+                        schema=schema,
+                        preview_limit=limit,
+                    )
+                emit_event(
+                    "frontend",
+                    "preview_run_completed",
+                    status="ok",
+                    rows_count=int(preview.get("rows_count", 0) or 0),
                 )
             _set_feedback(
                 status_key="us13_status_message",
@@ -4157,6 +4323,13 @@ def render_us13_window():
                 st.session_state.us15_time_column = temporal[0]
             st.rerun()
         except Exception as exc:
+            with bind_log_context(**preview_context):
+                emit_event(
+                    "frontend",
+                    "preview_run_completed",
+                    status="error",
+                    error_message=str(exc),
+                )
             _set_feedback(
                 status_key="us13_status_message",
                 error_key="us13_error_message",
@@ -4172,7 +4345,7 @@ def render_us13_window():
             "Если это не нужно, можно пропустить шаг и вернуться в чат с бизнес-вопросом.",
         )
         if st.button("Вернуться в чат и задать вопрос", key="us13_back_to_chat_empty", use_container_width=True):
-            st.session_state.active_window = WINDOW_CHAT
+            _navigate_to_window(WINDOW_CHAT, source="us13_empty_back_to_chat")
             st.rerun()
         return
 
@@ -4379,7 +4552,7 @@ def render_us14_window():
             "Сначала выполните предпросмотр, если хотите проверить поля и значения перед выбором графика.",
         )
         if st.button("Открыть предпросмотр", use_container_width=True):
-            st.session_state.active_window = WINDOW_US13
+            _navigate_to_window(WINDOW_US13, source="us14_open_preview")
             st.rerun()
         return
 
@@ -4456,15 +4629,28 @@ def render_us14_window():
         st.rerun()
 
     if recommend_btn:
+        recommendation_context = _emit_frontend_event(
+            "viz_recommend_request",
+            source_window=WINDOW_US14,
+            row_count=len(rows),
+            column_count=len(columns),
+        )
         try:
             svc = get_us13_15_viz_service()
-            recommendation = svc.recommend_viz_types(
-                rows=rows,
-                columns=columns,
-                metric_column=st.session_state.us14_metric_column,
-                dimension_column=st.session_state.us14_dimension_column,
-                time_column=st.session_state.us14_time_column,
-            )
+            with bind_log_context(**recommendation_context):
+                recommendation = svc.recommend_viz_types(
+                    rows=rows,
+                    columns=columns,
+                    metric_column=st.session_state.us14_metric_column,
+                    dimension_column=st.session_state.us14_dimension_column,
+                    time_column=st.session_state.us14_time_column,
+                )
+                emit_event(
+                    "frontend",
+                    "viz_recommend_completed",
+                    status="ok",
+                    recommended=str(recommendation.get("recommended", "table")).strip() or "table",
+                )
             st.session_state.us14_recommendation = recommendation
             recommended = str(recommendation.get("recommended", "table")).strip() or "table"
             _set_feedback(
@@ -4476,6 +4662,13 @@ def render_us14_window():
             st.session_state.us15_viz_type = recommended
             st.rerun()
         except Exception as exc:
+            with bind_log_context(**recommendation_context):
+                emit_event(
+                    "frontend",
+                    "viz_recommend_completed",
+                    status="error",
+                    error_message=str(exc),
+                )
             _set_feedback(
                 status_key="us14_status_message",
                 error_key="us14_error_message",
@@ -4560,7 +4753,7 @@ def render_us14_window():
                 st.rerun()
         with apply_col2:
             if st.button("Перейти к созданию виджета", use_container_width=True):
-                st.session_state.active_window = WINDOW_US15
+                _navigate_to_window(WINDOW_US15, source="us14_to_us15")
                 st.rerun()
 
 
@@ -4778,18 +4971,33 @@ def render_us15_window():
             )
             st.rerun()
         try:
+            create_context = _emit_frontend_event(
+                "widget_create",
+                source_window=WINDOW_US15,
+                dataset_id=dataset_id,
+                viz_type=st.session_state.us15_viz_type,
+                row_limit=int(st.session_state.us15_row_limit),
+            )
             svc = get_us13_15_viz_service()
-            with st.spinner("Создаём dashboard/chart в Superset..."):
-                result = svc.create_dashboard_widget_with_share(
-                    dataset_id=dataset_id,
-                    dashboard_title=st.session_state.us15_dashboard_title,
-                    slice_name=st.session_state.us15_chart_title,
-                    viz_type=st.session_state.us15_viz_type,
-                    metric_column=st.session_state.us15_metric_column,
-                    dimension_column=st.session_state.us15_dimension_column,
-                    time_column=st.session_state.us15_time_column,
-                    row_limit=int(st.session_state.us15_row_limit),
-                    description=st.session_state.us15_description,
+            with bind_log_context(**create_context):
+                with st.spinner("Создаём dashboard/chart в Superset..."):
+                    result = svc.create_dashboard_widget_with_share(
+                        dataset_id=dataset_id,
+                        dashboard_title=st.session_state.us15_dashboard_title,
+                        slice_name=st.session_state.us15_chart_title,
+                        viz_type=st.session_state.us15_viz_type,
+                        metric_column=st.session_state.us15_metric_column,
+                        dimension_column=st.session_state.us15_dimension_column,
+                        time_column=st.session_state.us15_time_column,
+                        row_limit=int(st.session_state.us15_row_limit),
+                        description=st.session_state.us15_description,
+                    )
+                emit_event(
+                    "frontend",
+                    "widget_create_completed",
+                    status="ok",
+                    dashboard_id=result.get("dashboard_id"),
+                    chart_id=result.get("chart_id"),
                 )
             _set_feedback(
                 status_key="us15_status_message",
@@ -4799,6 +5007,13 @@ def render_us15_window():
             )
             st.rerun()
         except Exception as exc:
+            with bind_log_context(**create_context):
+                emit_event(
+                    "frontend",
+                    "widget_create_completed",
+                    status="error",
+                    error_message=str(exc),
+                )
             _set_feedback(
                 status_key="us15_status_message",
                 error_key="us15_error_message",
@@ -4871,7 +5086,7 @@ async def ensure_session():
     return True, None
 
 
-async def handle_message(text: str):
+async def handle_message(text: str, *, trace_id: str = "", request_id: str = ""):
     username = _current_username()
     if not username:
         raise ValueError("User is not authenticated.")
@@ -4880,35 +5095,66 @@ async def handle_message(text: str):
     if not session_id:
         raise ValueError("Session ID is missing.")
 
-    agent, created = await _get_session_agent(
-        session_id,
-        username,
-        create_if_missing=True,
-    )
-    if not agent:
-        raise RuntimeError("Не удалось получить сессию агента.")
-    if created:
-        if not st.session_state.get("agent_initialized"):
-            ok = await agent.initialize()
-            if not ok:
-                raise RuntimeError("Не удалось инициализировать агента.")
-            st.session_state.agent_initialized = True
+    with bind_log_context(
+        **_build_log_context(
+            trace_id=trace_id,
+            request_id=request_id,
+            username=username,
+            session_id=session_id,
+        )
+    ):
+        agent, created = await _get_session_agent(
+            session_id,
+            username,
+            create_if_missing=True,
+        )
+        if not agent:
+            raise RuntimeError("Не удалось получить сессию агента.")
+        if created:
+            if not st.session_state.get("agent_initialized"):
+                ok = await agent.initialize()
+                if not ok:
+                    raise RuntimeError("Не удалось инициализировать агента.")
+                st.session_state.agent_initialized = True
 
-    st.session_state.chat_processing_text = "Ассистент готовит ответ..."
-    reply = await agent.chat(st.session_state.messages)
-    content = str(reply.get("content", "")).strip()
-    finish_reason = str(reply.get("finish_reason", "")).strip().lower()
-    if not content:
-        content = "Пустой ответ ассистента."
-    if finish_reason == "blocked":
-        content = _format_guardrail_block_content(content)
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": content,
-    })
-    if _persist_chat_message("assistant", content):
-        _reload_current_chat_state(force_messages=False)
-    _stop_chat_processing()
+        st.session_state.chat_processing_text = "Ассистент готовит ответ..."
+        reply = await agent.chat(st.session_state.messages)
+        content = str(reply.get("content", "")).strip()
+        finish_reason = str(reply.get("finish_reason", "")).strip().lower()
+        if not content:
+            content = "Пустой ответ ассистента."
+        if finish_reason == "blocked":
+            content = _format_guardrail_block_content(content)
+        st.session_state.messages.append({
+            "role": "assistant",
+            "content": content,
+        })
+        if _persist_chat_message("assistant", content):
+            _reload_current_chat_state(force_messages=False)
+        links = _extract_chat_links(content)
+        emit_event(
+            "frontend",
+            "assistant_reply_received",
+            finish_reason=finish_reason or "unknown",
+            status="blocked" if finish_reason == "blocked" else "ok",
+            link_count=len(links),
+            message_chars=len(content),
+        )
+        if links:
+            emit_event(
+                "artifact",
+                "useful_links_produced",
+                source="assistant_chat",
+                link_count=len(links),
+                link_kinds=sorted(
+                    {
+                        str(item.get("kind", "")).strip()
+                        for item in links
+                        if isinstance(item, dict)
+                    }
+                ),
+            )
+        _stop_chat_processing()
 
 
 # --- State utils -------------------------------------------------------------
@@ -4931,9 +5177,16 @@ def process_pending_input():
     text = st.session_state.pending_input
     if not text:
         return False
+    log_context = _pending_chat_log_context()
     st.session_state.pending_input = None
     try:
-        asyncio.run(handle_message(text))
+        asyncio.run(
+            handle_message(
+                text,
+                trace_id=log_context["trace_id"],
+                request_id=log_context["request_id"],
+            )
+        )
     except Exception as exc:
         error_text = str(exc).strip()
         content = (
@@ -4947,7 +5200,16 @@ def process_pending_input():
                 "content": content,
             }
         )
+        with bind_log_context(**log_context):
+            emit_event(
+                "frontend",
+                "assistant_reply_error",
+                status="error",
+                error_message=error_text,
+            )
         _stop_chat_processing()
+    finally:
+        _clear_pending_chat_log_context()
     return True
 
 
@@ -5015,7 +5277,7 @@ def main():
         _process_pending_input_with_feedback()
         render_us15_window()
     else:
-        st.session_state.active_window = WINDOW_CHAT
+        _navigate_to_window(WINDOW_CHAT, source="fallback")
         st.rerun()
 
 
