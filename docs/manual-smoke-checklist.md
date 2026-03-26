@@ -2,10 +2,16 @@
 
 Цель документа: дать команде один воспроизводимый manual smoke перед merge, deploy и MUP defence demo.
 
+Во время dual-run этот checklist нужно проходить по одному и тому же сценарию
+для обеих UI-веток:
+- Streamlit UI
+- Next.js/FastAPI UI
+
 ## Scope
 
 Проверяем именно текущий продуктовый контур:
 - Streamlit assistant
+- Next.js/FastAPI assistant
 - built-in MCP path
 - Superset
 - Pagila PostgreSQL demo-source
@@ -391,4 +397,3 @@ Go только если все `Critical` сценарии прошли.
   - проверить `SUPERSET_PUBLIC_URL`
 - Если blocked response выглядит как generic error:
   - проверить `agent.log` и `frontend.log`
-
