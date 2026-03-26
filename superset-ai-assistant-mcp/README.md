@@ -84,12 +84,13 @@ Runbooks:
 - `../docs/deployment.md`
 - `../docs/production-rollout-runbook.md`
 - `../docs/manual-smoke-checklist.md`
+- `../docs/update-and-debug.md`
 
 ## Verification
 
 ```bash
-curl http://127.0.0.1:8100/api/health
-curl -I http://127.0.0.1:3001/login
+cd /home/superset_ai
+./docker/dev/check-primary-stack.sh
 ```
 
 Recommended test set:

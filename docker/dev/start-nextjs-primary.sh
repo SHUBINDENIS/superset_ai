@@ -10,9 +10,16 @@ if [ ! -x node_modules/.bin/next ]; then
   npm ci
 fi
 
-if [ "${NEXTJS_RUNTIME}" = "production" ]; then
-  npm run build
-  exec npm run start -- --hostname 0.0.0.0 --port "${NEXTJS_PORT}"
-fi
-
-exec npm run dev -- --hostname 0.0.0.0 --port "${NEXTJS_PORT}"
+case "${NEXTJS_RUNTIME}" in
+  production)
+    npm run build
+    exec npm run start -- --hostname 0.0.0.0 --port "${NEXTJS_PORT}"
+    ;;
+  development)
+    exec npm run dev -- --hostname 0.0.0.0 --port "${NEXTJS_PORT}"
+    ;;
+  *)
+    echo "Unsupported NEXTJS_RUNTIME='${NEXTJS_RUNTIME}'. Use 'production' or 'development'." >&2
+    exit 64
+    ;;
+esac

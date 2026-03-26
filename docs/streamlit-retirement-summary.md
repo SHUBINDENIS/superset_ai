@@ -49,8 +49,8 @@ service in the repository.
 
 ## Remaining Polish
 
-- Prune now-unused Python packages that were previously pulled in through the
-  Streamlit-oriented requirements snapshot
+- Regenerate Python requirements from a cleaner source-of-truth if the team
+  wants to prune more transitive snapshot noise
 - Decide whether `US2-US5` will get a new UI surface in `Next.js` or remain
   backend-only capabilities for future work
 - Archive or compress more historical cutover documents if the team no longer

@@ -137,6 +137,7 @@ Recommended operator actions:
 ## Related Docs
 
 - `docs/production-rollout-runbook.md`
+- `docs/update-and-debug.md`
 - `docs/manual-smoke-checklist.md`
 - `docs/streamlit-retirement-summary.md`
 - `docs/dual-run-parity-readiness.md` (historical archive)

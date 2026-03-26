@@ -47,10 +47,7 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
 Internal:
 
 ```bash
-docker compose --env-file .env.dev -f docker-compose.dev.yml ps
-curl http://127.0.0.1:8100/api/health
-curl -I http://127.0.0.1:3001/login
-curl -I http://127.0.0.1:8088/health
+./docker/dev/check-primary-stack.sh
 ```
 
 External:
@@ -84,7 +81,12 @@ rollback:
 See:
 - `docs/examples/nginx-primary-ui.conf.example`
 
-## 8. Historical References
+## 8. Day-2 Update And Debug
+
+See:
+- `docs/update-and-debug.md`
+
+## 9. Historical References
 
 For the previous phased-cutover evidence only:
 - `docs/dual-run-parity-readiness.md`

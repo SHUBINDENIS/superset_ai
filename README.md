@@ -83,20 +83,20 @@ Reverse-proxy example:
 Deployment and rollout docs:
 - `docs/deployment.md`
 - `docs/production-rollout-runbook.md`
+- `docs/update-and-debug.md`
 
 ## Verification
 
 Primary health checks:
 
 ```bash
-curl http://127.0.0.1:8100/api/health
-curl -I http://127.0.0.1:3001/login
-curl -I http://127.0.0.1:8088/health
+./docker/dev/check-primary-stack.sh
 ```
 
 Manual smoke:
 - `docs/manual-smoke-checklist.md`
 - `docs/demo-query-pack.md`
+- `docs/update-and-debug.md`
 
 ## Test Commands
 

@@ -5,9 +5,7 @@ Run locally:
     cd superset-ai-assistant-mcp
     uvicorn api.main:app --reload --port 8100
 
-This app is designed to coexist with the Streamlit assistant.
-It now serves the primary core UI path for the Next.js frontend,
-while Streamlit remains available as a fallback/helper-admin UI.
+This app serves the single supported assistant API for the Next.js frontend.
 """
 
 from __future__ import annotations
