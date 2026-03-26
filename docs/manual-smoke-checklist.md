@@ -33,7 +33,9 @@
   - `http://<host>:8100/api/health`
   - `http://<host>:8088`
 - [ ] Известно, где лежат логи:
-  - default: `superset-ai-assistant-mcp/data/logs/`
+  - compose logs: `./docker/dev/tail-primary-logs.sh`
+  - structured logs in compose: `./docker/dev/tail-primary-logs.sh structured`
+  - direct-run default: `superset-ai-assistant-mcp/data/logs/`
   - override: `ASSISTANT_LOG_DIR`
 
 ## Go / No-Go Rule

@@ -1,18 +1,15 @@
 # Update And Debug Guide
 
-Используйте этот документ как day-2 operator/developer guide для единственного
-поддерживаемого stack: `Next.js + FastAPI`.
+Используйте этот документ как основной day-2 operator/developer guide для
+единственного поддерживаемого runtime stack: `Next.js + FastAPI`.
 
-## Supported Runtime
+## Final Supported Scope
 
-- UI: `assistant-web` / `frontend-next`
-- API: `assistant-api` / `api`
-- Superset: отдельный Superset stack
-
-Historical only:
-- `docs/dual-run-parity-readiness.md`
-- `docs/phased-cutover-plan.md`
-- `docs/phased-cutover-signoff.md`
+Fully supported now:
+- `assistant-web` / `frontend-next`
+- `assistant-api` / `api`
+- `superset` + built-in MCP path
+- current product UI flows: `login`, `chat`, `preview`, `recommend`, `share`, `scan`
 
 Backend-only for future work:
 - `backend/us2_glossary_service.py`
@@ -20,7 +17,15 @@ Backend-only for future work:
 - `backend/us4_query_assistant.py`
 - `backend/us5_query_builder.py`
 
-## Default Local Run
+Historical/archive only:
+- `docs/dual-run-parity-readiness.md`
+- `docs/phased-cutover-plan.md`
+- `docs/phased-cutover-signoff.md`
+- `docs/streamlit-retirement-summary.md`
+
+## One Primary Local/Server Path
+
+Default local or production-like compose run:
 
 ```bash
 cd /home/superset_ai
@@ -28,66 +33,112 @@ cp .env.dev.example .env.dev
 docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
 ```
 
-## Fastest Health Check
+Primary endpoints:
+- UI: `http://<host>:3001/login`
+- API: `http://<host>:8100/api/health`
+- Superset: `http://<host>:8088`
+
+## Operator Helpers
+
+Primary health:
 
 ```bash
 cd /home/superset_ai
 ./docker/dev/check-primary-stack.sh
 ```
 
-Если нужны non-default порты:
+Update or rebuild primary services:
+
+```bash
+cd /home/superset_ai
+./docker/dev/refresh-primary-stack.sh
+./docker/dev/refresh-primary-stack.sh rebuild assistant-api
+./docker/dev/refresh-primary-stack.sh rebuild assistant-web
+```
+
+`refresh-primary-stack.sh` waits for touched HTTP services to answer before it exits.
+
+Restart primary services without rebuild:
+
+```bash
+cd /home/superset_ai
+./docker/dev/refresh-primary-stack.sh restart
+```
+
+Tail logs:
+
+```bash
+cd /home/superset_ai
+./docker/dev/tail-primary-logs.sh
+./docker/dev/tail-primary-logs.sh compose assistant-api
+./docker/dev/tail-primary-logs.sh structured
+```
+
+Если нужны non-default порты для health helper:
 
 ```bash
 cd /home/superset_ai
 DEV_API_PORT=18100 DEV_NEXTJS_PORT=13001 DEV_SUPERSET_PORT=18088 ./docker/dev/check-primary-stack.sh
 ```
 
-## Rebuild Only What Changed
+## Required Environment Checklist
 
-FastAPI/backend change:
+Minimum variables before local smoke or server rollout:
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
+- `SUPERSET_PUBLIC_URL`
+- `US15_SHARE_BASE_URL`
+- `AUTH_JWT_SECRET`
 
-```bash
-cd /home/superset_ai
-docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build assistant-api
-```
+Only when calling FastAPI directly outside the Next.js origin:
+- `API_CORS_ORIGINS`
 
-Next.js/frontend change:
+Optional log override:
+- `ASSISTANT_LOG_DIR`
 
-```bash
-cd /home/superset_ai
-docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build assistant-web
-```
+## Minimal Post-Update Verification Path
+
+1. `./docker/dev/refresh-primary-stack.sh`
+2. `./docker/dev/check-primary-stack.sh`
+3. Open `/login`
+4. Run `chat -> preview -> recommend -> share -> scan`
+5. Run `docs/demo-query-pack.md`
 
 ## Logs And Debug Flow
 
-Primary logs:
+Compose logs:
+- `./docker/dev/tail-primary-logs.sh`
+- `./docker/dev/tail-primary-logs.sh compose assistant-api`
 
-```bash
-cd /home/superset_ai
-docker compose --env-file .env.dev -f docker-compose.dev.yml logs -f assistant-api
-docker compose --env-file .env.dev -f docker-compose.dev.yml logs -f assistant-web
-docker compose --env-file .env.dev -f docker-compose.dev.yml logs -f superset
-```
+Structured assistant logs:
+- `./docker/dev/tail-primary-logs.sh structured`
 
-Primary health/debug sequence:
+Structured log locations:
+- direct local run default: `superset-ai-assistant-mcp/data/logs/`
+- compose default: `/app/superset-ai-assistant-mcp/data/logs/` inside `assistant-api`
+- optional override: `ASSISTANT_LOG_DIR`
 
-1. `docker compose ... ps`
-2. `./docker/dev/check-primary-stack.sh`
-3. If API issue: inspect `assistant-api` logs first
-4. If UI issue: inspect `assistant-web` logs and rerun `npm run build`
-5. If chart/share/scan issue: confirm `SUPERSET_PUBLIC_URL` and Superset health
+What to check first:
+1. `./docker/dev/check-primary-stack.sh`
+2. If API issue: `./docker/dev/tail-primary-logs.sh compose assistant-api`
+3. If UI issue: `./docker/dev/tail-primary-logs.sh compose assistant-web`
+4. If chart/share/scan issue: check Superset health and `SUPERSET_PUBLIC_URL`
+5. If correlation/logging issue: `./docker/dev/tail-primary-logs.sh structured`
 
-## Minimal Smoke Path
+## Rollback Guidance
 
-1. Open `/login`
-2. Register or login
-3. Run `chat -> preview -> recommend -> share -> scan`
-4. Run `docs/demo-query-pack.md`
+Rollback is deployment rollback of the same single stack:
+
+1. restore the previous known-good revision or image build
+2. rerun `./docker/dev/refresh-primary-stack.sh`
+3. rerun `./docker/dev/check-primary-stack.sh`
+4. rerun `docs/manual-smoke-checklist.md`
+5. inspect compose + structured logs before reopening traffic
 
 ## Before Updating On A Server
 
 1. pull the new revision
 2. review `README.md` and `docs/production-rollout-runbook.md`
-3. rebuild `assistant-api` and `assistant-web`
+3. run `./docker/dev/refresh-primary-stack.sh`
 4. run `./docker/dev/check-primary-stack.sh`
 5. rerun `docs/manual-smoke-checklist.md`

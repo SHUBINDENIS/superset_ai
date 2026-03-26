@@ -98,6 +98,11 @@ Manual smoke:
 - `docs/demo-query-pack.md`
 - `docs/update-and-debug.md`
 
+Operator helpers:
+- `docker/dev/refresh-primary-stack.sh`
+- `docker/dev/check-primary-stack.sh`
+- `docker/dev/tail-primary-logs.sh`
+
 ## Test Commands
 
 Python API/backend suites:

@@ -32,6 +32,7 @@ x-assistant-build: &assistant-build
 x-assistant-runtime-env: &assistant-runtime-env
   OPENAI_API_KEY: ${OPENAI_API_KEY:-replace_me}
   OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.4-mini}
+  ASSISTANT_LOG_DIR: ${ASSISTANT_LOG_DIR:-}
   SUPERSET_PRODUCT_MCP_RUNTIME: built_in_http
   SUPERSET_BUILT_IN_MCP_URL: http://mcp-http:5008/mcp/
   SUPERSET_BASE_URL: http://superset:8088

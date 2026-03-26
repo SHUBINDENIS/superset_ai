@@ -108,10 +108,8 @@ NEXT_PUBLIC_API_URL=http://127.0.0.1:8100 npm run dev -- --hostname 0.0.0.0 --po
 ## Health Verification
 
 ```bash
-docker compose --env-file .env.dev -f docker-compose.dev.yml ps
-curl http://127.0.0.1:8100/api/health
-curl -I http://127.0.0.1:3001/login
-curl -I http://127.0.0.1:8088/health
+./docker/dev/check-primary-stack.sh
+./docker/dev/tail-primary-logs.sh compose assistant-api
 ```
 
 External checks after proxy publication:
@@ -131,8 +129,18 @@ Recommended operator actions:
 
 1. keep the failed deployment logs and trace identifiers
 2. restore the previous compose revision, image tag, or application build
-3. re-run `docs/manual-smoke-checklist.md`
-4. re-open traffic to the restored primary stack
+3. re-run `./docker/dev/check-primary-stack.sh`
+4. re-run `docs/manual-smoke-checklist.md`
+5. re-open traffic to the restored primary stack
+
+## Operator Helpers
+
+- `docker/dev/refresh-primary-stack.sh`
+  - rebuild or restart `assistant-api` / `assistant-web`, then wait for HTTP readiness
+- `docker/dev/check-primary-stack.sh`
+  - one-command health verification
+- `docker/dev/tail-primary-logs.sh`
+  - compose log tail or structured assistant file logs
 
 ## Related Docs
 

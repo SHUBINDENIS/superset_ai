@@ -93,6 +93,11 @@ cd /home/superset_ai
 ./docker/dev/check-primary-stack.sh
 ```
 
+Operator helpers:
+- `../docker/dev/refresh-primary-stack.sh`
+- `../docker/dev/check-primary-stack.sh`
+- `../docker/dev/tail-primary-logs.sh`
+
 Recommended test set:
 
 ```bash

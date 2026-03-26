@@ -48,6 +48,7 @@ Internal:
 
 ```bash
 ./docker/dev/check-primary-stack.sh
+./docker/dev/tail-primary-logs.sh compose assistant-api
 ```
 
 External:
@@ -60,11 +61,13 @@ curl -I https://superset.example.com/health
 
 ## 5. Post-Deploy Smoke
 
-1. open `https://assistant.example.com/login`
-2. login or register
-3. run `chat -> preview -> recommend -> share -> scan`
-4. run `docs/demo-query-pack.md`
-5. confirm trace correlation in logs
+1. run `./docker/dev/refresh-primary-stack.sh`
+2. run `./docker/dev/check-primary-stack.sh`
+3. open `https://assistant.example.com/login`
+4. login or register
+5. run `chat -> preview -> recommend -> share -> scan`
+6. run `docs/demo-query-pack.md`
+7. confirm trace correlation in logs via `./docker/dev/tail-primary-logs.sh structured`
 
 ## 6. Rollback
 
@@ -74,7 +77,8 @@ rollback:
 1. stop exposing the faulty release
 2. restore the previous known-good assistant-web / assistant-api deployment
 3. keep traces and logs for incident analysis
-4. rerun `docs/manual-smoke-checklist.md`
+4. rerun `./docker/dev/check-primary-stack.sh`
+5. rerun `docs/manual-smoke-checklist.md`
 
 ## 7. Proxy Reference
 
