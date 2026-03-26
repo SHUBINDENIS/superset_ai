@@ -68,6 +68,12 @@ SAFE_ANALYTICS_EXAMPLES: List[str] = [
     "Объясни, какие поля отвечают за клиента и сумму заказа",
 ]
 
+PREVIEW_PATH_EXAMPLES: List[str] = [
+    "Хочу быстро увидеть несколько строк по заказам",
+    "Хочу понять, где дата, сумма и категория",
+    "Хочу проверить, какие значения встречаются в поле «регион»",
+]
+
 BLOCKED_GUARDRAIL_EXAMPLES: List[Dict[str, str]] = [
     {
         "label": "Проверить: destructive SQL",
@@ -427,6 +433,32 @@ def _looks_like_policy_block_text(content: str) -> bool:
         "ddl/dml",
     ]
     return any(marker in low for marker in block_markers)
+
+
+def _open_preview_window() -> None:
+    st.session_state.active_window = WINDOW_US13
+
+
+def _build_us13_chat_followup(preview: Dict[str, Any]) -> str:
+    columns = preview.get("columns", [])
+    column_names: List[str] = []
+    if isinstance(columns, list):
+        for item in columns:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("column", "")).strip()
+            if name and name not in column_names:
+                column_names.append(name)
+    if column_names:
+        shown = ", ".join(column_names[:6])
+        return (
+            "Я посмотрел предпросмотр данных. Помоги сформулировать бизнес-вопросы и полезные метрики "
+            f"по этим данным. Для контекста доступны поля: {shown}."
+        )
+    return (
+        "Я посмотрел предпросмотр данных. Помоги сформулировать бизнес-вопрос и подскажи, "
+        "какие метрики и срезы стоит проверить в чате."
+    )
 
 
 def _load_user_chat_state(
@@ -832,16 +864,16 @@ def sidebar():
 
         with st.expander("Как начать", expanded=False):
             st.caption(
-                "1. Начните с чата, если у вас уже есть бизнес-вопрос."
+                "Есть два пути: быстро заглянуть в данные или сразу задать бизнес-вопрос."
             )
             st.caption(
-                "2. Откройте «Предпросмотр», если нужно увидеть поля, значения и понять таблицу."
+                "Путь A: откройте «Предпросмотр», если хотите увидеть поля, примеры значений и понять таблицу."
             )
             st.caption(
-                "3. Откройте «Рекомендации», если хотите быстро выбрать подходящий график."
+                "Путь B: оставайтесь в чате, если уже понимаете бизнес-задачу и хотите получить ответ сразу."
             )
             st.caption(
-                "4. Откройте «Шеринг», чтобы создать chart/dashboard и получить ссылки."
+                "После этого можно перейти в «Рекомендации», чтобы выбрать график, и в «Шеринг», чтобы получить chart/dashboard и ссылки."
             )
             st.caption(
                 "«Сканер схем» нужен только если вы ещё не знаете, где искать данные."
@@ -982,27 +1014,28 @@ def sidebar():
 
 def _render_chat_onboarding() -> None:
     st.info(
-        "Как начать: задайте вопрос в бизнес-формулировке. "
-        "Если нужно проверить поля и примеры значений, откройте «Предпросмотр». "
-        "Если вы пока не знаете, где лежат данные, начните со «Сканера схем»."
+        "Как начать: выберите один из двух путей. "
+        "Если хотите быстро понять таблицу и поля, откройте «Предпросмотр». "
+        "Если вопрос уже понятен в бизнес-терминах, задайте его прямо в чате. "
+        "«Сканер схем» нужен только если вы пока не знаете, где искать данные."
     )
     st.markdown("### Рекомендуемый путь")
     render_kpi_cards(
         [
             {
-                "label": "1. Спросите бизнес-вопрос",
-                "value": "Начните в чате",
-                "meta": "Например: выручка, заказы, категории, клиенты, регионы.",
+                "label": "1. Выберите удобный путь",
+                "value": "Preview или чат",
+                "meta": "Можно быстро заглянуть в данные или сразу перейти к бизнес-вопросу.",
             },
             {
                 "label": "2. Проверьте поля при необходимости",
                 "value": "Предпросмотр",
-                "meta": "Нужен, если вы не уверены в таблице, датах, фильтрах или названиях полей.",
+                "meta": "Полезен, если вы не уверены в таблице, датах, фильтрах или названиях полей.",
             },
             {
-                "label": "3. Получите подсказку по графику",
-                "value": "Рекомендации",
-                "meta": "Используйте, если хотите быстро понять, какой тип визуализации подойдёт.",
+                "label": "3. Сформулируйте вопрос или график",
+                "value": "Чат / Рекомендации",
+                "meta": "В чате задавайте бизнес-вопросы, а в «Рекомендациях» выбирайте визуализацию.",
             },
             {
                 "label": "4. Сохраните результат",
@@ -1022,6 +1055,40 @@ def _render_chat_onboarding() -> None:
         st.markdown(
             "- Если вы совсем не знаете, где лежат данные, начните со «Сканера схем», а затем перейдите в «Предпросмотр»."
         )
+
+
+def _render_chat_dual_path_guidance() -> None:
+    st.markdown("### Два удобных способа начать")
+    st.caption(
+        "Оба пути корректны: можно быстро проверить данные, а можно сразу спросить о выручке, заказах, клиентах или категориях."
+    )
+    preview_col, direct_col = st.columns(2)
+    with preview_col:
+        st.markdown("#### Хочу быстро посмотреть данные")
+        st.caption(
+            "Подходит, если нужно увидеть несколько строк, понять поля, проверить даты, категории и примеры значений."
+        )
+        st.markdown("- Быстро посмотреть данные")
+        st.markdown("- Понять поля")
+        st.markdown("- Убедиться, что выбрана нужная таблица")
+        st.caption("Примеры для этого пути:")
+        for example in PREVIEW_PATH_EXAMPLES:
+            st.markdown(f"- {example}")
+        if st.button("Открыть «Предпросмотр»", key="chat_open_preview_path", use_container_width=True):
+            _open_preview_window()
+            st.rerun()
+    with direct_col:
+        st.markdown("#### Хочу сразу задать бизнес-вопрос")
+        st.caption(
+            "Подходит, если задача уже понятна: например, нужно сравнить выручку, заказы, категории или регионы."
+        )
+        st.markdown("- Можно пропустить preview")
+        st.markdown("- Не нужно формулировать SQL")
+        st.markdown("- Ассистент сам поможет перейти к графику или дашборду")
+        st.caption("Примеры для этого пути:")
+        for example in SAFE_ANALYTICS_EXAMPLES[:3]:
+            st.markdown(f"- {example}")
+        st.caption("Если источник данных пока неясен, только тогда переходите в «Сканер схем».")
 
 
 def _render_chat_security_guidance() -> None:
@@ -1101,9 +1168,10 @@ def render_chat_window():
     )
 
     _render_chat_onboarding()
+    _render_chat_dual_path_guidance()
     _render_chat_security_guidance()
 
-    st.markdown("### Разрешённые аналитические примеры")
+    st.markdown("### Примеры для пути «Сразу задать бизнес-вопрос»")
     samples = list(SAFE_ANALYTICS_EXAMPLES)
     left_col, right_col = st.columns(2)
     for i, q in enumerate(samples):
@@ -1116,9 +1184,16 @@ def render_chat_window():
     if not st.session_state.messages:
         render_empty_state(
             "Диалог пока пуст",
-            "Начните с вопроса в бизнес-формулировке ниже. "
-            "Если хотите сначала увидеть поля и примеры значений, откройте «Предпросмотр».",
+            "Выберите удобный путь: откройте «Предпросмотр», если хотите быстро посмотреть данные и понять поля, "
+            "или просто задайте бизнес-вопрос ниже.",
         )
+        empty_col1, empty_col2 = st.columns(2)
+        with empty_col1:
+            if st.button("Быстро посмотреть данные", key="chat_empty_open_preview", use_container_width=True):
+                _open_preview_window()
+                st.rerun()
+        with empty_col2:
+            st.caption("Можно пропустить preview и сразу задать вопрос в чате.")
     else:
         for msg in st.session_state.messages:
             _render_chat_message_item(msg)
@@ -1127,7 +1202,7 @@ def render_chat_window():
         "Безопасный режим: задавайте бизнес-вопросы и read-only запросы. "
         "Destructive SQL, prompt injection, off-topic и часть PII-запросов будут заблокированы."
     )
-    user_text = st.chat_input("Например: Покажи выручку по месяцам…")
+    user_text = st.chat_input("Например: Покажи выручку по месяцам или сравни регионы по заказам…")
     if user_text:
         _queue_message(user_text, switch_to_chat=False)
         st.rerun()
@@ -2505,7 +2580,7 @@ def render_us4_window():
         except Exception:
             pass
 
-    st.markdown("### Источник данных")
+    st.markdown("### Что посмотреть")
     scope_col1, scope_col2 = st.columns(2)
     with scope_col1:
         refresh_scope_btn = st.button(
@@ -3673,14 +3748,34 @@ def _us13_preview_columns() -> List[Dict[str, Any]]:
 
 
 def render_us13_window():
-    st.title("Предпросмотр результата и объяснение полей")
+    st.title("Быстрый просмотр данных и объяснение полей")
     st.caption(
-        "Здесь можно быстро посмотреть пример данных и понять, какие поля отвечают за метрики, категории и даты."
+        "Здесь можно быстро посмотреть несколько строк и понять, какие поля отвечают за метрики, категории и даты."
     )
     st.info(
-        "Используйте предпросмотр, если хотите увидеть поля, примеры значений и убедиться, "
-        "что выбрали правильную таблицу. Если вопрос уже понятен и детали полей не важны, "
-        "можно начать прямо с чата."
+        "Используйте этот шаг, если хотите быстро посмотреть данные, понять поля и убедиться, "
+        "что выбрали правильную таблицу. Если бизнес-вопрос уже понятен и детали полей не важны, "
+        "можно пропустить этот шаг и просто задать вопрос в чате."
+    )
+    render_kpi_cards(
+        [
+            {
+                "label": "1. Быстрый взгляд",
+                "value": "Посмотрите несколько строк",
+                "meta": "Полезно, если хотите быстро проверить, что данные выглядят ожидаемо.",
+            },
+            {
+                "label": "2. Понять поля",
+                "value": "Посмотрите объяснения колонок",
+                "meta": "Так проще понять, какие поля отвечают за даты, суммы, категории и фильтры.",
+            },
+            {
+                "label": "3. Можно пропустить",
+                "value": "Вернуться в чат",
+                "meta": "Если вопрос уже ясен, предпросмотр не обязателен.",
+            },
+        ],
+        max_columns=3,
     )
 
     _render_feedback("us13_status_message", "us13_error_message")
@@ -3689,9 +3784,9 @@ def render_us13_window():
     with action_col1:
         refresh_sources_btn = st.button("Обновить источники", use_container_width=True)
     with action_col2:
-        apply_template_btn = st.button("Заполнить пример запроса", use_container_width=True)
+        apply_template_btn = st.button("Подготовить быстрый просмотр", use_container_width=True)
     with action_col3:
-        run_preview_btn = st.button("Запустить предпросмотр", use_container_width=True)
+        run_preview_btn = st.button("Быстро посмотреть данные", use_container_width=True)
 
     if refresh_sources_btn:
         try:
@@ -3742,7 +3837,7 @@ def render_us13_window():
         if current_db_label and current_db_label not in labels:
             st.session_state.us13_database_label = labels[selected_index]
         selected_label = st.selectbox(
-            "База данных Superset",
+            "База данных",
             labels,
             index=selected_index,
             key="us13_database_label",
@@ -3789,11 +3884,11 @@ def render_us13_window():
     if current_dataset_label and current_dataset_label not in dataset_labels:
         st.session_state.us13_dataset_label = dataset_labels[selected_dataset_index]
     selected_dataset_label = st.selectbox(
-        "Таблица/датасет (опционально)",
+        "Таблица/датасет для быстрого просмотра (опционально)",
         dataset_labels,
         index=selected_dataset_index,
         key="us13_dataset_label",
-        help="Выбор таблицы ускоряет подготовку SQL через шаблоны.",
+        help="Если уже знаете таблицу, предпросмотр подготовится быстрее. Если нет, сначала посмотрите «Сканер схем».",
     )
     st.session_state.us13_dataset_id = int(dataset_label_to_id[selected_dataset_label])
     selected_dataset = _us13_get_selected_dataset()
@@ -3803,25 +3898,25 @@ def render_us13_window():
             st.session_state.us13_schema = ds_schema
 
     template_options = {
-        "table_preview": "Таблица целиком",
-        "count_rows": "Количество строк",
-        "top_categories": "Топ категорий",
-        "daily_trend": "Дневной тренд",
+        "table_preview": "Первые строки таблицы",
+        "count_rows": "Сколько всего записей",
+        "top_categories": "Какие категории встречаются чаще",
+        "daily_trend": "Как меняются данные по дням",
     }
     st.selectbox(
-        "Шаблон запроса",
+        "Что хотите быстро проверить",
         list(template_options.keys()),
         key="us13_sql_template",
         format_func=lambda x: template_options.get(str(x), str(x)),
-        help="Если не хотите писать запрос вручную, выберите таблицу и заполните готовую основу.",
+        help="Если не хотите думать про SQL, выберите таблицу и используйте готовую основу.",
     )
     st.caption(
-        "Не хотите писать запрос сами? Выберите таблицу/датасет и нажмите «Заполнить пример запроса»."
+        "Не хотите думать про SQL? Выберите таблицу/датасет и нажмите «Подготовить быстрый просмотр»."
     )
 
     control_col1, control_col2 = st.columns(2)
     with control_col1:
-        st.text_input("Schema (опционально)", key="us13_schema")
+        st.text_input("Schema (если уже знаете)", key="us13_schema")
     with control_col2:
         preview_limits = [10, 20, 50, 100, 200]
         current_limit = int(st.session_state.get("us13_preview_limit", 20) or 20)
@@ -3829,7 +3924,7 @@ def render_us13_window():
             preview_limits.append(current_limit)
             preview_limits = sorted(set(preview_limits))
         selected_limit = st.selectbox(
-            "Лимит строк в preview",
+            "Сколько строк показать",
             preview_limits,
             index=preview_limits.index(current_limit),
             key="us13_preview_limit_choice",
@@ -3841,7 +3936,7 @@ def render_us13_window():
         try:
             if not selected_dataset:
                 raise RuntimeError(
-                    "Выберите таблицу/датасет, чтобы подставить SQL-шаблон."
+                    "Выберите таблицу/датасет, чтобы подготовить быстрый просмотр."
                 )
             sql_template = str(st.session_state.get("us13_sql_template", "table_preview"))
             sql_text = _us13_build_template_sql(
@@ -3853,7 +3948,7 @@ def render_us13_window():
             _set_feedback(
                 status_key="us13_status_message",
                 error_key="us13_error_message",
-                status_message="Пример запроса подставлен.",
+                status_message="Основа для быстрого просмотра подготовлена.",
             )
             st.rerun()
         except Exception as exc:
@@ -3866,10 +3961,10 @@ def render_us13_window():
 
     st.markdown("### Запрос и запуск")
     st.text_area(
-        "Запрос для предпросмотра",
+        "Запрос для быстрого просмотра",
         key="us13_sql",
         height=170,
-        placeholder="Выберите таблицу выше и заполните пример запроса или вставьте свой SQL.",
+        placeholder="Выберите таблицу выше и подготовьте быстрый просмотр или вставьте свой SQL.",
     )
 
     if run_preview_btn:
@@ -3889,13 +3984,13 @@ def render_us13_window():
             _set_feedback(
                 status_key="us13_status_message",
                 error_key="us13_error_message",
-                error_message="SQL не должен быть пустым.",
+                error_message="Подготовьте основу для просмотра или вставьте SQL.",
             )
             st.rerun()
 
         try:
             svc = get_us13_15_viz_service()
-            with st.spinner("Выполняем SQL и готовим объяснение полей..."):
+            with st.spinner("Готовим быстрый просмотр данных и объяснение полей..."):
                 preview = svc.preview_sql(
                     database_id=database_id,
                     sql=sql,
@@ -3905,7 +4000,7 @@ def render_us13_window():
             _set_feedback(
                 status_key="us13_status_message",
                 error_key="us13_error_message",
-                status_message=f"Preview готов: {preview.get('rows_count', 0)} строк.",
+                status_message=f"Быстрый просмотр готов: {preview.get('rows_count', 0)} строк.",
                 extra_values={
                     "us13_preview_result": preview,
                     "us13_column_focus": "",
@@ -3942,13 +4037,16 @@ def render_us13_window():
     preview = st.session_state.get("us13_preview_result")
     if not isinstance(preview, dict):
         render_empty_state(
-            "Предпросмотр не запущен",
-            "Выберите базу и запустите предпросмотр, если хотите проверить поля и примеры значений. "
-            "Если это не нужно, можно вернуться в чат и задать вопрос напрямую.",
+            "Быстрый просмотр пока не запущен",
+            "Выберите источник и нажмите «Быстро посмотреть данные», если хотите проверить поля и примеры значений. "
+            "Если это не нужно, можно пропустить шаг и вернуться в чат с бизнес-вопросом.",
         )
+        if st.button("Вернуться в чат и задать вопрос", key="us13_back_to_chat_empty", use_container_width=True):
+            st.session_state.active_window = WINDOW_CHAT
+            st.rerun()
         return
 
-    st.markdown("### Результат предпросмотра")
+    st.markdown("### Что видно в данных")
     render_kpi_cards(
         [
             {"label": "Database ID", "value": preview.get("database_id")},
@@ -3968,7 +4066,7 @@ def render_us13_window():
             "Запрос выполнился, но вернул 0 строк. Попробуйте смягчить фильтры.",
         )
 
-    st.markdown("### Объяснение полей")
+    st.markdown("### Понять поля")
     columns = preview.get("columns", [])
     if isinstance(columns, list) and columns:
         type_labels = {
@@ -4053,13 +4151,13 @@ def render_us13_window():
                 )
     else:
         render_empty_state(
-            "Пояснения недоступны",
-            "В preview нет колонок для анализа. Измените SQL и запустите снова.",
+            "Пояснения пока недоступны",
+            "В предпросмотре нет колонок для анализа. Выберите другой шаблон или проверьте источник данных.",
         )
 
     sql_executed = str(preview.get("sql_executed", "")).strip()
-    if sql_executed and st.button("Обсудить этот запрос в чате", use_container_width=True):
-        _queue_message(sql_executed, switch_to_chat=True)
+    if sql_executed and st.button("Задать бизнес-вопрос по этим данным", use_container_width=True):
+        _queue_message(_build_us13_chat_followup(preview), switch_to_chat=True)
         st.rerun()
 
 

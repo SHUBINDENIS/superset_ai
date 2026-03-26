@@ -543,7 +543,21 @@ class TestFrontendUISmoke(unittest.TestCase):
 
         self.assertTrue(any("Как начать:" in value for value in info_values))
         self.assertTrue(any("Рекомендуемый путь" in value for value in markdown_values))
-        self.assertTrue(any("1. Спросите бизнес-вопрос" in value for value in markdown_values))
+        self.assertTrue(any("1. Выберите удобный путь" in value for value in markdown_values))
+
+    def test_chat_clearly_shows_preview_and_direct_question_paths(self):
+        at = self._new_app(authenticated=True)
+        at.run()
+
+        markdown_values = self._text_values(at.markdown)
+        caption_values = self._text_values(at.caption)
+        labels = [button.label for button in at.button]
+
+        self.assertTrue(any("Два удобных способа начать" in value for value in markdown_values))
+        self.assertTrue(any("Хочу быстро посмотреть данные" in value for value in markdown_values))
+        self.assertTrue(any("Хочу сразу задать бизнес-вопрос" in value for value in markdown_values))
+        self.assertTrue(any("Оба пути корректны" in value for value in caption_values))
+        self.assertIn("Открыть «Предпросмотр»", labels)
 
     def test_authenticated_user_sees_security_and_guardrails_guidance(self):
         at = self._new_app(authenticated=True)
@@ -565,9 +579,12 @@ class TestFrontendUISmoke(unittest.TestCase):
         at.run()
 
         labels = [button.label for button in at.button]
+        markdown_values = self._text_values(at.markdown)
         self.assertIn("Покажи выручку по месяцам", labels)
         self.assertIn("Какие категории товаров приносят больше всего продаж?", labels)
         self.assertIn("Сделай график по заказам за 2025 год", labels)
+        self.assertTrue(any("Хочу быстро увидеть несколько строк по заказам" in value for value in markdown_values))
+        self.assertTrue(any("Хочу понять, где дата, сумма и категория" in value for value in markdown_values))
         self.assertFalse(any("SELECT" in label for label in labels))
 
     def test_security_examples_distinguish_safe_and_blocked_usage(self):
@@ -577,7 +594,7 @@ class TestFrontendUISmoke(unittest.TestCase):
         markdown_values = self._text_values(at.markdown)
         labels = [button.label for button in at.button]
 
-        self.assertTrue(any("Разрешённые аналитические примеры" in value for value in markdown_values))
+        self.assertTrue(any("Примеры для пути «Сразу задать бизнес-вопрос»" in value for value in markdown_values))
         self.assertTrue(any("Что будет заблокировано" in value for value in markdown_values))
         self.assertIn("Покажи выручку по месяцам", labels)
         self.assertIn("Проверить: off-topic", labels)
@@ -741,11 +758,14 @@ class TestFrontendUISmoke(unittest.TestCase):
 
         info_values = self._text_values(at.info)
         caption_values = self._text_values(at.caption)
+        markdown_values = self._text_values(at.markdown)
         labels = [button.label for button in at.button]
 
-        self.assertTrue(any("можно начать прямо с чата" in value for value in info_values))
-        self.assertTrue(any("Не хотите писать запрос сами?" in value for value in caption_values))
-        self.assertIn("Заполнить пример запроса", labels)
+        self.assertTrue(any("можно пропустить этот шаг" in value for value in info_values))
+        self.assertTrue(any("Не хотите думать про SQL?" in value for value in caption_values))
+        self.assertTrue(any("Понять поля" in value for value in markdown_values))
+        self.assertIn("Подготовить быстрый просмотр", labels)
+        self.assertIn("Быстро посмотреть данные", labels)
 
     def test_blocked_agent_reply_is_rendered_as_intentional_policy_block(self):
         self.agent.reply = (
@@ -777,7 +797,7 @@ class TestFrontendUISmoke(unittest.TestCase):
 
         self._click_button(at, "🔎 Предпросмотр")
         at.run()
-        self.assertEqual(at.title[0].value, "Предпросмотр результата и объяснение полей")
+        self.assertEqual(at.title[0].value, "Быстрый просмотр данных и объяснение полей")
         self.assertEqual(at.session_state["active_window"], "us13")
 
         self._click_button(at, "🎯 Рекомендации")
@@ -812,10 +832,10 @@ class TestFrontendUISmoke(unittest.TestCase):
         self.assertTrue(any(name == "list_databases" for name, _ in self.viz_service.calls))
         self.assertTrue(any(name == "list_datasets" for name, _ in self.viz_service.calls))
 
-        self._click_button(at, "Запустить предпросмотр")
+        self._click_button(at, "Быстро посмотреть данные")
         at.run()
         self.assertEqual(at.session_state["us13_preview_result"]["rows_count"], 2)
-        self.assertIn("Preview готов: 2 строк.", [item.value for item in at.success])
+        self.assertIn("Быстрый просмотр готов: 2 строк.", [item.value for item in at.success])
         self.assertGreaterEqual(len(at.dataframe), 1)
 
         self._click_button(at, "🎯 Рекомендации")
