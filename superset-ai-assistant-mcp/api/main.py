@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import sys
+from contextlib import asynccontextmanager
 
 # Ensure the assistant package root is on sys.path so that
 # ``from backend.auth_service import …`` works regardless of CWD.
@@ -27,13 +28,29 @@ from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
-from api.routers import auth, health  # noqa: E402
+from api.routers import auth, chats, health  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# Lifespan: clean up agent sessions / MCP runtimes on shutdown
+# ---------------------------------------------------------------------------
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    yield
+    try:
+        from backend.ai_agent import shutdown_global_resources
+        await shutdown_global_resources()
+    except Exception:
+        pass
+
 
 app = FastAPI(
     title="Superset AI Assistant API",
     version="0.1.0",
     docs_url="/api/docs",
     openapi_url="/api/openapi.json",
+    lifespan=_lifespan,
 )
 
 # CORS — permissive for local dev; tighten for production.
@@ -46,4 +63,5 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(chats.router)
 app.include_router(health.router)

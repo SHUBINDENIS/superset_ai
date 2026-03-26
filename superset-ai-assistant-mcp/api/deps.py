@@ -86,3 +86,25 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(exc),
         ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Agent session manager (lazy-loaded to avoid heavy imports at startup)
+# ---------------------------------------------------------------------------
+
+_agent_session_manager: Any = None
+
+
+def get_agent_session_manager():
+    """Return the AgentSessionManager singleton.
+
+    The import of ``backend.ai_agent`` is deferred to the first call so that
+    the FastAPI app can start without loading langchain / MCP / OpenAI deps.
+    These heavy dependencies are only needed when a user actually sends a
+    chat message.
+    """
+    global _agent_session_manager
+    if _agent_session_manager is None:
+        from backend.ai_agent import get_session_manager
+        _agent_session_manager = get_session_manager()
+    return _agent_session_manager

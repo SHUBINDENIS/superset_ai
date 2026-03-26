@@ -1,0 +1,210 @@
+"""
+Chat session & message router.
+
+Endpoints:
+    GET    /api/chats                          – list user's chat sessions
+    POST   /api/chats                          – create a new chat session
+    PATCH  /api/chats/{session_id}             – rename a chat session
+    GET    /api/chats/{session_id}/messages     – list messages in a session
+    DELETE /api/chats/{session_id}/messages     – clear messages in a session
+    POST   /api/chats/{session_id}/messages     – send a message (runs agent)
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict
+
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from api.deps import get_agent_session_manager, get_auth_service, get_current_user
+from api.schemas import (
+    ChatMessageResponse,
+    ChatSessionListResponse,
+    ChatSessionResponse,
+    ClearMessagesResponse,
+    CreateChatRequest,
+    MessageListResponse,
+    RenameChatRequest,
+    SendMessageRequest,
+    SendMessageResponse,
+)
+
+router = APIRouter(prefix="/api/chats", tags=["chats"])
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _session_or_404(auth_service, username: str, session_id: str) -> Dict[str, Any]:
+    """Fetch a chat session or raise 404."""
+    session = auth_service.get_chat_session(username=username, session_id=session_id)
+    if session is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Chat session not found.",
+        )
+    return session
+
+
+# ---------------------------------------------------------------------------
+# Chat session CRUD
+# ---------------------------------------------------------------------------
+
+@router.get("", response_model=ChatSessionListResponse)
+def list_chats(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    auth_service=Depends(get_auth_service),
+) -> ChatSessionListResponse:
+    """Return all non-archived chat sessions for the authenticated user."""
+    sessions = auth_service.list_chat_sessions(username=current_user["username"])
+    return ChatSessionListResponse(
+        sessions=[ChatSessionResponse(**s) for s in sessions],
+    )
+
+
+@router.post("", response_model=ChatSessionResponse, status_code=status.HTTP_201_CREATED)
+def create_chat(
+    body: CreateChatRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    auth_service=Depends(get_auth_service),
+) -> ChatSessionResponse:
+    """Create a new chat session."""
+    created = auth_service.create_chat_session(
+        current_user["username"],
+        body.title,
+    )
+    return ChatSessionResponse(**created)
+
+
+@router.patch("/{session_id}", response_model=ChatSessionResponse)
+def rename_chat(
+    session_id: str,
+    body: RenameChatRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    auth_service=Depends(get_auth_service),
+) -> ChatSessionResponse:
+    """Rename an existing chat session."""
+    try:
+        updated = auth_service.rename_chat_session(
+            username=current_user["username"],
+            session_id=session_id,
+            title=body.title,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    return ChatSessionResponse(**updated)
+
+
+# ---------------------------------------------------------------------------
+# Messages
+# ---------------------------------------------------------------------------
+
+@router.get("/{session_id}/messages", response_model=MessageListResponse)
+def list_messages(
+    session_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    auth_service=Depends(get_auth_service),
+) -> MessageListResponse:
+    """Return persisted messages for a chat session."""
+    _session_or_404(auth_service, current_user["username"], session_id)
+    messages = auth_service.list_chat_history(
+        username=current_user["username"],
+        session_id=session_id,
+    )
+    return MessageListResponse(
+        messages=[ChatMessageResponse(**m) for m in messages],
+    )
+
+
+@router.delete(
+    "/{session_id}/messages",
+    response_model=ClearMessagesResponse,
+)
+def clear_messages(
+    session_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    auth_service=Depends(get_auth_service),
+) -> ClearMessagesResponse:
+    """Delete all messages in a chat session."""
+    _session_or_404(auth_service, current_user["username"], session_id)
+    deleted = auth_service.clear_chat_history(
+        username=current_user["username"],
+        session_id=session_id,
+    )
+    return ClearMessagesResponse(deleted_count=deleted)
+
+
+@router.post(
+    "/{session_id}/messages",
+    response_model=SendMessageResponse,
+)
+async def send_message(
+    session_id: str,
+    body: SendMessageRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    auth_service=Depends(get_auth_service),
+    agent_manager=Depends(get_agent_session_manager),
+) -> SendMessageResponse:
+    """Send a user message and receive the assistant reply.
+
+    Flow:
+        1. Verify session ownership.
+        2. Persist the user message.
+        3. Load full conversation history for context.
+        4. Get/create agent for the session.
+        5. Run ``agent.chat(messages)`` (may block while LLM processes).
+        6. Persist the assistant reply.
+        7. Return the reply including ``finish_reason``.
+    """
+    username = current_user["username"]
+
+    # 1. Verify session exists and belongs to user
+    _session_or_404(auth_service, username, session_id)
+
+    # 2. Persist user message
+    auth_service.save_chat_message(
+        username=username,
+        session_id=session_id,
+        role="user",
+        content=body.content,
+    )
+
+    # 3. Load full history (includes the message just saved)
+    history = auth_service.list_chat_history(
+        username=username,
+        session_id=session_id,
+    )
+    messages = [{"role": m["role"], "content": m["content"]} for m in history]
+
+    # 4. Get or create agent for this session
+    agent = await agent_manager.get_or_create_agent(session_id, owner=username)
+
+    # 5. Run agent
+    try:
+        reply = await agent.chat(messages)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Agent processing failed: {exc}",
+        ) from exc
+
+    # 6. Persist assistant reply
+    auth_service.save_chat_message(
+        username=username,
+        session_id=session_id,
+        role="assistant",
+        content=reply.get("content", ""),
+    )
+
+    # 7. Return
+    return SendMessageResponse(
+        content=reply.get("content", ""),
+        role=reply.get("role", "assistant"),
+        finish_reason=reply.get("finish_reason", "stop"),
+        model=reply.get("model", ""),
+        session_id=session_id,
+    )
