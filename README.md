@@ -61,6 +61,15 @@
 
 Подробная схема развёртывания (Deployment): `docs/deployment.md`.
 
+## Текущие entrypoints по умолчанию
+- Primary core UI: `http://<host>:3001/login`
+- Primary FastAPI API: `http://<host>:8100/api/health`
+- Streamlit fallback/admin UI: `http://<host>:8051`
+
+Для текущего phased switch именно `Next.js/FastAPI` считается default path для
+core flows. `Streamlit` больше не считается основным пользовательским входом и
+используется только для `US2-US5` и rollback-сценариев.
+
 ## Требования к окружению
 - Docker + Docker Compose
 - Python 3.10+ (для локального запуска сервисов)
@@ -78,15 +87,16 @@
 Ассистент не входит в текущий `docker compose` стек Superset.
 `superset-worker` и `superset-worker-beat` больше не считаются обязательной частью базового проекта; они оставлены как opt-in профиль для фоновых задач Superset.
 
-Дополнительно есть **опциональный** unified local dev stack:
+Дополнительно есть unified local dev stack, который теперь считается
+дефолтным repo-backed локальным запуском для primary core path:
 
 - файл: `docker-compose.dev.yml`
 - цель: локальный демо/дев-контур одной командой
 - модель MCP: `built_in_http`
-- baseline split deployment при этом остаётся основной и поддерживаемой схемой
+- split deployment при этом остаётся поддерживаемой альтернативой
 
 ## Быстрый запуск (рекомендуемый порядок)
-Сначала запускается Superset, затем primary core UI (`FastAPI + Next.js`).
+По умолчанию для core flows запускается `Next.js/FastAPI`.
 Streamlit поднимается отдельно только как fallback/helper-admin path.
 
 ### 1) Поднять Apache Superset
@@ -255,6 +265,7 @@ curl -I http://127.0.0.1:8051
 - `docs/demo-query-pack.md`
 - `docs/dual-run-parity-readiness.md`
 - `docs/phased-cutover-plan.md`
+- `docs/phased-cutover-signoff.md`
 
 ## Линтеры и CI
 В репозитории настроен рабочий pipeline/workflow для автоматического запуска линтеров:

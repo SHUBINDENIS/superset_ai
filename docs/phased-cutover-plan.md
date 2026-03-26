@@ -1,6 +1,8 @@
 # Phased Core Cutover Plan
 
-Status: repository prepared for phased primary-frontend cutover; do not remove Streamlit in this phase.
+Status: phased primary-frontend switch is now active; `Next.js/FastAPI` is the
+default core-flow path and `Streamlit` remains fallback/admin only for
+`US2-US5`. Do not remove Streamlit in this phase.
 
 Current signoff outcome is tracked in `docs/phased-cutover-signoff.md`.
 
@@ -48,16 +50,16 @@ Streamlit path остаётся доступным на `http://<host>:8051` т�
 - изменение backend business logic
 - redesign UI
 
-## Preconditions Before Switching The Default Entry
+## Signoff Evidence Used For The Actual Switch
 
-Перед фактическим switch primary entrypoint должны быть выполнены все пункты:
+Перед формальным switch primary entrypoint были выполнены все пункты:
 
-- [ ] `docs/dual-run-parity-readiness.md` актуален и не содержит blocker внутри migrated core path
-- [ ] `docs/manual-smoke-checklist.md` пройден для `Next.js/FastAPI`
-- [ ] `docs/demo-query-pack.md` пройден на Pagila в primary path
-- [ ] `frontend.log`, `agent.log`, `mcp.log`, `artifact.log` показывают рабочую trace correlation для Next.js core flows
-- [ ] Streamlit fallback sanity-check для `US2-US5` пройден
-- [ ] Команда понимает, какой URL объявляется primary и какой URL остаётся fallback
+- [x] `docs/dual-run-parity-readiness.md` актуален и не содержит blocker внутри migrated core path
+- [x] `docs/manual-smoke-checklist.md` пройден для `Next.js/FastAPI`
+- [x] `docs/demo-query-pack.md` пройден на Pagila в primary path
+- [x] `frontend.log`, `agent.log`, `mcp.log`, `artifact.log` показывают рабочую trace correlation для Next.js core flows
+- [x] Streamlit fallback sanity-check для `US2-US5` пройден
+- [x] Команда понимает, какой URL объявляется primary и какой URL остаётся fallback
 
 ## Recommended Dual-Run Launch
 
@@ -120,7 +122,7 @@ cd /home/superset_ai/superset-ai-assistant-mcp
 streamlit run frontend/app.py --server.port 8051 --server.address 0.0.0.0
 ```
 
-## Signoff Sequence Before Actual Cutover
+## Signoff Sequence Used For The Actual Cutover
 
 ### A. Primary path signoff
 
@@ -140,7 +142,7 @@ streamlit run frontend/app.py --server.port 8051 --server.address 0.0.0.0
 
 ### C. Go / No-Go decision
 
-Go на actual primary switch только если:
+Go на actual primary switch достигнут, потому что:
 - core-flow signoff на Next.js зелёный
 - fallback sanity на Streamlit зелёный
 - лог-корреляция подтверждена
@@ -174,8 +176,9 @@ Go на actual primary switch только если:
 
 Это допустимо для phased primary cutover, но блокирует полную деактивацию Streamlit.
 
-## Concrete Next Step After This Document
+## Current Operational State After This Document
 
-После этого документа следующая итерация должна быть уже про одно из двух:
-1. actual switch primary entrypoint на `Next.js/FastAPI`
-2. либо фиксацию одного последнего operational blocker, если он проявится на signoff
+После этого документа репозиторий следует трактовать так:
+1. `Next.js/FastAPI` уже является default primary path для core flows
+2. `Streamlit` остаётся доступным только как fallback/admin console для `US2-US5`
+3. следующий операционный шаг теперь не switch-prep, а обычный rollout/monitoring с сохранением rollback path

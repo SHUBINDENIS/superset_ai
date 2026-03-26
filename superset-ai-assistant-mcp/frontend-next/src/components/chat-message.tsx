@@ -19,6 +19,7 @@ const GUARDRAIL_PREFIX =
   "Безопасность: запрос заблокирован намеренно.";
 const ERROR_PREFIX = "Ошибка при обработке запроса:";
 const URL_PATTERN = /https?:\/\/[^\s<>)\]]+/g;
+const MARKDOWN_IMAGE_PATTERN = /!\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g;
 
 type MessageKind = "normal" | "blocked" | "error";
 
@@ -51,6 +52,27 @@ function extractLinks(content: string) {
   });
 }
 
+function isDirectImageUrl(url: string) {
+  return (
+    /^data:image\//.test(url) ||
+    /\.(png|jpe?g|gif|webp|svg)(\?.*)?$/i.test(url)
+  );
+}
+
+function normalizeAssistantMarkdown(content: string) {
+  return content.replace(
+    MARKDOWN_IMAGE_PATTERN,
+    (_full, altText: string, url: string) => {
+      if (isDirectImageUrl(url)) {
+        return `![${altText}](${url})`;
+      }
+
+      const label = altText?.trim() || "Preview";
+      return `**${label}:** встроенный предпросмотр недоступен, откройте ссылку ниже.`;
+    },
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /* Component                                                          */
 /* ------------------------------------------------------------------ */
@@ -68,7 +90,8 @@ export function ChatMessage({ message }: Props) {
       : kind === "error"
         ? bodyAfterPrefix(message.content, ERROR_PREFIX)
         : message.content;
-  const links = extractLinks(content);
+  const normalizedContent = normalizeAssistantMarkdown(content);
+  const links = extractLinks(normalizedContent);
 
   return (
     <div
@@ -127,7 +150,9 @@ export function ChatMessage({ message }: Props) {
 
         {/* Body */}
         <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-li:my-0.5">
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            {normalizedContent}
+          </ReactMarkdown>
         </div>
 
         {links.length > 0 && (

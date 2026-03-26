@@ -8,7 +8,7 @@ Phased cutover scope и rollback-логика зафиксированы отд�
 
 Текущее состояние после упрощения транспорта:
 
-- primary core UI path проходит через `Next.js -> FastAPI -> shared assistant services`
+- default primary core UI path проходит через `Next.js -> FastAPI -> shared assistant services`
 - Streamlit остаётся fallback/helper-admin UI path для `US2-US5`
 - отдельный streaming backend больше не используется
 - поддерживаемый Docker-сценарий остаётся split-моделью: Superset через compose, ассистент отдельным процессом/контейнером
@@ -130,6 +130,20 @@ flowchart TB
 
 ## 7) Минимальный сценарий запуска
 
+Default repo-backed локальный запуск для текущего phased switch:
+
+```bash
+cd /home/superset_ai
+cp .env.dev.example .env.dev
+docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
+```
+
+После этого по умолчанию используются:
+- `http://<host>:3001` как primary UI
+- `http://<host>:8100` как primary API
+- `http://<host>:8051` как Streamlit fallback
+
+Если unified compose не используется, поддерживается и split-run ниже.
 1. Поднять Superset стек:
    - `cd superset`
    - `docker compose -f docker-compose-image-tag.yml up -d db redis superset-init superset`
@@ -150,8 +164,9 @@ flowchart TB
 
 ## 8) Опциональный unified local dev stack
 
-Этот вариант предназначен для локальной разработки/демо одной командой и не заменяет split-модель как базовый deployment.
-В phased cutover он даёт Superset + MCP + primary `FastAPI + Next.js` + Streamlit fallback console.
+Этот вариант предназначен для локальной разработки/демо одной командой.
+В текущем phased switch он является дефолтным repo-backed локальным запуском и
+даёт Superset + MCP + primary `FastAPI + Next.js` + Streamlit fallback console.
 
 Состав:
 - `db`

@@ -1,7 +1,8 @@
 # Superset AI Assistant (прототип)
 
-Коротко: primary core UI path теперь готовится как `Next.js + FastAPI`, а
-`Streamlit` остаётся fallback/helper-admin UI для `US2-US5` и rollback-сценариев.
+Коротко: по умолчанию primary core UI path теперь использует
+`Next.js + FastAPI`, а `Streamlit` остаётся только fallback/helper-admin UI для
+`US2-US5` и rollback-сценариев.
 
 ## Что нужно
 - Python 3.10+
@@ -22,7 +23,7 @@
 - в этой фазе unified stack поднимает и primary `FastAPI + Next.js`, и Streamlit fallback console
 
 ## Как запустить primary core UI
-Самый короткий repo-backed путь для dual-run:
+Дефолтный repo-backed запуск primary path:
 
 ```bash
 cd /home/superset_ai
@@ -35,7 +36,7 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
 - primary FastAPI health: `http://localhost:8100/api/health`
 - Streamlit fallback/admin UI: `http://localhost:8051`
 
-Ниже оставлен ручной split-run сценарий, если compose не используется.
+Ниже оставлен ручной split-run сценарий, если unified compose не используется.
 
 1. Скопируйте `.env.example` в `.env` и заполните:
    - `OPENAI_API_KEY` — ключ OpenAI
@@ -122,7 +123,7 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml up -d
 ```
 
 Этот сценарий:
-- оставляет текущую split-модель основной
+- считается дефолтным repo-backed локальным запуском primary path
 - поднимает `superset`, `mcp-http`, `assistant-api`, `assistant-web`, `assistant`, `db`, `pagila-db`, `redis`, `superset-init`
 - подключает ассистент к built-in MCP по HTTP
 - автоматически регистрирует `Pagila Demo (PostgreSQL)` и ключевые datasets для demo-сценариев
@@ -146,7 +147,7 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml up -d
 
 ## Primary core UI: Next.js + FastAPI
 
-Новая primary ветка core UI живёт в `frontend-next/` и `api/`. В текущей фазе
+Текущий primary UI path живёт в `frontend-next/` и `api/`. В текущей фазе
 там уже перенесены:
 - auth shell с cookie-based FastAPI auth,
 - `/app/chat` с multi-chat sidebar,
@@ -194,6 +195,7 @@ NEXT_PUBLIC_API_URL=http://127.0.0.1:8100 npm run dev -- --hostname 0.0.0.0 --po
 - `docs/manual-smoke-checklist.md`
 - `docs/demo-query-pack.md`
 - `docs/phased-cutover-plan.md`
+- `docs/phased-cutover-signoff.md`
 
 ## Как пользоваться Streamlit fallback path
 - В `sidebar` есть кнопки навигации по окнам: `Чат`, `US1`, `US2`, `US3`, `US4`, `US5`, `US13`, `US14`, `US15`.

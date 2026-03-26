@@ -1,6 +1,7 @@
 # Dual-Run Parity And Cutover Readiness
 
-Status: repo prepared for phased primary-frontend cutover; keep Streamlit available as fallback/admin path until the actual switch decision is executed.
+Status: actual phased primary-frontend switch is now in effect; keep Streamlit
+available as fallback/admin path for `US2-US5` and rollback scenarios.
 
 Этот документ фиксирует repo-backed audit между:
 - текущим Streamlit UI
@@ -119,15 +120,15 @@ Repo-backed evidence для этого аудита:
 ## Cutover Readiness Assessment
 
 ### Current recommendation
-- Safe to continue dual-run: `yes`
-- Repo is prepared for a phased primary core-flow cutover: `yes`
+- Safe to continue dual-run during rollout window: `yes`
+- Actual phased primary core-flow switch: `yes`
 - Safe to remove Streamlit: `no`
 
-### What still gates the actual switch
-С этого момента речь уже не о repo blocker, а об operational decision:
-- выполнить финальный signoff по `docs/phased-cutover-plan.md`
-- подтвердить, какой URL/entrypoint становится primary для пользователей
-- сохранить Streamlit доступным как fallback/admin console на время rollout window
+### What still gates full Streamlit removal
+С этого момента речь уже не о primary switch, а о более позднем milestone:
+- миграция или формальное снятие `US2-US5`
+- завершение rollout window без необходимости rollback на Streamlit
+- отдельное решение о деактивации Streamlit
 
 ### What is already strong enough
 - Core demo path exists in the new stack:
@@ -170,17 +171,17 @@ They are helper/admin flows, not part of the current core demo baseline.
 They remain blockers for the later milestone “remove Streamlit entirely”.
 
 So the practical decision is:
-- primary core-flow cutover: repo-prepared and ready for switch planning
+- primary core-flow cutover: already executed and now default
 - Streamlit decommission: not possible until US2-US5 are either migrated or formally dropped
 
 ## Dual-Run Decision
 
 Recommended near-term mode:
-1. Treat Next.js/FastAPI as the primary core UX candidate and default test target.
+1. Treat Next.js/FastAPI as the default primary core UX.
 2. Keep Streamlit running as fallback/admin console for `US2-US5`.
-3. Run `docs/manual-smoke-checklist.md` as the main signoff for the Next.js core path.
-4. Run the fallback sanity from `docs/phased-cutover-plan.md` against Streamlit.
-5. Use `docs/demo-query-pack.md` and frontend/backend trace correlation as signoff evidence.
+3. Use `docs/manual-smoke-checklist.md` for ongoing regression checks on the primary core path.
+4. Use the fallback sanity from `docs/phased-cutover-plan.md` against Streamlit during the rollout window.
+5. Keep using `docs/demo-query-pack.md` and frontend/backend trace correlation as operational evidence.
 
 ## Minimal Evidence Collected In This Audit
 
@@ -194,12 +195,9 @@ These checks support:
 - FastAPI route coverage for the migrated core path
 - successful compilation of the new frontend routes
 
-## Safe Next Step Before Cutover
+## Current Safe Next Step After Cutover
 
-Следующий шаг теперь уже не про подготовку репозитория, а про операционное решение:
-1. выполнить signoff по `docs/phased-cutover-plan.md`
-2. выбрать фактический primary URL/entrypoint для пользователей
-3. провести rollout с сохранением Streamlit fallback path
-
-То есть следующая итерация может быть уже про сам switch/no-switch decision,
-а не про дополнительное снятие архитектурной неопределённости.
+Следующий шаг теперь уже не про switch/no-switch decision, а про rollout:
+1. использовать `Next.js/FastAPI` как default primary path
+2. держать Streamlit доступным для `US2-US5` и rollback window
+3. решать отдельно только вопрос будущего удаления Streamlit
