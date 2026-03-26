@@ -2,6 +2,8 @@
 
 Status: repository prepared for phased primary-frontend cutover; do not remove Streamlit in this phase.
 
+Current signoff outcome is tracked in `docs/phased-cutover-signoff.md`.
+
 ## Goal
 
 Зафиксировать безопасный переходный режим, в котором:

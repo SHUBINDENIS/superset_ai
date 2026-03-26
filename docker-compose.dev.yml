@@ -210,18 +210,21 @@ services:
     environment:
       NEXT_PUBLIC_API_URL: http://assistant-api:8100
       NEXTJS_PORT: "3001"
+      NEXTJS_RUNTIME: production
+      NEXT_TELEMETRY_DISABLED: "1"
     command: ["sh", "/usr/local/bin/start-nextjs-primary.sh"]
     volumes:
       - ./superset-ai-assistant-mcp/frontend-next:/app/superset-ai-assistant-mcp/frontend-next
       - ./docker/dev/start-nextjs-primary.sh:/usr/local/bin/start-nextjs-primary.sh:ro
       - frontend_next_node_modules:/app/superset-ai-assistant-mcp/frontend-next/node_modules
+      - frontend_next_build:/app/superset-ai-assistant-mcp/frontend-next/.next
     healthcheck:
       test:
         ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3001/login').then(r=>process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
       interval: 20s
       timeout: 5s
       retries: 10
-      start_period: 40s
+      start_period: 120s
 
   assistant:
     build: *assistant-build
@@ -246,3 +249,4 @@ volumes:
   redis_dev:
   assistant_dev_data:
   frontend_next_node_modules:
+  frontend_next_build:
