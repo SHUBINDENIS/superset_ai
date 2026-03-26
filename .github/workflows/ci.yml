@@ -25,15 +25,15 @@ jobs:
       - name: Ruff lint
         run: |
           ruff check \
+            superset-ai-assistant-mcp/api \
             superset-ai-assistant-mcp/backend \
-            superset-ai-assistant-mcp/frontend \
             superset-ai-assistant-mcp/tests
 
       - name: Python compile check
         run: |
           python -m compileall \
+            superset-ai-assistant-mcp/api \
             superset-ai-assistant-mcp/backend \
-            superset-ai-assistant-mcp/frontend \
             superset-ai-assistant-mcp/tests
 
   assistant-unit:
@@ -83,28 +83,29 @@ jobs:
           python -m unittest discover -s superset-ai-assistant-mcp/tests -p "test_ai_agent_clarifications.py"
           python -m unittest discover -s superset-ai-assistant-mcp/tests -p "test_us13_15_viz_service.py"
 
-  assistant-ui:
+  assistant-web-build:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          python-version: "3.12"
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: superset-ai-assistant-mcp/frontend-next/package-lock.json
 
-      - name: Install UI test dependencies
+      - name: Install frontend dependencies
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r superset-ai-assistant-mcp/requirements.txt
+          cd superset-ai-assistant-mcp/frontend-next
+          npm ci
 
-      - name: Run Streamlit UI smoke tests
-        env:
-          PYTHONPATH: ./superset-ai-assistant-mcp
+      - name: Build Next.js frontend
         run: |
-          python -m unittest discover -s superset-ai-assistant-mcp/tests -p "test_frontend_ui.py"
+          cd superset-ai-assistant-mcp/frontend-next
+          npm run build
 
   mcp-tool-inventory:
     runs-on: ubuntu-latest

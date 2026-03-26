@@ -226,22 +226,6 @@ services:
       retries: 10
       start_period: 120s
 
-  assistant:
-    build: *assistant-build
-    depends_on:
-      superset:
-        condition: service_healthy
-      mcp-http:
-        condition: service_healthy
-    restart: unless-stopped
-    ports:
-      - "${DEV_ASSISTANT_PORT:-8051}:8051"
-    environment:
-      <<: *assistant-runtime-env
-      STREAMLIT_PORT: "8051"
-    volumes:
-      - assistant_dev_data:/app/superset-ai-assistant-mcp/data
-
 volumes:
   superset_dev_home:
   db_dev_home:

@@ -1,52 +1,33 @@
-# Production-Like Primary UI Rollout Runbook
+# Production-Like Rollout Runbook
 
-Статус: использовать для rollout текущего primary UI path:
-- `Next.js` как default user entrypoint
-- `FastAPI` как backend API для core flows
-- `Streamlit` как fallback/helper-admin path только для `US2-US5`
+Используйте этот runbook для rollout текущего поддерживаемого stack:
 
-Этот runbook не удаляет Streamlit и не заменяет будущий production hardening.
-Он даёт оператору понятный и обратимый rollout path для серверного запуска.
+- `Next.js` as default user entrypoint
+- `FastAPI` as primary API
+- `Superset` on its own host
 
-## 1. Recommended Public Access Model
+`Streamlit` fallback path removed from the supported runtime model.
 
-Рекомендуемая production-like схема доступа:
+## 1. Recommended Public URLs
 
-- primary UI host:
-  - `https://assistant.example.com/`
-- primary API path на том же host:
-  - `https://assistant.example.com/api/*`
-- Streamlit fallback host:
-  - `https://assistant-fallback.example.com/`
-- Superset public host:
-  - `https://superset.example.com/`
+- `https://assistant.example.com/` -> `Next.js`
+- `https://assistant.example.com/api/*` -> `FastAPI`
+- `https://superset.example.com/` -> `Superset`
 
-Почему именно так:
-- для пользователей есть один default primary URL
-- `/api/*` остаётся на том же origin, что упрощает cookie auth
-- Streamlit fallback не смешивается с primary path
-- rollback можно делать операционно, не меняя код
+## 2. Required Environment
 
-## 2. Required Runtime Values
+Проверьте перед rollout:
 
-Перед rollout проверьте:
-
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
 - `SUPERSET_PUBLIC_URL=https://superset.example.com`
 - `US15_SHARE_BASE_URL=https://superset.example.com`
 - `API_CORS_ORIGINS=https://assistant.example.com`
-- `AUTH_JWT_SECRET` заменён на безопасное значение
-- `OPENAI_API_KEY` задан
-- `OPENAI_MODEL` выбран
+- `AUTH_JWT_SECRET`
 
-Если primary UI публикуется под HTTPS-host, `SUPERSET_PUBLIC_URL` должен
-указывать именно на публичный Superset host, иначе explore/share links будут
-указывать не туда.
+## 3. Bring-Up Options
 
-## 3. Bring-Up Sequence
-
-### Option A: unified server bring-up
-
-Используйте текущий repo-backed compose:
+### Option A: unified compose
 
 ```bash
 cd /home/superset_ai
@@ -54,93 +35,58 @@ cp .env.dev.example .env.dev
 docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
 ```
 
-Поднимаются:
-- `superset`
-- `mcp-http`
-- `assistant-api`
-- `assistant-web`
-- `assistant`
+### Option B: split services
 
-### Option B: split bring-up
+1. start Superset
+2. start `FastAPI` on `:8100`
+3. start `Next.js` on `:3001`
+4. publish both through a reverse proxy
 
-1. Поднять Superset stack
-2. Поднять FastAPI на `:8100`
-3. Поднять Next.js на `:3001`
-4. Поднять Streamlit fallback на `:8051`
-5. Поставить reverse proxy перед ними
+## 4. Health Checks
 
-## 4. Health Verification
-
-### Internal service checks
+Internal:
 
 ```bash
-cd /home/superset_ai
 docker compose --env-file .env.dev -f docker-compose.dev.yml ps
 curl http://127.0.0.1:8100/api/health
 curl -I http://127.0.0.1:3001/login
-curl -I http://127.0.0.1:8051
 curl -I http://127.0.0.1:8088/health
 ```
 
-### External proxy checks
-
-После публикации через reverse proxy:
+External:
 
 ```bash
 curl -I https://assistant.example.com/login
 curl -I https://assistant.example.com/api/health
-curl -I https://assistant-fallback.example.com/
 curl -I https://superset.example.com/health
 ```
 
-Ожидаемо:
-- primary `/login` отвечает `200`
-- primary `/api/health` отвечает `200`
-- fallback host отвечает `200`
-- Superset public host отвечает `200`
-
 ## 5. Post-Deploy Smoke
 
-После bring-up:
+1. open `https://assistant.example.com/login`
+2. login or register
+3. run `chat -> preview -> recommend -> share -> scan`
+4. run `docs/demo-query-pack.md`
+5. confirm trace correlation in logs
 
-1. открыть primary URL
-2. выполнить login
-3. пройти `chat -> preview -> recommend -> share -> scan`
-4. пройти `docs/demo-query-pack.md` на Pagila
-5. проверить один blocked request
-6. проверить trace correlation в логах
-7. открыть fallback host и убедиться, что `US2-US5` доступны
+## 6. Rollback
 
-## 6. Rollback Model
+There is no separate runtime fallback host anymore. Rollback is deployment
+rollback:
 
-Rollback не требует удаления primary path.
+1. stop exposing the faulty release
+2. restore the previous known-good assistant-web / assistant-api deployment
+3. keep traces and logs for incident analysis
+4. rerun `docs/manual-smoke-checklist.md`
 
-Если rollout дал сбой:
+## 7. Proxy Reference
 
-1. объявить `assistant-fallback.example.com` временным operator/user path для
-   `US2-US5` и критичных fallback use cases
-2. при необходимости временно убрать primary host из пользовательской
-   коммуникации
-3. не выключать `assistant-api` и `assistant-web`, пока не сняты логи
-4. сохранить `trace_id` / `request_id`
-5. повторить critical smoke на fallback и на восстановленном primary path
-
-## 7. What Remains Fallback-Only
-
-Даже после rollout primary UI в Streamlit остаются только:
-- `US2`
-- `US3`
-- `US4`
-- `US5`
-
-Это и есть допустимый phased model.
-
-## 8. Ingress Example
-
-Пример production-like reverse proxy находится в:
-
+See:
 - `docs/examples/nginx-primary-ui.conf.example`
 
-Он показывает рекомендуемую модель:
-- `assistant.example.com` -> Next.js + `/api/*` на FastAPI
-- `assistant-fallback.example.com` -> Streamlit
+## 8. Historical References
+
+For the previous phased-cutover evidence only:
+- `docs/dual-run-parity-readiness.md`
+- `docs/phased-cutover-plan.md`
+- `docs/phased-cutover-signoff.md`

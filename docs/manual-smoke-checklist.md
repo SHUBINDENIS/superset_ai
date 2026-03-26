@@ -2,21 +2,13 @@
 
 Цель документа: дать команде один воспроизводимый manual smoke перед merge, deploy и MUP defence demo.
 
-Для phased primary-frontend cutover этот checklist является главным signoff
-для migrated core flows в `Next.js/FastAPI`.
-
-Streamlit в этой фазе используется как fallback/helper-admin path для `US2-US5`,
-поэтому для него нужен отдельный fallback sanity-check из
-`docs/phased-cutover-plan.md`, а не полный core-flow прогон по умолчанию.
-
-Если нужно повторить именно parity-сравнение UI-в-UI, этот же checklist можно
-дополнительно прогнать и против Streamlit.
+После retirement Streamlit runtime этот checklist является главным manual smoke
+для единственного поддерживаемого stack: `Next.js/FastAPI`.
 
 ## Scope
 
 Проверяем именно текущий продуктовый контур:
 - primary Next.js/FastAPI assistant
-- Streamlit fallback/admin assistant
 - built-in MCP path
 - Superset
 - Pagila PostgreSQL demo-source
@@ -28,7 +20,7 @@ Streamlit в этой фазе используется как fallback/helper-a
 
 Перед smoke все пункты ниже должны быть истинны:
 
-- [ ] `assistant`, `superset`, `mcp-http`, `pagila-db` подняты и отвечают.
+- [ ] `assistant-web`, `assistant-api`, `superset`, `mcp-http`, `pagila-db` подняты и отвечают.
 - [ ] `OPENAI_API_KEY` задан и assistant может ходить в LLM.
 - [ ] В Superset есть источник `Pagila Demo (PostgreSQL)` или он создан вручную.
 - [ ] В Superset доступны datasets:
@@ -37,7 +29,8 @@ Streamlit в этой фазе используется как fallback/helper-a
   - `payment`
   - `rental`
 - [ ] Из браузера открываются:
-  - `http://<host>:8051`
+  - `http://<host>:3001/login`
+  - `http://<host>:8100/api/health`
   - `http://<host>:8088`
 - [ ] Известно, где лежат логи:
   - default: `superset-ai-assistant-mcp/data/logs/`
