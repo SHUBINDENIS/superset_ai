@@ -34,6 +34,27 @@ from superset.mcp_service.chart.schemas import (
 from superset.mcp_service.utils.url_utils import get_superset_base_url
 from superset.utils import json
 
+ROW_COUNT_METRIC_NAMES = frozenset(
+    {
+        "count",
+        "row_count",
+        "rows",
+        "record_count",
+        "records",
+        "total_rows",
+        "total_records",
+        "cnt",
+    }
+)
+
+
+def is_row_count_metric(col: ColumnRef) -> bool:
+    """Detect synthetic row-count requests that should map to COUNT(*)."""
+    return (
+        (col.aggregate or "").upper() == "COUNT"
+        and col.name.strip().lower() in ROW_COUNT_METRIC_NAMES
+    )
+
 
 def generate_explore_link(dataset_id: int | str, form_data: Dict[str, Any]) -> str:
     """Generate an explore link for the given dataset and form data."""
@@ -217,6 +238,17 @@ def create_metric_object(col: ColumnRef) -> Dict[str, Any]:
     # Validate aggregate function (final safety check)
     if aggregate.upper() not in valid_aggregates:
         aggregate = "SUM"  # Safe fallback
+
+    if is_row_count_metric(col):
+        metric_label = col.label or col.name
+        return {
+            "expressionType": "SQL",
+            "sqlExpression": "COUNT(*)",
+            "label": metric_label,
+            "optionName": f"metric_{col.name}",
+            "hasCustomLabel": bool(col.label),
+            "datasourceWarning": False,
+        }
 
     return {
         "aggregate": aggregate.upper(),

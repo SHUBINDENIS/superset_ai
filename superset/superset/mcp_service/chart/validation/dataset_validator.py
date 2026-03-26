@@ -24,6 +24,7 @@ import difflib
 import logging
 from typing import Dict, List, Tuple
 
+from superset.mcp_service.chart.chart_utils import is_row_count_metric
 from superset.mcp_service.chart.schemas import (
     ColumnRef,
     TableChartConfig,
@@ -179,7 +180,7 @@ class DatasetValidator:
             for filter_config in config.filters:
                 refs.append(ColumnRef(name=filter_config.column))
 
-        return refs
+        return [ref for ref in refs if not is_row_count_metric(ref)]
 
     @staticmethod
     def _column_exists(column_name: str, dataset_context: DatasetContext) -> bool:

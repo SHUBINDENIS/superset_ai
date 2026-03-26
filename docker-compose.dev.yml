@@ -9,6 +9,7 @@ x-superset-env: &superset-env
       required: false
   environment:
     SUPERSET_LOAD_EXAMPLES: ${SUPERSET_LOAD_EXAMPLES:-yes}
+    SUPERSET_PUBLIC_URL: ${SUPERSET_PUBLIC_URL:-http://103.54.18.91:8088}
 x-superset-volumes: &superset-volumes
   - ./superset/docker:/app/docker
   - ./superset/pyproject.toml:/app/pyproject.toml:ro
@@ -91,6 +92,7 @@ services:
       FASTMCP_TRANSPORT: streamable-http
       FASTMCP_HOST: 0.0.0.0
       FASTMCP_PORT: "5008"
+      SUPERSET_PUBLIC_URL: ${SUPERSET_PUBLIC_URL:-http://103.54.18.91:8088}
     volumes: *superset-volumes
     healthcheck:
       test:
@@ -143,7 +145,7 @@ services:
       SUPERSET_BUILT_IN_MCP_URL: http://mcp-http:5008/mcp/
       SUPERSET_BASE_URL: http://superset:8088
       SUPERSET_PUBLIC_URL: ${SUPERSET_PUBLIC_URL:-http://103.54.18.91:8088}
-      US15_SHARE_BASE_URL: ${SUPERSET_PUBLIC_URL:-http://103.54.18.91:80888}
+      US15_SHARE_BASE_URL: ${SUPERSET_PUBLIC_URL:-http://103.54.18.91:8088}
       AUTH_DB_PATH: /app/superset-ai-assistant-mcp/data/auth.db
       AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-secret-change-me}
       AUTH_JWT_TTL_HOURS: ${AUTH_JWT_TTL_HOURS:-12}

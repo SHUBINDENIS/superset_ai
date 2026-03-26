@@ -19,7 +19,17 @@
 URL utilities for MCP service
 """
 
+import os
+
 from flask import current_app
+
+
+def _normalize_base_url(url: str | None) -> str | None:
+    """Normalize configured base URLs for stable link generation."""
+    if not url:
+        return None
+    normalized = url.strip().rstrip("/")
+    return normalized or None
 
 
 def get_superset_base_url() -> str:
@@ -32,14 +42,22 @@ def get_superset_base_url() -> str:
     # Default fallback to localhost:9001
     default_url = "http://localhost:9001"
 
+    for env_key in ("SUPERSET_PUBLIC_URL", "SUPERSET_BASE_URL"):
+        if normalized := _normalize_base_url(os.getenv(env_key)):
+            return normalized
+
     try:
         # Try to get from configuration
         config = current_app.config
 
-        # Check for SUPERSET_WEBSERVER_ADDRESS first
-        webserver_address = config.get("SUPERSET_WEBSERVER_ADDRESS")
-        if webserver_address:
-            return webserver_address
+        for config_key in (
+            "SUPERSET_PUBLIC_URL",
+            "SUPERSET_BASE_URL",
+            "WEBDRIVER_BASEURL_USER_FRIENDLY",
+            "SUPERSET_WEBSERVER_ADDRESS",
+        ):
+            if normalized := _normalize_base_url(config.get(config_key)):
+                return normalized
 
         # Fallback to other potential config keys
         public_role_like_gamma = config.get("PUBLIC_ROLE_LIKE_GAMMA", False)
@@ -49,7 +67,7 @@ def get_superset_base_url() -> str:
             protocol = "https" if webserver_protocol else "http"
             host = config.get("WEBSERVER_HOST", "localhost")
             port = config.get("WEBSERVER_PORT", 9001)
-            return f"{protocol}://{host}:{port}"
+            return _normalize_base_url(f"{protocol}://{host}:{port}") or default_url
 
         return default_url
 
