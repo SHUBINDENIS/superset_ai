@@ -203,7 +203,7 @@ def apply_product_theme() -> None:
 
 def render_message(role: str, content: str) -> None:
     with st.chat_message(role):
-        st.write(content)
+        st.markdown(content)
 
 
 def parse_examples_input(raw: str):

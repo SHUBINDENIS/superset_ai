@@ -2,6 +2,7 @@ import os
 import sys
 import asyncio
 import json
+import re
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 import streamlit as st
@@ -103,6 +104,7 @@ BLOCKED_GUARDRAIL_EXAMPLES: List[Dict[str, str]] = [
 ]
 
 GUARDRAIL_BLOCK_PREFIX = "Безопасность: запрос заблокирован намеренно."
+CHAT_URL_PATTERN = re.compile(r"https?://[^\s<>)\]]+")
 
 # --- Page config -------------------------------------------------------------
 st.set_page_config(
@@ -435,6 +437,84 @@ def _looks_like_policy_block_text(content: str) -> bool:
     return any(marker in low for marker in block_markers)
 
 
+def _start_chat_processing(text: str = "Ассистент думает над ответом...") -> None:
+    apply_state_patch(
+        st.session_state,
+        {
+            "chat_is_processing": True,
+            "chat_processing_text": str(text or "").strip() or "Ассистент думает над ответом...",
+        },
+    )
+
+
+def _stop_chat_processing() -> None:
+    apply_state_patch(
+        st.session_state,
+        {
+            "chat_is_processing": False,
+            "chat_processing_text": "",
+        },
+    )
+
+
+def _extract_chat_links(content: str) -> List[Dict[str, str]]:
+    text = str(content or "")
+    links: List[Dict[str, str]] = []
+    seen: set[str] = set()
+    for match in CHAT_URL_PATTERN.findall(text):
+        url = str(match or "").rstrip(".,);")
+        if not url or url in seen:
+            continue
+        seen.add(url)
+        lower_url = url.casefold()
+        kind = "link"
+        label = "Открыть ссылку"
+        if "/superset/dashboard/" in lower_url or "/dashboard/" in lower_url:
+            kind = "dashboard"
+            label = "Открыть dashboard"
+        elif "/explore/" in lower_url or "slice_id=" in lower_url:
+            kind = "chart"
+            label = "Открыть chart"
+        elif "sql_lab" in lower_url or "sqllab" in lower_url:
+            kind = "sql_lab"
+            label = "Открыть SQL Lab"
+        links.append({"url": url, "kind": kind, "label": label})
+    return links
+
+
+def _build_assistant_outcome_summary(content: str, links: List[Dict[str, str]]) -> str:
+    low = str(content or "").casefold()
+    link_kinds = {item.get("kind", "") for item in links if isinstance(item, dict)}
+    if "dashboard" in link_kinds and "chart" in link_kinds:
+        return "Готовы chart и dashboard со ссылками."
+    if "dashboard" in link_kinds:
+        return "Готов dashboard со ссылкой."
+    if "chart" in link_kinds:
+        return "Готов chart со ссылкой."
+    if "sql_lab" in link_kinds:
+        return "Готова ссылка для продолжения работы."
+    if "предпросмотр" in low or "preview" in low:
+        return "Есть краткий итог по данным."
+    return ""
+
+
+def _build_assistant_next_steps(content: str, links: List[Dict[str, str]]) -> List[str]:
+    low = str(content or "").casefold()
+    hints: List[str] = []
+    kinds = {item.get("kind", "") for item in links if isinstance(item, dict)}
+    if "dashboard" in kinds:
+        hints.append("Откройте dashboard, если хотите показать итог на демо или проверить layout.")
+    if "chart" in kinds:
+        hints.append("Откройте chart, если хотите быстро проверить или донастроить визуализацию.")
+    if "sql_lab" in kinds:
+        hints.append("Откройте SQL Lab, если хотите продолжить исследование вручную.")
+    if ("предпросмотр" in low or "preview" in low) and not hints:
+        hints.append("Если данные выглядят корректно, следующий шаг — открыть «Рекомендации» или «Шеринг».")
+    if ("график" in low or "дашборд" in low) and not hints:
+        hints.append("Если результат подходит, следующий шаг — сохранить его через «Шеринг».")
+    return hints[:2]
+
+
 def _open_preview_window() -> None:
     st.session_state.active_window = WINDOW_US13
 
@@ -571,6 +651,8 @@ def _activate_chat_session(session_id: str, *, switch_to_chat: bool = True) -> N
             "chat_sessions": sessions,
             "messages": messages,
             "pending_input": None,
+            "chat_is_processing": False,
+            "chat_processing_text": "",
             "agent_initialized": False,
             "chat_rename_session_id": "",
             "chat_rename_value": "",
@@ -596,6 +678,8 @@ def _create_new_chat_session() -> None:
             "chat_sessions": sessions,
             "messages": messages,
             "pending_input": None,
+            "chat_is_processing": False,
+            "chat_processing_text": "",
             "agent_initialized": False,
             "chat_rename_session_id": "",
             "chat_rename_value": "",
@@ -666,6 +750,8 @@ def _clear_active_chat() -> None:
         {
             "messages": [],
             "pending_input": None,
+            "chat_is_processing": False,
+            "chat_processing_text": "",
             "agent_initialized": False,
         },
     )
@@ -795,6 +881,7 @@ def _queue_message(text: str, switch_to_chat: bool = True) -> None:
     if not clean:
         return
     st.session_state.messages.append({"role": "user", "content": clean})
+    _start_chat_processing("Ассистент думает над ответом...")
     if _persist_chat_message("user", clean):
         _reload_current_chat_state(force_messages=False)
     st.session_state.pending_input = clean
@@ -805,14 +892,56 @@ def _queue_message(text: str, switch_to_chat: bool = True) -> None:
 def _render_chat_message_item(message: Dict[str, str]) -> None:
     role = str(message.get("role", "")).strip()
     content = str(message.get("content", "")).strip()
+    if role != "assistant":
+        render_message(role, content)
+        return
+
     if role == "assistant" and content.startswith(GUARDRAIL_BLOCK_PREFIX):
         body = content[len(GUARDRAIL_BLOCK_PREFIX) :].strip()
         with st.chat_message("assistant"):
             st.warning("Запрос заблокирован намеренно политикой безопасности.")
             if body:
-                st.write(body)
+                st.markdown(body)
         return
-    render_message(role, content)
+
+    if content.startswith("Ошибка при обработке запроса:"):
+        body = content.split(":", 1)[1].strip() if ":" in content else ""
+        with st.chat_message("assistant"):
+            st.error("Ассистент не смог обработать запрос.")
+            if body:
+                st.markdown(body)
+            st.caption("Попробуйте уточнить формулировку вопроса или сократить запрос.")
+        return
+
+    links = _extract_chat_links(content)
+    outcome_summary = _build_assistant_outcome_summary(content, links)
+    next_steps = _build_assistant_next_steps(content, links)
+    with st.chat_message("assistant"):
+        if outcome_summary:
+            st.success(outcome_summary)
+        st.markdown(content)
+        if links:
+            st.markdown("**Полезные ссылки**")
+            for item in links:
+                label = str(item.get("label", "")).strip() or "Открыть ссылку"
+                url = str(item.get("url", "")).strip()
+                if not url:
+                    continue
+                st.markdown(f"- [{label}]({url})")
+        if next_steps:
+            st.caption("Что можно сделать дальше:")
+            for hint in next_steps:
+                st.markdown(f"- {hint}")
+
+
+def _render_chat_processing_placeholder() -> None:
+    if not bool(st.session_state.get("chat_is_processing")):
+        return
+    status_text = str(st.session_state.get("chat_processing_text", "")).strip()
+    if not status_text:
+        status_text = "Ассистент думает над ответом..."
+    st.info(status_text)
+    st.caption("Запрос отправлен. Ответ появится в этом чате автоматически.")
 
 
 async def _get_session_agent(
@@ -1197,6 +1326,7 @@ def render_chat_window():
     else:
         for msg in st.session_state.messages:
             _render_chat_message_item(msg)
+    _render_chat_processing_placeholder()
 
     st.caption(
         "Безопасный режим: задавайте бизнес-вопросы и read-only запросы. "
@@ -4764,6 +4894,7 @@ async def handle_message(text: str):
                 raise RuntimeError("Не удалось инициализировать агента.")
             st.session_state.agent_initialized = True
 
+    st.session_state.chat_processing_text = "Ассистент готовит ответ..."
     reply = await agent.chat(st.session_state.messages)
     content = str(reply.get("content", "")).strip()
     finish_reason = str(reply.get("finish_reason", "")).strip().lower()
@@ -4777,6 +4908,7 @@ async def handle_message(text: str):
     })
     if _persist_chat_message("assistant", content):
         _reload_current_chat_state(force_messages=False)
+    _stop_chat_processing()
 
 
 # --- State utils -------------------------------------------------------------
@@ -4815,7 +4947,22 @@ def process_pending_input():
                 "content": content,
             }
         )
+        _stop_chat_processing()
     return True
+
+
+def _process_pending_input_with_feedback(*, use_chat_text: bool = False) -> None:
+    if not st.session_state.pending_input:
+        return
+    spinner_text = "Обрабатываем запрос ассистента..."
+    if use_chat_text:
+        spinner_text = str(st.session_state.get("chat_processing_text", "")).strip()
+        if not spinner_text:
+            spinner_text = "Ассистент думает над ответом..."
+    with st.spinner(spinner_text):
+        processed = process_pending_input()
+    if processed:
+        st.rerun()
 
 
 def main():
@@ -4839,30 +4986,33 @@ def main():
         st.error(error)
         st.stop()
 
-    if st.session_state.pending_input:
-        with st.spinner("Обрабатываем запрос ассистента..."):
-            processed = process_pending_input()
-        if processed:
-            st.rerun()
-
     active_window = st.session_state.active_window
     if active_window == WINDOW_CHAT:
         render_chat_window()
+        _process_pending_input_with_feedback(use_chat_text=True)
     elif active_window == WINDOW_US1:
+        _process_pending_input_with_feedback()
         render_us1_window()
     elif active_window == WINDOW_US2:
+        _process_pending_input_with_feedback()
         render_us2_window()
     elif active_window == WINDOW_US3:
+        _process_pending_input_with_feedback()
         render_us3_window()
     elif active_window == WINDOW_US4:
+        _process_pending_input_with_feedback()
         render_us4_window()
     elif active_window == WINDOW_US5:
+        _process_pending_input_with_feedback()
         render_us5_window()
     elif active_window == WINDOW_US13:
+        _process_pending_input_with_feedback()
         render_us13_window()
     elif active_window == WINDOW_US14:
+        _process_pending_input_with_feedback()
         render_us14_window()
     elif active_window == WINDOW_US15:
+        _process_pending_input_with_feedback()
         render_us15_window()
     else:
         st.session_state.active_window = WINDOW_CHAT

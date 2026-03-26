@@ -531,8 +531,32 @@ class TestFrontendUISmoke(unittest.TestCase):
             self.agent.chat_calls[-1][-1],
             {"role": "user", "content": "Покажи доступные датасеты"},
         )
+        self.assertEqual(at.chat_message[-1].name, "assistant")
+        self.assertEqual(at.chat_message[-1].markdown[0].value, "assistant-reply")
+        self.assertFalse(at.session_state["chat_is_processing"])
+        self.assertEqual(at.session_state["chat_processing_text"], "")
         sessions = self.auth_service.list_chat_sessions("alice")
         self.assertEqual(sessions[0]["title"], "Покажи доступные датасеты")
+
+    def test_pending_chat_state_shows_user_message_and_processing_feedback(self):
+        at = self._new_app(
+            authenticated=True,
+            extra_state={
+                "messages": [{"role": "user", "content": "Покажи выручку по месяцам"}],
+                "chat_is_processing": True,
+                "chat_processing_text": "Ассистент думает над ответом...",
+            },
+        )
+        at.run()
+
+        info_values = self._text_values(at.info)
+        caption_values = self._text_values(at.caption)
+
+        self.assertGreaterEqual(len(at.chat_message), 1)
+        self.assertEqual(at.chat_message[0].name, "user")
+        self.assertEqual(at.chat_message[0].markdown[0].value, "Покажи выручку по месяцам")
+        self.assertTrue(any("Ассистент думает над ответом" in value for value in info_values))
+        self.assertTrue(any("Ответ появится в этом чате автоматически" in value for value in caption_values))
 
     def test_authenticated_user_sees_chat_onboarding_and_quick_start_help(self):
         at = self._new_app(authenticated=True)
@@ -787,6 +811,26 @@ class TestFrontendUISmoke(unittest.TestCase):
             "Безопасность: запрос заблокирован намеренно.",
         )
         self.assertIn("read-only", at.session_state["messages"][-1]["content"])
+
+    def test_assistant_reply_with_links_renders_useful_result_summary(self):
+        self.agent.reply = (
+            "Готово: собрал результат для демонстрации.\n\n"
+            "Dashboard: http://localhost:8088/superset/dashboard/301/\n"
+            "Chart: http://localhost:8088/explore/?slice_id=501"
+        )
+
+        at = self._new_app(authenticated=True)
+        at.run()
+        at.chat_input[0].set_value("Собери дашборд по продажам")
+        at.run()
+
+        assistant_message = at.chat_message[-1]
+
+        self.assertTrue(any("Готовы chart и dashboard со ссылками." in value for value in self._text_values(assistant_message.success)))
+        self.assertTrue(any("Полезные ссылки" in value for value in self._text_values(assistant_message.markdown)))
+        self.assertTrue(any("Открыть dashboard" in value for value in self._text_values(assistant_message.markdown)))
+        self.assertTrue(any("Открыть chart" in value for value in self._text_values(assistant_message.markdown)))
+        self.assertTrue(any("Что можно сделать дальше:" in value for value in self._text_values(assistant_message.caption)))
 
     def test_navigation_smoke_respects_active_window(self):
         at = self._new_app(authenticated=True, active_window="us1")
