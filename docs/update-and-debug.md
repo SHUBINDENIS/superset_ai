@@ -25,6 +25,17 @@ Historical/archive only:
 
 ## One Primary Local/Server Path
 
+Deployment-mode contract:
+- `ASSISTANT_DEPLOYMENT_MODE=development`
+  - local/direct-port workflow
+  - weak placeholder auth secrets stay warning-only
+  - localhost `SUPERSET_PUBLIC_URL` and localhost CORS origins are allowed
+- `ASSISTANT_DEPLOYMENT_MODE=production`
+  - public/proxy-facing workflow
+  - placeholder or short `AUTH_JWT_SECRET` becomes a hard failure
+  - localhost/loopback `SUPERSET_PUBLIC_URL`, `US15_SHARE_BASE_URL`, or `API_CORS_ORIGINS` become hard failures
+  - if `API_CORS_ORIGINS` is unset, same-origin proxy deployment is assumed
+
 Default local or production-like compose run:
 
 ```bash
@@ -102,6 +113,7 @@ Minimum variables before local smoke or server rollout:
 - `OPENAI_MODEL`
 - `SUPERSET_PUBLIC_URL`
 - `AUTH_JWT_SECRET`
+- `ASSISTANT_DEPLOYMENT_MODE`
 
 Only when calling FastAPI directly outside the Next.js origin:
 - `API_CORS_ORIGINS`

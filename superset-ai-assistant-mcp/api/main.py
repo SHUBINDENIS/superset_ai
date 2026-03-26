@@ -23,10 +23,15 @@ if _PACKAGE_ROOT not in sys.path:
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import logging
 
 load_dotenv()
 
 from api.routers import auth, chats, frontend_logs, health, scan, viz  # noqa: E402
+from api.runtime_config import RuntimeConfigError, validate_runtime_config  # noqa: E402
+
+
+logger = logging.getLogger("api.runtime_config")
 
 
 # ---------------------------------------------------------------------------
@@ -35,6 +40,14 @@ from api.routers import auth, chats, frontend_logs, health, scan, viz  # noqa: E
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
+    try:
+        report = validate_runtime_config()
+        app.state.deployment_mode = report["mode"]
+        for warning in report["warnings"]:
+            logger.warning(warning)
+    except RuntimeConfigError:
+        logger.exception("Startup config validation failed")
+        raise
     yield
     try:
         from backend.ai_agent import shutdown_global_resources

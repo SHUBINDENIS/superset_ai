@@ -18,6 +18,7 @@
 
 Проверьте перед rollout:
 
+- `ASSISTANT_DEPLOYMENT_MODE=production`
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
 - `SUPERSET_PUBLIC_URL=https://superset.example.com`
@@ -34,6 +35,12 @@ Optional share-link override:
 
 - `US15_SHARE_BASE_URL=https://superset.example.com`
   - if omitted, the assistant uses `SUPERSET_PUBLIC_URL`
+
+Production-mode safety checks now fail rollout if:
+- `AUTH_JWT_SECRET` is placeholder-like or shorter than 32 characters
+- `SUPERSET_PUBLIC_URL` or `US15_SHARE_BASE_URL` points to localhost/loopback
+- `US15_SHARE_BASE_URL` uses a different public origin than `SUPERSET_PUBLIC_URL`
+- `API_CORS_ORIGINS` contains localhost/loopback origins
 
 ## 3. Bring-Up Options
 

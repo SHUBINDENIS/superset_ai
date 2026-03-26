@@ -12,6 +12,8 @@ Usage:
 
 Validates the effective deploy environment for the single supported stack.
 Reads values from the current shell first, then from .env.dev.
+Uses ASSISTANT_DEPLOYMENT_MODE=development|production to decide whether
+unsafe values are warnings or hard failures.
 EOF
 }
 
@@ -39,86 +41,56 @@ value_for() {
   fi
 }
 
-is_placeholder() {
-  local value="$1"
-  shift
-  local marker
-  for marker in "$@"; do
-    if [[ "${value}" == "${marker}" ]]; then
-      return 0
-    fi
-  done
-  return 1
-}
-
-require_nonempty() {
-  local key="$1"
-  local value
-  value="$(value_for "${key}")"
-  if [[ -z "${value}" ]]; then
-    echo "[validate-primary-env] missing required ${key}" >&2
-    return 1
-  fi
-  return 0
-}
-
-FAIL=0
-
 docker compose --env-file "${ENV_FILE}" -f "${COMPOSE_FILE}" config >/dev/null
 
+ASSISTANT_DEPLOYMENT_MODE_VALUE="$(value_for ASSISTANT_DEPLOYMENT_MODE)"
 OPENAI_API_KEY_VALUE="$(value_for OPENAI_API_KEY)"
 OPENAI_MODEL_VALUE="$(value_for OPENAI_MODEL)"
 SUPERSET_PUBLIC_URL_VALUE="$(value_for SUPERSET_PUBLIC_URL)"
 AUTH_JWT_SECRET_VALUE="$(value_for AUTH_JWT_SECRET)"
 US15_SHARE_BASE_URL_VALUE="$(value_for US15_SHARE_BASE_URL)"
 API_CORS_ORIGINS_VALUE="$(value_for API_CORS_ORIGINS)"
+ASSISTANT_RELEASE_VERSION_VALUE="${ASSISTANT_RELEASE_VERSION:-$(value_for ASSISTANT_RELEASE_VERSION)}"
+ASSISTANT_BUILD_SHA_VALUE="${ASSISTANT_BUILD_SHA:-$(value_for ASSISTANT_BUILD_SHA)}"
+ASSISTANT_BUILD_TIMESTAMP_VALUE="${ASSISTANT_BUILD_TIMESTAMP:-$(value_for ASSISTANT_BUILD_TIMESTAMP)}"
 
-if ! require_nonempty OPENAI_API_KEY; then
-  FAIL=1
-elif is_placeholder "${OPENAI_API_KEY_VALUE}" "replace_me" "your_openai_api_key"; then
-  echo "[validate-primary-env] OPENAI_API_KEY still uses a placeholder value" >&2
-  FAIL=1
-else
-  echo "[validate-primary-env] OPENAI_API_KEY set"
-fi
+ASSISTANT_DEPLOYMENT_MODE="${ASSISTANT_DEPLOYMENT_MODE_VALUE}" \
+OPENAI_API_KEY="${OPENAI_API_KEY_VALUE}" \
+OPENAI_MODEL="${OPENAI_MODEL_VALUE}" \
+SUPERSET_PUBLIC_URL="${SUPERSET_PUBLIC_URL_VALUE}" \
+AUTH_JWT_SECRET="${AUTH_JWT_SECRET_VALUE}" \
+US15_SHARE_BASE_URL="${US15_SHARE_BASE_URL_VALUE}" \
+API_CORS_ORIGINS="${API_CORS_ORIGINS_VALUE}" \
+ASSISTANT_RELEASE_VERSION="${ASSISTANT_RELEASE_VERSION_VALUE}" \
+ASSISTANT_BUILD_SHA="${ASSISTANT_BUILD_SHA_VALUE}" \
+ASSISTANT_BUILD_TIMESTAMP="${ASSISTANT_BUILD_TIMESTAMP_VALUE}" \
+PYTHONPATH="${ROOT_DIR}/superset-ai-assistant-mcp" \
+python3 - <<'PY'
+from api.runtime_config import RuntimeConfigError, validate_runtime_config
+import os
+import sys
 
-if ! require_nonempty OPENAI_MODEL; then
-  FAIL=1
-else
-  echo "[validate-primary-env] OPENAI_MODEL set"
-fi
+try:
+    report = validate_runtime_config()
+except RuntimeConfigError as exc:
+    print(f"[validate-primary-env] {exc}", file=sys.stderr)
+    raise SystemExit(64)
 
-if ! require_nonempty SUPERSET_PUBLIC_URL; then
-  FAIL=1
-else
-  echo "[validate-primary-env] SUPERSET_PUBLIC_URL set"
-fi
+for line in report["checks"]:
+    print(f"[validate-primary-env] {line}")
+for warning in report["warnings"]:
+    print(f"[validate-primary-env] warning: {warning}")
 
-if [[ -n "${US15_SHARE_BASE_URL_VALUE}" ]]; then
-  echo "[validate-primary-env] US15_SHARE_BASE_URL set"
-else
-  echo "[validate-primary-env] US15_SHARE_BASE_URL not set; runtime will fall back to SUPERSET_PUBLIC_URL"
-fi
-
-if [[ -n "${API_CORS_ORIGINS_VALUE}" ]]; then
-  echo "[validate-primary-env] API_CORS_ORIGINS set"
-else
-  echo "[validate-primary-env] API_CORS_ORIGINS not set; local default will be used"
-fi
-
-if [[ -z "${AUTH_JWT_SECRET_VALUE}" ]]; then
-  echo "[validate-primary-env] AUTH_JWT_SECRET missing" >&2
-  FAIL=1
-elif is_placeholder "${AUTH_JWT_SECRET_VALUE}" "dev-only-secret-change-me" "change_me_please"; then
-  echo "[validate-primary-env] AUTH_JWT_SECRET still uses a weak default placeholder" >&2
-else
-  echo "[validate-primary-env] AUTH_JWT_SECRET set"
-fi
-
-echo "[validate-primary-env] ASSISTANT_RELEASE_VERSION=${ASSISTANT_RELEASE_VERSION:-<auto>}"
-echo "[validate-primary-env] ASSISTANT_BUILD_SHA=${ASSISTANT_BUILD_SHA:-<auto>}"
-echo "[validate-primary-env] ASSISTANT_BUILD_TIMESTAMP=${ASSISTANT_BUILD_TIMESTAMP:-<auto>}"
-
-if (( FAIL != 0 )); then
-  exit 64
-fi
+print(
+    "[validate-primary-env] "
+    f"ASSISTANT_RELEASE_VERSION={os.getenv('ASSISTANT_RELEASE_VERSION', '<auto>') or '<auto>'}"
+)
+print(
+    "[validate-primary-env] "
+    f"ASSISTANT_BUILD_SHA={os.getenv('ASSISTANT_BUILD_SHA', '<auto>') or '<auto>'}"
+)
+print(
+    "[validate-primary-env] "
+    f"ASSISTANT_BUILD_TIMESTAMP={os.getenv('ASSISTANT_BUILD_TIMESTAMP', '<auto>') or '<auto>'}"
+)
+PY

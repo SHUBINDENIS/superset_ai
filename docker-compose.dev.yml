@@ -30,6 +30,7 @@ x-assistant-build: &assistant-build
   context: .
   dockerfile: superset-ai-assistant-mcp/Dockerfile
 x-assistant-runtime-env: &assistant-runtime-env
+  ASSISTANT_DEPLOYMENT_MODE: ${ASSISTANT_DEPLOYMENT_MODE:-development}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-replace_me}
   OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.4-mini}
   ASSISTANT_LOG_DIR: ${ASSISTANT_LOG_DIR:-}
