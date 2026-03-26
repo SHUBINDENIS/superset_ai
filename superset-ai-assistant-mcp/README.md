@@ -19,9 +19,24 @@
 - `docker-compose.dev.yml`
 - он поднимает Superset + built-in MCP HTTP + assistant одной командой
 - он не заменяет split deployment, а лишь упрощает локальный dev/demo запуск
-- в этой фазе unified stack по-прежнему поднимает Streamlit fallback console; Next.js primary path стартует отдельно
+- в этой фазе unified stack поднимает и primary `FastAPI + Next.js`, и Streamlit fallback console
 
 ## Как запустить primary core UI
+Самый короткий repo-backed путь для dual-run:
+
+```bash
+cd /home/superset_ai
+cp .env.dev.example .env.dev
+docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
+```
+
+После этого по умолчанию доступны:
+- primary Next.js UI: `http://localhost:3001/login`
+- primary FastAPI health: `http://localhost:8100/api/health`
+- Streamlit fallback/admin UI: `http://localhost:8051`
+
+Ниже оставлен ручной split-run сценарий, если compose не используется.
+
 1. Скопируйте `.env.example` в `.env` и заполните:
    - `OPENAI_API_KEY` — ключ OpenAI
    - `OPENAI_MODEL` — рекомендуемо `gpt-5.4-mini` для снижения риска 429 TPM
@@ -108,14 +123,17 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml up -d
 
 Этот сценарий:
 - оставляет текущую split-модель основной
-- поднимает `superset`, `mcp-http`, `assistant`, `db`, `pagila-db`, `redis`, `superset-init`
+- поднимает `superset`, `mcp-http`, `assistant-api`, `assistant-web`, `assistant`, `db`, `pagila-db`, `redis`, `superset-init`
 - подключает ассистент к built-in MCP по HTTP
 - автоматически регистрирует `Pagila Demo (PostgreSQL)` и ключевые datasets для demo-сценариев
 - поднимает Streamlit fallback/admin console на `:8051`
-- не поднимает Next.js primary core UI, его нужно запускать отдельно
+- поднимает primary FastAPI на `:8100`
+- поднимает primary Next.js UI на `:3001`
 
 Если порты заняты локально, переопределите в `.env.dev`:
 - `DEV_SUPERSET_PORT`
+- `DEV_API_PORT`
+- `DEV_NEXTJS_PORT`
 - `DEV_ASSISTANT_PORT`
 - `DEV_PAGILA_PORT`
 

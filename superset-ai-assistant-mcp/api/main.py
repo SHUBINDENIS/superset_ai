@@ -6,8 +6,8 @@ Run locally:
     uvicorn api.main:app --reload --port 8100
 
 This app is designed to coexist with the Streamlit assistant.
-It does NOT replace Streamlit; it provides a proper HTTP API layer
-that future frontends (e.g. Next.js) will consume.
+It now serves the primary core UI path for the Next.js frontend,
+while Streamlit remains available as a fallback/helper-admin UI.
 """
 
 from __future__ import annotations
@@ -56,7 +56,10 @@ app = FastAPI(
 # CORS — permissive for local dev; tighten for production.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.getenv("API_CORS_ORIGINS", "http://localhost:3000").split(","),
+    allow_origins=os.getenv(
+        "API_CORS_ORIGINS",
+        "http://localhost:3001,http://127.0.0.1:3001",
+    ).split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

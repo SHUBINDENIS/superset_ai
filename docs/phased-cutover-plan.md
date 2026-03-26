@@ -66,12 +66,19 @@ Streamlit path остаётся доступным на `http://<host>:8051` т�
 ```bash
 cd /home/superset_ai
 cp .env.dev.example .env.dev
-docker compose --env-file .env.dev -f docker-compose.dev.yml up -d
+docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
 ```
 
-Этот стек поднимает Superset, built-in MCP HTTP и Streamlit fallback console.
+Этот стек теперь поднимает:
+- Superset
+- built-in MCP HTTP
+- `assistant-api` как primary FastAPI
+- `assistant-web` как primary Next.js UI
+- `assistant` как Streamlit fallback/admin console
 
 ### 2. FastAPI primary backend
+
+Если unified compose не используется, поднимите отдельно:
 
 ```bash
 cd /home/superset_ai/superset-ai-assistant-mcp
@@ -86,7 +93,7 @@ curl http://127.0.0.1:8100/api/health
 
 ### 3. Next.js primary frontend
 
-В отдельном терминале:
+Если unified compose не используется, поднимите отдельно:
 
 ```bash
 cd /home/superset_ai/superset-ai-assistant-mcp/frontend-next

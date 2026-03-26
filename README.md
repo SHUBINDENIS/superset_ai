@@ -198,8 +198,9 @@ docker run --rm -p 8051:8051 --env-file superset-ai-assistant-mcp/.env ai_supers
 - для рабочего MCP-подключения внутри такого контейнера нужен либо доступный `built_in_http` endpoint, либо явно заданный stdio launcher
 
 ### 7) Опциональный unified local dev stack
-Этот сценарий добавлен для локальной разработки и демо, но не заменяет split deployment.
-Он по-прежнему поднимает Streamlit fallback/admin console; primary Next.js/FastAPI path запускается отдельно.
+Этот сценарий добавлен для локальной разработки и демо и теперь является самым
+коротким repo-backed способом поднять phased primary UI switch в dual-run.
+Split deployment при этом остаётся основной поддерживаемой моделью.
 
 Что поднимает `docker-compose.dev.yml`:
 - `db`
@@ -207,6 +208,8 @@ docker run --rm -p 8051:8051 --env-file superset-ai-assistant-mcp/.env ai_supers
 - `superset-init`
 - `superset`
 - `mcp-http`
+- `assistant-api` (primary FastAPI)
+- `assistant-web` (primary Next.js)
 - `assistant`
 - опционально: `superset-worker`, `superset-worker-beat` через профиль `async`
 
@@ -221,6 +224,8 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml up -d
 ```bash
 docker compose --env-file .env.dev -f docker-compose.dev.yml ps
 curl -I http://127.0.0.1:8088
+curl http://127.0.0.1:${DEV_API_PORT:-8100}/api/health
+curl -I http://127.0.0.1:${DEV_NEXTJS_PORT:-3001}/login
 curl -I http://127.0.0.1:8051
 ```
 
@@ -228,7 +233,9 @@ curl -I http://127.0.0.1:8051
 - `docker compose -f docker-compose.dev.yml config`
 - unified stack стартует в контейнерах
 - Superset отвечает на HTTP
-- Streamlit assistant отвечает на HTTP
+- primary FastAPI отвечает на `/api/health`
+- primary Next.js отвечает на `/login`
+- Streamlit fallback отвечает на HTTP
 - assistant runtime подключается к built-in MCP по `http://mcp-http:5008/mcp/`
 
 Важные детали:
@@ -236,10 +243,11 @@ curl -I http://127.0.0.1:8051
 - `mcp-http` запускает built-in MCP из локального дерева `superset/`, примонтированного в dev-контур
 - в `.env.dev.example` по умолчанию `SUPERSET_LOAD_EXAMPLES=no`, чтобы первый `up -d` был быстрее и детерминированнее
 - unified stack теперь поднимает отдельный `pagila-db` и автоматически регистрирует `Pagila Demo (PostgreSQL)` как реальный demo-source в Superset
-- если `8088` или `8051` уже заняты, задайте `DEV_SUPERSET_PORT` и `DEV_ASSISTANT_PORT` в `.env.dev`
-- чтобы валидировать phased cutover в dual-run, запустите отдельно:
-  - FastAPI на `:8100`
-  - Next.js на свободном порту, например `:3001`
+- primary entrypoints по умолчанию:
+  - Next.js: `:3001`
+  - FastAPI: `:8100`
+  - Streamlit fallback: `:8051`
+- если host-порты заняты, задайте `DEV_SUPERSET_PORT`, `DEV_API_PORT`, `DEV_NEXTJS_PORT`, `DEV_ASSISTANT_PORT` в `.env.dev`
 
 Подробный demo runbook и набор рекомендованных вопросов:
 - `docs/demo-pagila.md`

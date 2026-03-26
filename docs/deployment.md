@@ -13,7 +13,7 @@ Phased cutover scope и rollback-логика зафиксированы отд�
 - отдельный streaming backend больше не используется
 - поддерживаемый Docker-сценарий остаётся split-моделью: Superset через compose, ассистент отдельным процессом/контейнером
 - дополнительно доступен optional unified local dev stack через `docker-compose.dev.yml`
-- unified local dev stack по-прежнему поднимает Streamlit fallback console; Next.js primary path запускается отдельно
+- unified local dev stack поднимает primary `FastAPI + Next.js` и Streamlit fallback вместе
 - Celery worker/beat оставлены только как опциональный профиль для фоновых задач Superset, а не как обязательная часть базового запуска проекта
 
 ## 1) Диаграмма развёртывания
@@ -151,7 +151,7 @@ flowchart TB
 ## 8) Опциональный unified local dev stack
 
 Этот вариант предназначен для локальной разработки/демо одной командой и не заменяет split-модель как базовый deployment.
-В phased cutover он даёт Superset + MCP + Streamlit fallback console; primary Next.js/FastAPI стартует отдельно.
+В phased cutover он даёт Superset + MCP + primary `FastAPI + Next.js` + Streamlit fallback console.
 
 Состав:
 - `db`
@@ -159,6 +159,8 @@ flowchart TB
 - `superset-init`
 - `superset`
 - `mcp-http`
+- `assistant-api`
+- `assistant-web`
 - `assistant`
 - optional profile `async`: `superset-worker`, `superset-worker-beat`
 

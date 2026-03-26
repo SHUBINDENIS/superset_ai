@@ -26,6 +26,26 @@ x-superset-volumes: &superset-volumes
   - ./docker/dev/superset_config_docker.py:/app/docker/pythonpath_dev/superset_config_docker.py:ro
   - ./docker/dev/requirements-local.txt:/app/docker/requirements-local.txt:ro
   - superset_dev_home:/app/superset_home
+x-assistant-build: &assistant-build
+  context: .
+  dockerfile: superset-ai-assistant-mcp/Dockerfile
+x-assistant-runtime-env: &assistant-runtime-env
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-replace_me}
+  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.4-mini}
+  SUPERSET_PRODUCT_MCP_RUNTIME: built_in_http
+  SUPERSET_BUILT_IN_MCP_URL: http://mcp-http:5008/mcp/
+  SUPERSET_BASE_URL: http://superset:8088
+  SUPERSET_PUBLIC_URL: ${SUPERSET_PUBLIC_URL:-http://103.54.18.91:8088}
+  US15_SHARE_BASE_URL: ${SUPERSET_PUBLIC_URL:-http://103.54.18.91:8088}
+  AUTH_DB_PATH: /app/superset-ai-assistant-mcp/data/auth.db
+  AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-secret-change-me}
+  AUTH_JWT_TTL_HOURS: ${AUTH_JWT_TTL_HOURS:-12}
+  AUTH_PASSWORD_MIN_LENGTH: ${AUTH_PASSWORD_MIN_LENGTH:-8}
+  AUTH_HISTORY_MAX_MESSAGES: ${AUTH_HISTORY_MAX_MESSAGES:-500}
+  GLOSSARY_DB_PATH: /app/superset-ai-assistant-mcp/data/glossary.db
+  US3_RULES_DB_PATH: /app/superset-ai-assistant-mcp/data/us3_mapping_rules.db
+  US5_DB_PATH: /app/superset-ai-assistant-mcp/data/us5_query_builder.db
+  US10_12_DB_PATH: /app/superset-ai-assistant-mcp/data/us10_12_guardrails.db
 
 services:
   redis:
@@ -153,10 +173,58 @@ services:
     restart: unless-stopped
     volumes: *superset-volumes
 
+  assistant-api:
+    build: *assistant-build
+    depends_on:
+      superset:
+        condition: service_healthy
+      mcp-http:
+        condition: service_healthy
+    restart: unless-stopped
+    ports:
+      - "${DEV_API_PORT:-8100}:8100"
+    environment:
+      <<: *assistant-runtime-env
+      API_PORT: "8100"
+      API_CORS_ORIGINS: ${API_CORS_ORIGINS:-http://localhost:3001,http://127.0.0.1:3001}
+    command: ["bash", "superset-ai-assistant-mcp/start_fastapi_stack.sh"]
+    volumes:
+      - assistant_dev_data:/app/superset-ai-assistant-mcp/data
+    healthcheck:
+      test:
+        ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/api/health', timeout=5)\""]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  assistant-web:
+    image: node:20-bookworm-slim
+    depends_on:
+      assistant-api:
+        condition: service_healthy
+    working_dir: /app/superset-ai-assistant-mcp/frontend-next
+    restart: unless-stopped
+    ports:
+      - "${DEV_NEXTJS_PORT:-3001}:3001"
+    environment:
+      NEXT_PUBLIC_API_URL: http://assistant-api:8100
+      NEXTJS_PORT: "3001"
+    command: ["sh", "/usr/local/bin/start-nextjs-primary.sh"]
+    volumes:
+      - ./superset-ai-assistant-mcp/frontend-next:/app/superset-ai-assistant-mcp/frontend-next
+      - ./docker/dev/start-nextjs-primary.sh:/usr/local/bin/start-nextjs-primary.sh:ro
+      - frontend_next_node_modules:/app/superset-ai-assistant-mcp/frontend-next/node_modules
+    healthcheck:
+      test:
+        ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3001/login').then(r=>process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+
   assistant:
-    build:
-      context: .
-      dockerfile: superset-ai-assistant-mcp/Dockerfile
+    build: *assistant-build
     depends_on:
       superset:
         condition: service_healthy
@@ -166,22 +234,7 @@ services:
     ports:
       - "${DEV_ASSISTANT_PORT:-8051}:8051"
     environment:
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-replace_me}
-      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.4-mini}
-      SUPERSET_PRODUCT_MCP_RUNTIME: built_in_http
-      SUPERSET_BUILT_IN_MCP_URL: http://mcp-http:5008/mcp/
-      SUPERSET_BASE_URL: http://superset:8088
-      SUPERSET_PUBLIC_URL: ${SUPERSET_PUBLIC_URL:-http://103.54.18.91:8088}
-      US15_SHARE_BASE_URL: ${SUPERSET_PUBLIC_URL:-http://103.54.18.91:8088}
-      AUTH_DB_PATH: /app/superset-ai-assistant-mcp/data/auth.db
-      AUTH_JWT_SECRET: ${AUTH_JWT_SECRET:-dev-only-secret-change-me}
-      AUTH_JWT_TTL_HOURS: ${AUTH_JWT_TTL_HOURS:-12}
-      AUTH_PASSWORD_MIN_LENGTH: ${AUTH_PASSWORD_MIN_LENGTH:-8}
-      AUTH_HISTORY_MAX_MESSAGES: ${AUTH_HISTORY_MAX_MESSAGES:-500}
-      GLOSSARY_DB_PATH: /app/superset-ai-assistant-mcp/data/glossary.db
-      US3_RULES_DB_PATH: /app/superset-ai-assistant-mcp/data/us3_mapping_rules.db
-      US5_DB_PATH: /app/superset-ai-assistant-mcp/data/us5_query_builder.db
-      US10_12_DB_PATH: /app/superset-ai-assistant-mcp/data/us10_12_guardrails.db
+      <<: *assistant-runtime-env
       STREAMLIT_PORT: "8051"
     volumes:
       - assistant_dev_data:/app/superset-ai-assistant-mcp/data
@@ -192,3 +245,4 @@ volumes:
   pagila_dev_home:
   redis_dev:
   assistant_dev_data:
+  frontend_next_node_modules:
