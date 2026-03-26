@@ -13,32 +13,36 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth, useLogout } from "@/hooks/use-auth";
+import { useChats } from "@/hooks/use-chats";
+import { ChatSidebar } from "@/components/chat-sidebar";
 import { cn } from "@/lib/utils";
 
 const navItems = [
-  { href: "/app/chat", label: "Chat", icon: MessageSquare },
-  { href: "/app/preview", label: "Preview", icon: Eye },
-  { href: "/app/recommend", label: "Recommend", icon: Sparkles },
-  { href: "/app/share", label: "Share", icon: Share2 },
-  { href: "/app/scan", label: "Scan", icon: ScanSearch },
+  { href: "/app/chat", label: "Чат", icon: MessageSquare },
+  { href: "/app/preview", label: "Предпросмотр", icon: Eye },
+  { href: "/app/recommend", label: "Рекомендации", icon: Sparkles },
+  { href: "/app/share", label: "Шеринг", icon: Share2 },
+  { href: "/app/scan", label: "Сканер схем", icon: ScanSearch },
 ] as const;
 
 export function AppSidebar() {
   const pathname = usePathname();
   const { user } = useAuth();
   const logout = useLogout();
+  const onChatPage = pathname.startsWith("/app/chat");
+  const { data: chatList } = useChats({ enabled: onChatPage });
 
   return (
     <aside className="flex h-screen w-56 flex-col border-r bg-card">
       {/* Brand */}
-      <div className="flex h-14 items-center border-b px-4">
+      <div className="flex h-14 shrink-0 items-center border-b px-4">
         <span className="text-sm font-semibold tracking-tight">
           Superset AI
         </span>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 space-y-1 p-2">
+      <nav className="space-y-1 p-2">
         {navItems.map(({ href, label, icon: Icon }) => {
           const active = pathname.startsWith(href);
           return (
@@ -59,8 +63,18 @@ export function AppSidebar() {
         })}
       </nav>
 
+      {/* Chat sessions — only visible on /app/chat */}
+      {onChatPage && (
+        <div className="flex-1 overflow-y-auto border-t px-2 py-3">
+          <ChatSidebar sessions={chatList?.sessions ?? []} />
+        </div>
+      )}
+
+      {/* Spacer when not on chat page */}
+      {!onChatPage && <div className="flex-1" />}
+
       {/* User / logout */}
-      <div className="border-t p-3">
+      <div className="shrink-0 border-t p-3">
         <div className="mb-2 flex items-center gap-2 px-1">
           <User className="h-4 w-4 text-muted-foreground" />
           <span className="truncate text-sm text-muted-foreground">
@@ -75,7 +89,7 @@ export function AppSidebar() {
           disabled={logout.isPending}
         >
           <LogOut className="h-4 w-4" />
-          {logout.isPending ? "Signing out..." : "Sign out"}
+          {logout.isPending ? "Выход..." : "Выйти"}
         </Button>
       </div>
     </aside>

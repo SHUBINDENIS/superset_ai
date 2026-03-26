@@ -31,7 +31,7 @@ def _fresh_app():
 
 
 class TestChatSessionCRUD(unittest.TestCase):
-    """Tests for GET/POST/PATCH /api/chats and message list/clear."""
+    """Tests for chat CRUD, activation, and message list/clear."""
 
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
@@ -160,6 +160,40 @@ class TestChatSessionCRUD(unittest.TestCase):
             cookies=self._auth_cookies(),
         )
         self.assertEqual(resp.status_code, 422)
+
+    # ------------------------------------------------------------------
+    # POST /api/chats/{session_id}/activate
+    # ------------------------------------------------------------------
+    def test_activate_chat_session_updates_active_pointer(self):
+        first = self.client.post(
+            "/api/chats",
+            json={"title": "First"},
+            cookies=self._auth_cookies(),
+        ).json()["session_id"]
+        second = self.client.post(
+            "/api/chats",
+            json={"title": "Second"},
+            cookies=self._auth_cookies(),
+        ).json()["session_id"]
+
+        activate_resp = self.client.post(
+            f"/api/chats/{first}/activate",
+            cookies=self._auth_cookies(),
+        )
+        self.assertEqual(activate_resp.status_code, 200)
+        self.assertEqual(activate_resp.json()["session_id"], first)
+
+        me_resp = self.client.get("/api/auth/me", cookies=self._auth_cookies())
+        self.assertEqual(me_resp.status_code, 200)
+        self.assertEqual(me_resp.json()["session_id"], first)
+        self.assertNotEqual(me_resp.json()["session_id"], second)
+
+    def test_activate_nonexistent_session_returns_404(self):
+        resp = self.client.post(
+            "/api/chats/00000000/activate",
+            cookies=self._auth_cookies(),
+        )
+        self.assertEqual(resp.status_code, 404)
 
     # ------------------------------------------------------------------
     # GET /api/chats/{session_id}/messages

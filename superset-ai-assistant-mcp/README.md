@@ -85,6 +85,37 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml up -d
 - `docs/manual-smoke-checklist.md`
 - `docs/demo-query-pack.md`
 
+## Экспериментальный Next.js frontend
+
+Новая миграционная ветка UI живёт в `frontend-next/`. В текущей фазе там уже
+перенесены:
+- auth shell с cookie-based FastAPI auth,
+- `/app/chat` с multi-chat sidebar,
+- отправка сообщений через FastAPI `/api/chats/...`.
+
+Локальный запуск:
+
+```bash
+cd /home/superset_ai/superset-ai-assistant-mcp
+uvicorn api.main:app --host 0.0.0.0 --port 8100
+```
+
+В отдельном терминале:
+
+```bash
+cd /home/superset_ai/superset-ai-assistant-mcp/frontend-next
+npm install
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8100 npm run dev -- --hostname 0.0.0.0 --port 3000
+```
+
+Открыть:
+- `http://127.0.0.1:3000/login`
+- после входа основной маршрут: `http://127.0.0.1:3000/app/chat`
+
+Важно:
+- Streamlit UI остаётся рабочим и не заменяется этим запуском;
+- preview/recommend/share/scan пока ещё не перенесены и остаются на Streamlit.
+
 ## Как пользоваться
 - В `sidebar` есть кнопки навигации по окнам: `Чат`, `US1`, `US2`, `US3`, `US4`, `US5`, `US13`, `US14`, `US15`.
 - Кнопка `Выход` завершает пользовательскую сессию в UI (аккаунт и история не удаляются).

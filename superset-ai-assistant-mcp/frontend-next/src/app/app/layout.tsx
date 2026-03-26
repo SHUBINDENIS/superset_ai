@@ -4,6 +4,7 @@ import { useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
 import { AppSidebar } from "@/components/app-sidebar";
+import { ChatUIProvider } from "@/hooks/use-chats";
 
 /**
  * Protected layout for `/app/*` routes.
@@ -31,9 +32,11 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   if (!isAuthenticated) return null;
 
   return (
-    <div className="flex h-screen overflow-hidden">
-      <AppSidebar />
-      <main className="flex-1 overflow-y-auto p-6">{children}</main>
-    </div>
+    <ChatUIProvider>
+      <div className="flex h-screen overflow-hidden">
+        <AppSidebar />
+        <main className="flex-1 overflow-hidden">{children}</main>
+      </div>
+    </ChatUIProvider>
   );
 }

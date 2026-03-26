@@ -5,6 +5,7 @@ Endpoints:
     GET    /api/chats                          – list user's chat sessions
     POST   /api/chats                          – create a new chat session
     PATCH  /api/chats/{session_id}             – rename a chat session
+    POST   /api/chats/{session_id}/activate    – mark a chat as active
     GET    /api/chats/{session_id}/messages     – list messages in a session
     DELETE /api/chats/{session_id}/messages     – clear messages in a session
     POST   /api/chats/{session_id}/messages     – send a message (runs agent)
@@ -90,6 +91,26 @@ def rename_chat(
             username=current_user["username"],
             session_id=session_id,
             title=body.title,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    return ChatSessionResponse(**updated)
+
+
+@router.post("/{session_id}/activate", response_model=ChatSessionResponse)
+def activate_chat(
+    session_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    auth_service=Depends(get_auth_service),
+) -> ChatSessionResponse:
+    """Mark an existing chat session as active for future auth restore."""
+    try:
+        updated = auth_service.set_active_chat_session(
+            username=current_user["username"],
+            session_id=session_id,
         )
     except ValueError as exc:
         raise HTTPException(
