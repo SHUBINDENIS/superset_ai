@@ -200,6 +200,8 @@ curl -I http://127.0.0.1:8051
 
 Подробный demo runbook и набор рекомендованных вопросов:
 - `docs/demo-pagila.md`
+- `docs/manual-smoke-checklist.md`
+- `docs/demo-query-pack.md`
 
 ## Линтеры и CI
 В репозитории настроен рабочий pipeline/workflow для автоматического запуска линтеров:
