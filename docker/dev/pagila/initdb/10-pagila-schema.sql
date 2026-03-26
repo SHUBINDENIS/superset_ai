@@ -23,7 +23,7 @@ SET row_security = off;
 -- *not* creating schema, since initdb creates it
 
 
-ALTER SCHEMA public OWNER TO postgres;
+ALTER SCHEMA public OWNER TO pagila;
 
 --
 -- Name: bıgınt; Type: DOMAIN; Schema: public; Owner: postgres
@@ -32,7 +32,7 @@ ALTER SCHEMA public OWNER TO postgres;
 CREATE DOMAIN public."bıgınt" AS bigint;
 
 
-ALTER DOMAIN public."bıgınt" OWNER TO postgres;
+ALTER DOMAIN public."bıgınt" OWNER TO pagila;
 
 --
 -- Name: mpaa_rating; Type: TYPE; Schema: public; Owner: postgres
@@ -47,7 +47,7 @@ CREATE TYPE public.mpaa_rating AS ENUM (
 );
 
 
-ALTER TYPE public.mpaa_rating OWNER TO postgres;
+ALTER TYPE public.mpaa_rating OWNER TO pagila;
 
 --
 -- Name: year; Type: DOMAIN; Schema: public; Owner: postgres
@@ -57,7 +57,7 @@ CREATE DOMAIN public.year AS integer
 	CONSTRAINT year_check CHECK (((VALUE >= 1901) AND (VALUE <= 2155)));
 
 
-ALTER DOMAIN public.year OWNER TO postgres;
+ALTER DOMAIN public.year OWNER TO pagila;
 
 --
 -- Name: _group_concat(text, text); Type: FUNCTION; Schema: public; Owner: postgres
@@ -74,7 +74,7 @@ END
 $_$;
 
 
-ALTER FUNCTION public._group_concat(text, text) OWNER TO postgres;
+ALTER FUNCTION public._group_concat(text, text) OWNER TO pagila;
 
 --
 -- Name: film_in_stock(integer, integer); Type: FUNCTION; Schema: public; Owner: postgres
@@ -91,7 +91,7 @@ CREATE FUNCTION public.film_in_stock(p_film_id integer, p_store_id integer, OUT 
 $_$;
 
 
-ALTER FUNCTION public.film_in_stock(p_film_id integer, p_store_id integer, OUT p_film_count integer) OWNER TO postgres;
+ALTER FUNCTION public.film_in_stock(p_film_id integer, p_store_id integer, OUT p_film_count integer) OWNER TO pagila;
 
 --
 -- Name: film_not_in_stock(integer, integer); Type: FUNCTION; Schema: public; Owner: postgres
@@ -108,7 +108,7 @@ CREATE FUNCTION public.film_not_in_stock(p_film_id integer, p_store_id integer, 
 $_$;
 
 
-ALTER FUNCTION public.film_not_in_stock(p_film_id integer, p_store_id integer, OUT p_film_count integer) OWNER TO postgres;
+ALTER FUNCTION public.film_not_in_stock(p_film_id integer, p_store_id integer, OUT p_film_count integer) OWNER TO pagila;
 
 --
 -- Name: get_customer_balance(integer, timestamp with time zone); Type: FUNCTION; Schema: public; Owner: postgres
@@ -153,7 +153,7 @@ END
 $$;
 
 
-ALTER FUNCTION public.get_customer_balance(p_customer_id integer, p_effective_date timestamp with time zone) OWNER TO postgres;
+ALTER FUNCTION public.get_customer_balance(p_customer_id integer, p_effective_date timestamp with time zone) OWNER TO pagila;
 
 --
 -- Name: inventory_held_by_customer(integer); Type: FUNCTION; Schema: public; Owner: postgres
@@ -175,7 +175,7 @@ BEGIN
 END $$;
 
 
-ALTER FUNCTION public.inventory_held_by_customer(p_inventory_id integer) OWNER TO postgres;
+ALTER FUNCTION public.inventory_held_by_customer(p_inventory_id integer) OWNER TO pagila;
 
 --
 -- Name: inventory_in_stock(integer); Type: FUNCTION; Schema: public; Owner: postgres
@@ -212,7 +212,7 @@ BEGIN
 END $$;
 
 
-ALTER FUNCTION public.inventory_in_stock(p_inventory_id integer) OWNER TO postgres;
+ALTER FUNCTION public.inventory_in_stock(p_inventory_id integer) OWNER TO pagila;
 
 --
 -- Name: last_day(timestamp with time zone); Type: FUNCTION; Schema: public; Owner: postgres
@@ -230,7 +230,7 @@ CREATE FUNCTION public.last_day(timestamp with time zone) RETURNS date
 $_$;
 
 
-ALTER FUNCTION public.last_day(timestamp with time zone) OWNER TO postgres;
+ALTER FUNCTION public.last_day(timestamp with time zone) OWNER TO pagila;
 
 --
 -- Name: last_updated(); Type: FUNCTION; Schema: public; Owner: postgres
@@ -245,7 +245,7 @@ BEGIN
 END $$;
 
 
-ALTER FUNCTION public.last_updated() OWNER TO postgres;
+ALTER FUNCTION public.last_updated() OWNER TO pagila;
 
 --
 -- Name: customer_customer_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -259,7 +259,7 @@ CREATE SEQUENCE public.customer_customer_id_seq
     CACHE 1;
 
 
-ALTER TABLE public.customer_customer_id_seq OWNER TO postgres;
+ALTER TABLE public.customer_customer_id_seq OWNER TO pagila;
 
 SET default_tablespace = '';
 
@@ -283,7 +283,7 @@ CREATE TABLE public.customer (
 );
 
 
-ALTER TABLE public.customer OWNER TO postgres;
+ALTER TABLE public.customer OWNER TO pagila;
 
 --
 -- Name: rewards_report(integer, numeric); Type: FUNCTION; Schema: public; Owner: postgres
@@ -347,7 +347,7 @@ END
 $_$;
 
 
-ALTER FUNCTION public.rewards_report(min_monthly_purchases integer, min_dollar_amount_purchased numeric) OWNER TO postgres;
+ALTER FUNCTION public.rewards_report(min_monthly_purchases integer, min_dollar_amount_purchased numeric) OWNER TO pagila;
 
 --
 -- Name: group_concat(text); Type: AGGREGATE; Schema: public; Owner: postgres
@@ -359,7 +359,7 @@ CREATE AGGREGATE public.group_concat(text) (
 );
 
 
-ALTER AGGREGATE public.group_concat(text) OWNER TO postgres;
+ALTER AGGREGATE public.group_concat(text) OWNER TO pagila;
 
 --
 -- Name: actor_actor_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -373,7 +373,7 @@ CREATE SEQUENCE public.actor_actor_id_seq
     CACHE 1;
 
 
-ALTER TABLE public.actor_actor_id_seq OWNER TO postgres;
+ALTER TABLE public.actor_actor_id_seq OWNER TO pagila;
 
 --
 -- Name: actor; Type: TABLE; Schema: public; Owner: postgres
@@ -387,7 +387,7 @@ CREATE TABLE public.actor (
 );
 
 
-ALTER TABLE public.actor OWNER TO postgres;
+ALTER TABLE public.actor OWNER TO pagila;
 
 --
 -- Name: category_category_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -401,7 +401,7 @@ CREATE SEQUENCE public.category_category_id_seq
     CACHE 1;
 
 
-ALTER TABLE public.category_category_id_seq OWNER TO postgres;
+ALTER TABLE public.category_category_id_seq OWNER TO pagila;
 
 --
 -- Name: category; Type: TABLE; Schema: public; Owner: postgres
@@ -414,7 +414,7 @@ CREATE TABLE public.category (
 );
 
 
-ALTER TABLE public.category OWNER TO postgres;
+ALTER TABLE public.category OWNER TO pagila;
 
 --
 -- Name: film_film_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -428,7 +428,7 @@ CREATE SEQUENCE public.film_film_id_seq
     CACHE 1;
 
 
-ALTER TABLE public.film_film_id_seq OWNER TO postgres;
+ALTER TABLE public.film_film_id_seq OWNER TO pagila;
 
 --
 -- Name: film; Type: TABLE; Schema: public; Owner: postgres
@@ -452,7 +452,7 @@ CREATE TABLE public.film (
 );
 
 
-ALTER TABLE public.film OWNER TO postgres;
+ALTER TABLE public.film OWNER TO pagila;
 
 --
 -- Name: film_actor; Type: TABLE; Schema: public; Owner: postgres
@@ -465,7 +465,7 @@ CREATE TABLE public.film_actor (
 );
 
 
-ALTER TABLE public.film_actor OWNER TO postgres;
+ALTER TABLE public.film_actor OWNER TO pagila;
 
 --
 -- Name: film_category; Type: TABLE; Schema: public; Owner: postgres
@@ -478,7 +478,7 @@ CREATE TABLE public.film_category (
 );
 
 
-ALTER TABLE public.film_category OWNER TO postgres;
+ALTER TABLE public.film_category OWNER TO pagila;
 
 --
 -- Name: actor_info; Type: VIEW; Schema: public; Owner: postgres
@@ -501,7 +501,7 @@ CREATE VIEW public.actor_info AS
   GROUP BY a.actor_id, a.first_name, a.last_name;
 
 
-ALTER TABLE public.actor_info OWNER TO postgres;
+ALTER TABLE public.actor_info OWNER TO pagila;
 
 --
 -- Name: address_address_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -515,7 +515,7 @@ CREATE SEQUENCE public.address_address_id_seq
     CACHE 1;
 
 
-ALTER TABLE public.address_address_id_seq OWNER TO postgres;
+ALTER TABLE public.address_address_id_seq OWNER TO pagila;
 
 --
 -- Name: address; Type: TABLE; Schema: public; Owner: postgres
@@ -533,7 +533,7 @@ CREATE TABLE public.address (
 );
 
 
-ALTER TABLE public.address OWNER TO postgres;
+ALTER TABLE public.address OWNER TO pagila;
 
 --
 -- Name: city_city_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -547,7 +547,7 @@ CREATE SEQUENCE public.city_city_id_seq
     CACHE 1;
 
 
-ALTER TABLE public.city_city_id_seq OWNER TO postgres;
+ALTER TABLE public.city_city_id_seq OWNER TO pagila;
 
 --
 -- Name: city; Type: TABLE; Schema: public; Owner: postgres
@@ -561,7 +561,7 @@ CREATE TABLE public.city (
 );
 
 
-ALTER TABLE public.city OWNER TO postgres;
+ALTER TABLE public.city OWNER TO pagila;
 
 --
 -- Name: country_country_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -575,7 +575,7 @@ CREATE SEQUENCE public.country_country_id_seq
     CACHE 1;
 
 
-ALTER TABLE public.country_country_id_seq OWNER TO postgres;
+ALTER TABLE public.country_country_id_seq OWNER TO pagila;
 
 --
 -- Name: country; Type: TABLE; Schema: public; Owner: postgres
@@ -588,7 +588,7 @@ CREATE TABLE public.country (
 );
 
 
-ALTER TABLE public.country OWNER TO postgres;
+ALTER TABLE public.country OWNER TO pagila;
 
 --
 -- Name: customer_list; Type: VIEW; Schema: public; Owner: postgres
@@ -613,7 +613,7 @@ CREATE VIEW public.customer_list AS
      JOIN public.country ON ((city.country_id = country.country_id)));
 
 
-ALTER TABLE public.customer_list OWNER TO postgres;
+ALTER TABLE public.customer_list OWNER TO pagila;
 
 --
 -- Name: film_list; Type: VIEW; Schema: public; Owner: postgres
@@ -636,7 +636,7 @@ CREATE VIEW public.film_list AS
   GROUP BY film.film_id, film.title, film.description, category.name, film.rental_rate, film.length, film.rating;
 
 
-ALTER TABLE public.film_list OWNER TO postgres;
+ALTER TABLE public.film_list OWNER TO pagila;
 
 --
 -- Name: inventory_inventory_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -650,7 +650,7 @@ CREATE SEQUENCE public.inventory_inventory_id_seq
     CACHE 1;
 
 
-ALTER TABLE public.inventory_inventory_id_seq OWNER TO postgres;
+ALTER TABLE public.inventory_inventory_id_seq OWNER TO pagila;
 
 --
 -- Name: inventory; Type: TABLE; Schema: public; Owner: postgres
@@ -664,7 +664,7 @@ CREATE TABLE public.inventory (
 );
 
 
-ALTER TABLE public.inventory OWNER TO postgres;
+ALTER TABLE public.inventory OWNER TO pagila;
 
 --
 -- Name: language_language_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -678,7 +678,7 @@ CREATE SEQUENCE public.language_language_id_seq
     CACHE 1;
 
 
-ALTER TABLE public.language_language_id_seq OWNER TO postgres;
+ALTER TABLE public.language_language_id_seq OWNER TO pagila;
 
 --
 -- Name: language; Type: TABLE; Schema: public; Owner: postgres
@@ -691,7 +691,7 @@ CREATE TABLE public.language (
 );
 
 
-ALTER TABLE public.language OWNER TO postgres;
+ALTER TABLE public.language OWNER TO pagila;
 
 --
 -- Name: nicer_but_slower_film_list; Type: VIEW; Schema: public; Owner: postgres
@@ -714,7 +714,7 @@ CREATE VIEW public.nicer_but_slower_film_list AS
   GROUP BY film.film_id, film.title, film.description, category.name, film.rental_rate, film.length, film.rating;
 
 
-ALTER TABLE public.nicer_but_slower_film_list OWNER TO postgres;
+ALTER TABLE public.nicer_but_slower_film_list OWNER TO pagila;
 
 --
 -- Name: payment_payment_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -728,7 +728,7 @@ CREATE SEQUENCE public.payment_payment_id_seq
     CACHE 1;
 
 
-ALTER TABLE public.payment_payment_id_seq OWNER TO postgres;
+ALTER TABLE public.payment_payment_id_seq OWNER TO pagila;
 
 --
 -- Name: payment; Type: TABLE; Schema: public; Owner: postgres
@@ -746,7 +746,7 @@ CREATE TABLE public.payment (
 PARTITION BY RANGE (payment_date);
 
 
-ALTER TABLE public.payment OWNER TO postgres;
+ALTER TABLE public.payment OWNER TO pagila;
 
 --
 -- Name: payment_p2022_01; Type: TABLE; Schema: public; Owner: postgres
@@ -762,7 +762,7 @@ CREATE TABLE public.payment_p2022_01 (
 );
 
 
-ALTER TABLE public.payment_p2022_01 OWNER TO postgres;
+ALTER TABLE public.payment_p2022_01 OWNER TO pagila;
 
 --
 -- Name: payment_p2022_02; Type: TABLE; Schema: public; Owner: postgres
@@ -778,7 +778,7 @@ CREATE TABLE public.payment_p2022_02 (
 );
 
 
-ALTER TABLE public.payment_p2022_02 OWNER TO postgres;
+ALTER TABLE public.payment_p2022_02 OWNER TO pagila;
 
 --
 -- Name: payment_p2022_03; Type: TABLE; Schema: public; Owner: postgres
@@ -794,7 +794,7 @@ CREATE TABLE public.payment_p2022_03 (
 );
 
 
-ALTER TABLE public.payment_p2022_03 OWNER TO postgres;
+ALTER TABLE public.payment_p2022_03 OWNER TO pagila;
 
 --
 -- Name: payment_p2022_04; Type: TABLE; Schema: public; Owner: postgres
@@ -810,7 +810,7 @@ CREATE TABLE public.payment_p2022_04 (
 );
 
 
-ALTER TABLE public.payment_p2022_04 OWNER TO postgres;
+ALTER TABLE public.payment_p2022_04 OWNER TO pagila;
 
 --
 -- Name: payment_p2022_05; Type: TABLE; Schema: public; Owner: postgres
@@ -826,7 +826,7 @@ CREATE TABLE public.payment_p2022_05 (
 );
 
 
-ALTER TABLE public.payment_p2022_05 OWNER TO postgres;
+ALTER TABLE public.payment_p2022_05 OWNER TO pagila;
 
 --
 -- Name: payment_p2022_06; Type: TABLE; Schema: public; Owner: postgres
@@ -842,7 +842,7 @@ CREATE TABLE public.payment_p2022_06 (
 );
 
 
-ALTER TABLE public.payment_p2022_06 OWNER TO postgres;
+ALTER TABLE public.payment_p2022_06 OWNER TO pagila;
 
 --
 -- Name: payment_p2022_07; Type: TABLE; Schema: public; Owner: postgres
@@ -858,7 +858,7 @@ CREATE TABLE public.payment_p2022_07 (
 );
 
 
-ALTER TABLE public.payment_p2022_07 OWNER TO postgres;
+ALTER TABLE public.payment_p2022_07 OWNER TO pagila;
 
 --
 -- Name: rental_rental_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -872,7 +872,7 @@ CREATE SEQUENCE public.rental_rental_id_seq
     CACHE 1;
 
 
-ALTER TABLE public.rental_rental_id_seq OWNER TO postgres;
+ALTER TABLE public.rental_rental_id_seq OWNER TO pagila;
 
 --
 -- Name: rental; Type: TABLE; Schema: public; Owner: postgres
@@ -889,7 +889,7 @@ CREATE TABLE public.rental (
 );
 
 
-ALTER TABLE public.rental OWNER TO postgres;
+ALTER TABLE public.rental OWNER TO pagila;
 
 --
 -- Name: rental_by_category; Type: MATERIALIZED VIEW; Schema: public; Owner: postgres
@@ -909,7 +909,7 @@ CREATE MATERIALIZED VIEW public.rental_by_category AS
   WITH NO DATA;
 
 
-ALTER TABLE public.rental_by_category OWNER TO postgres;
+ALTER TABLE public.rental_by_category OWNER TO pagila;
 
 --
 -- Name: sales_by_film_category; Type: VIEW; Schema: public; Owner: postgres
@@ -928,7 +928,7 @@ CREATE VIEW public.sales_by_film_category AS
   ORDER BY (sum(p.amount)) DESC;
 
 
-ALTER TABLE public.sales_by_film_category OWNER TO postgres;
+ALTER TABLE public.sales_by_film_category OWNER TO pagila;
 
 --
 -- Name: staff_staff_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -942,7 +942,7 @@ CREATE SEQUENCE public.staff_staff_id_seq
     CACHE 1;
 
 
-ALTER TABLE public.staff_staff_id_seq OWNER TO postgres;
+ALTER TABLE public.staff_staff_id_seq OWNER TO pagila;
 
 --
 -- Name: staff; Type: TABLE; Schema: public; Owner: postgres
@@ -963,7 +963,7 @@ CREATE TABLE public.staff (
 );
 
 
-ALTER TABLE public.staff OWNER TO postgres;
+ALTER TABLE public.staff OWNER TO pagila;
 
 --
 -- Name: store_store_id_seq; Type: SEQUENCE; Schema: public; Owner: postgres
@@ -977,7 +977,7 @@ CREATE SEQUENCE public.store_store_id_seq
     CACHE 1;
 
 
-ALTER TABLE public.store_store_id_seq OWNER TO postgres;
+ALTER TABLE public.store_store_id_seq OWNER TO pagila;
 
 --
 -- Name: store; Type: TABLE; Schema: public; Owner: postgres
@@ -991,7 +991,7 @@ CREATE TABLE public.store (
 );
 
 
-ALTER TABLE public.store OWNER TO postgres;
+ALTER TABLE public.store OWNER TO pagila;
 
 --
 -- Name: sales_by_store; Type: VIEW; Schema: public; Owner: postgres
@@ -1013,7 +1013,7 @@ CREATE VIEW public.sales_by_store AS
   ORDER BY cy.country, c.city;
 
 
-ALTER TABLE public.sales_by_store OWNER TO postgres;
+ALTER TABLE public.sales_by_store OWNER TO pagila;
 
 --
 -- Name: staff_list; Type: VIEW; Schema: public; Owner: postgres
@@ -1034,7 +1034,7 @@ CREATE VIEW public.staff_list AS
      JOIN public.country ON ((city.country_id = country.country_id)));
 
 
-ALTER TABLE public.staff_list OWNER TO postgres;
+ALTER TABLE public.staff_list OWNER TO pagila;
 
 --
 -- Name: payment_p2022_01; Type: TABLE ATTACH; Schema: public; Owner: postgres
