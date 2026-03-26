@@ -154,6 +154,16 @@ class TestAuthService(unittest.TestCase):
         self.assertIn(initial_session_id, session_ids)
         self.assertIn(created["session_id"], session_ids)
 
+        activated = self.service.set_active_chat_session(
+            username="erica",
+            session_id=initial_session_id,
+        )
+        self.assertEqual(activated["session_id"], initial_session_id)
+        self.assertEqual(
+            self.service.get_user("erica")["assistant_session_id"],
+            initial_session_id,
+        )
+
     def test_chat_history_roundtrip_preserves_legacy_userwide_behavior(self):
         self.service.register_user("eva", "superpass")
         session_id = self.service.get_or_create_user_session("eva")

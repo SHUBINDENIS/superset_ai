@@ -259,7 +259,7 @@ def _persist_chat_message(role: str, content: str) -> None:
     username = _current_username()
     session_id = str(st.session_state.get("session_id", "")).strip()
     if not username or not session_id:
-        return
+        return False
     try:
         get_auth_service().save_chat_message(
             username=username,
@@ -267,8 +267,9 @@ def _persist_chat_message(role: str, content: str) -> None:
             role=role,
             content=content,
         )
+        return True
     except Exception:
-        pass
+        return False
 
 
 def _set_feedback(
@@ -300,6 +301,274 @@ def _render_feedback(status_key: str, error_key: str) -> None:
         st.success(status_message)
 
 
+def _normalize_chat_messages(history_rows: Any) -> List[Dict[str, str]]:
+    if not isinstance(history_rows, list):
+        return []
+    messages: List[Dict[str, str]] = []
+    for item in history_rows:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role", "")).strip()
+        content = str(item.get("content", "")).strip()
+        if role not in {"user", "assistant"} or not content:
+            continue
+        messages.append({"role": role, "content": content})
+    return messages
+
+
+def _normalize_chat_sessions(session_rows: Any) -> List[Dict[str, Any]]:
+    if not isinstance(session_rows, list):
+        return []
+    sessions: List[Dict[str, Any]] = []
+    for item in session_rows:
+        if not isinstance(item, dict):
+            continue
+        session_id = str(item.get("session_id", "")).strip()
+        if not session_id:
+            continue
+        sessions.append(
+            {
+                "session_id": session_id,
+                "title": str(item.get("title", "")).strip() or "Новый чат",
+                "last_message_at": str(item.get("last_message_at", "")).strip(),
+                "updated_at": str(item.get("updated_at", "")).strip(),
+                "created_at": str(item.get("created_at", "")).strip(),
+                "is_archived": bool(item.get("is_archived", False)),
+            }
+        )
+    return sessions
+
+
+def _format_chat_last_activity(value: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return "—"
+    try:
+        dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        local_dt = dt.astimezone()
+        now_local = datetime.now(local_dt.tzinfo)
+        if local_dt.date() == now_local.date():
+            return local_dt.strftime("%H:%M")
+        if local_dt.year == now_local.year:
+            return local_dt.strftime("%d.%m %H:%M")
+        return local_dt.strftime("%Y-%m-%d")
+    except Exception:
+        return raw
+
+
+def _load_user_chat_state(
+    username: str,
+    *,
+    preferred_session_id: str = "",
+) -> tuple[str, List[Dict[str, Any]], List[Dict[str, str]]]:
+    clean_username = str(username or "").strip()
+    if not clean_username:
+        return "", [], []
+
+    auth_service = get_auth_service()
+    active_session_id = str(preferred_session_id or "").strip()
+    if not active_session_id:
+        active_session_id = str(auth_service.get_or_create_user_session(clean_username)).strip()
+
+    sessions = _normalize_chat_sessions(auth_service.list_chat_sessions(username=clean_username))
+    if not sessions:
+        created = auth_service.create_chat_session(clean_username)
+        active_session_id = str(created.get("session_id", "")).strip()
+        sessions = _normalize_chat_sessions(auth_service.list_chat_sessions(username=clean_username))
+
+    session_ids = {str(item.get("session_id", "")).strip() for item in sessions}
+    if active_session_id not in session_ids:
+        try:
+            active_session_id = str(auth_service.get_or_create_user_session(clean_username)).strip()
+        except Exception:
+            if sessions:
+                active_session_id = str(sessions[0].get("session_id", "")).strip()
+        sessions = _normalize_chat_sessions(auth_service.list_chat_sessions(username=clean_username))
+        session_ids = {str(item.get("session_id", "")).strip() for item in sessions}
+
+    if not active_session_id and sessions:
+        active_session_id = str(sessions[0].get("session_id", "")).strip()
+
+    messages: List[Dict[str, str]] = []
+    if active_session_id:
+        messages = _normalize_chat_messages(
+            auth_service.list_chat_history(
+                username=clean_username,
+                session_id=active_session_id,
+            )
+        )
+    return active_session_id, sessions, messages
+
+
+def _reload_current_chat_state(*, force_messages: bool = True) -> None:
+    username = _current_username()
+    if not username:
+        return
+    current_session_id = str(st.session_state.get("session_id", "")).strip()
+    resolved_session_id, sessions, messages = _load_user_chat_state(
+        username,
+        preferred_session_id=current_session_id,
+    )
+    patch: Dict[str, Any] = {
+        "chat_sessions": sessions,
+    }
+    if resolved_session_id and resolved_session_id != current_session_id:
+        patch["session_id"] = resolved_session_id
+        patch["agent_initialized"] = False
+    if force_messages:
+        patch["messages"] = messages
+        patch["pending_input"] = None
+    apply_state_patch(st.session_state, patch)
+
+
+def _ensure_chat_state_loaded() -> None:
+    username = _current_username()
+    if not username:
+        return
+    chat_sessions = st.session_state.get("chat_sessions")
+    has_sessions = isinstance(chat_sessions, list) and len(chat_sessions) > 0
+    has_session_id = bool(str(st.session_state.get("session_id", "")).strip())
+    has_messages = isinstance(st.session_state.get("messages"), list) and bool(st.session_state.get("messages"))
+
+    if has_sessions and has_session_id:
+        return
+
+    resolved_session_id, sessions, messages = _load_user_chat_state(
+        username,
+        preferred_session_id=str(st.session_state.get("session_id", "")).strip(),
+    )
+    patch: Dict[str, Any] = {
+        "chat_sessions": sessions,
+    }
+    if resolved_session_id and resolved_session_id != str(st.session_state.get("session_id", "")).strip():
+        patch["session_id"] = resolved_session_id
+        patch["agent_initialized"] = False
+    if not has_messages or not has_session_id:
+        patch["messages"] = messages
+        patch["pending_input"] = None
+    apply_state_patch(st.session_state, patch)
+
+
+def _activate_chat_session(session_id: str, *, switch_to_chat: bool = True) -> None:
+    username = _current_username()
+    clean_session_id = str(session_id or "").strip()
+    if not username or not clean_session_id:
+        return
+    _set_active_chat_session(clean_session_id)
+    resolved_session_id, sessions, messages = _load_user_chat_state(
+        username,
+        preferred_session_id=clean_session_id,
+    )
+    apply_state_patch(
+        st.session_state,
+        {
+            "session_id": resolved_session_id,
+            "chat_sessions": sessions,
+            "messages": messages,
+            "pending_input": None,
+            "agent_initialized": False,
+            "chat_rename_session_id": "",
+            "chat_rename_value": "",
+            "active_window": WINDOW_CHAT if switch_to_chat else st.session_state.get("active_window", WINDOW_CHAT),
+        },
+    )
+
+
+def _create_new_chat_session() -> None:
+    username = _current_username()
+    if not username:
+        raise ValueError("Пользователь не авторизован.")
+    created = get_auth_service().create_chat_session(username)
+    new_session_id = str(created.get("session_id", "")).strip()
+    resolved_session_id, sessions, messages = _load_user_chat_state(
+        username,
+        preferred_session_id=new_session_id,
+    )
+    apply_state_patch(
+        st.session_state,
+        {
+            "session_id": resolved_session_id,
+            "chat_sessions": sessions,
+            "messages": messages,
+            "pending_input": None,
+            "agent_initialized": False,
+            "chat_rename_session_id": "",
+            "chat_rename_value": "",
+            "active_window": WINDOW_CHAT,
+        },
+    )
+
+
+def _set_active_chat_session(session_id: str) -> None:
+    username = _current_username()
+    clean_session_id = str(session_id or "").strip()
+    if not username or not clean_session_id:
+        return
+    setter = getattr(get_auth_service(), "set_active_chat_session", None)
+    if callable(setter):
+        setter(username=username, session_id=clean_session_id)
+
+
+def _start_chat_rename(session_id: str, title: str) -> None:
+    apply_state_patch(
+        st.session_state,
+        {
+            "chat_rename_session_id": str(session_id or "").strip(),
+            "chat_rename_value": str(title or "").strip() or "Новый чат",
+        },
+    )
+
+
+def _cancel_chat_rename() -> None:
+    apply_state_patch(
+        st.session_state,
+        {
+            "chat_rename_session_id": "",
+            "chat_rename_value": "",
+        },
+    )
+
+
+def _submit_chat_rename(session_id: str) -> None:
+    username = _current_username()
+    clean_session_id = str(session_id or "").strip()
+    if not username or not clean_session_id:
+        raise ValueError("Чат не выбран.")
+    get_auth_service().rename_chat_session(
+        username=username,
+        session_id=clean_session_id,
+        title=str(st.session_state.get("chat_rename_value", "")).strip(),
+    )
+    _reload_current_chat_state(force_messages=False)
+    _cancel_chat_rename()
+
+
+def _clear_active_chat() -> None:
+    username = _current_username()
+    session_id = str(st.session_state.get("session_id", "")).strip()
+    if not username or not session_id:
+        return
+    get_auth_service().clear_chat_history(
+        username=username,
+        session_id=session_id,
+    )
+    try:
+        asyncio.run(get_session_manager().close_session(session_id))
+    except Exception:
+        pass
+    apply_state_patch(
+        st.session_state,
+        {
+            "messages": [],
+            "pending_input": None,
+            "agent_initialized": False,
+        },
+    )
+    _reload_current_chat_state(force_messages=True)
+
+
 def _apply_authenticated_state(auth_result: Dict[str, Any], *, persist_cookie: bool = True) -> None:
     username = str(auth_result.get("username", "")).strip()
     role = str(auth_result.get("role", "")).strip() or "analyst"
@@ -312,16 +581,10 @@ def _apply_authenticated_state(auth_result: Dict[str, Any], *, persist_cookie: b
     if not session_id:
         session_id = auth_service.get_or_create_user_session(username)
 
-    history_rows = auth_service.list_chat_history(username=username)
-    messages = [
-        {
-            "role": str(item.get("role", "")).strip(),
-            "content": str(item.get("content", "")).strip(),
-        }
-        for item in history_rows
-        if str(item.get("role", "")).strip() in {"user", "assistant"}
-        and str(item.get("content", "")).strip()
-    ]
+    session_id, chat_sessions, messages = _load_user_chat_state(
+        username,
+        preferred_session_id=session_id,
+    )
 
     apply_state_patch(
         st.session_state,
@@ -331,6 +594,7 @@ def _apply_authenticated_state(auth_result: Dict[str, Any], *, persist_cookie: b
             auth_token=auth_token,
             session_id=session_id,
             messages=messages,
+            chat_sessions=chat_sessions,
         ),
     )
     if persist_cookie:
@@ -428,7 +692,8 @@ def _queue_message(text: str, switch_to_chat: bool = True) -> None:
     if not clean:
         return
     st.session_state.messages.append({"role": "user", "content": clean})
-    _persist_chat_message("user", clean)
+    if _persist_chat_message("user", clean):
+        _reload_current_chat_state(force_messages=False)
     st.session_state.pending_input = clean
     if switch_to_chat:
         st.session_state.active_window = WINDOW_CHAT
@@ -481,6 +746,80 @@ def sidebar():
         else:
             st.warning("Сессия не создана")
 
+        st.markdown('<div class="sidebar-section">Чаты</div>', unsafe_allow_html=True)
+        if st.button("+ Новый чат", key="chat_create_btn", use_container_width=True, type="primary"):
+            try:
+                reset_session()
+            except Exception as exc:
+                st.error(str(exc))
+            st.rerun()
+
+        current_session_id = str(st.session_state.get("session_id", "")).strip()
+        chat_sessions = st.session_state.get("chat_sessions", [])
+        if not isinstance(chat_sessions, list) or not chat_sessions:
+            st.caption("Чаты пока не найдены.")
+        else:
+            for item in chat_sessions:
+                if not isinstance(item, dict):
+                    continue
+                session_id = str(item.get("session_id", "")).strip()
+                if not session_id:
+                    continue
+                title = str(item.get("title", "")).strip() or "Новый чат"
+                last_activity = _format_chat_last_activity(
+                    str(item.get("last_message_at", "")).strip()
+                    or str(item.get("updated_at", "")).strip()
+                    or str(item.get("created_at", "")).strip()
+                )
+                is_active = session_id == current_session_id
+
+                session_col, rename_col = st.columns([5, 1])
+                with session_col:
+                    if st.button(
+                        title,
+                        key=f"chat_session_select_{session_id}",
+                        use_container_width=True,
+                        type="primary" if is_active else "secondary",
+                    ):
+                        _activate_chat_session(session_id)
+                        st.rerun()
+                with rename_col:
+                    if st.button("✏️", key=f"chat_session_rename_{session_id}", use_container_width=True):
+                        _start_chat_rename(session_id, title)
+                        st.rerun()
+
+                st.caption(f"Последняя активность: {last_activity}")
+                if str(st.session_state.get("chat_rename_session_id", "")).strip() == session_id:
+                    st.text_input(
+                        "Переименовать чат",
+                        key="chat_rename_value",
+                        label_visibility="collapsed",
+                        max_chars=120,
+                    )
+                    rename_save_col, rename_cancel_col = st.columns(2)
+                    with rename_save_col:
+                        if st.button(
+                            "Сохранить",
+                            key=f"chat_session_rename_save_{session_id}",
+                            use_container_width=True,
+                            type="secondary",
+                        ):
+                            try:
+                                _submit_chat_rename(session_id)
+                            except Exception as exc:
+                                st.error(str(exc))
+                            st.rerun()
+                    with rename_cancel_col:
+                        if st.button(
+                            "Отмена",
+                            key=f"chat_session_rename_cancel_{session_id}",
+                            use_container_width=True,
+                            type="secondary",
+                        ):
+                            _cancel_chat_rename()
+                            st.rerun()
+
+        st.divider()
         st.markdown('<div class="sidebar-section">Навигация</div>', unsafe_allow_html=True)
         active = st.session_state.active_window
         for window_id in (
@@ -508,21 +847,15 @@ def sidebar():
         st.divider()
         st.markdown('<div class="sidebar-section">Сессия</div>', unsafe_allow_html=True)
 
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         with col1:
-            if st.button("🔄 Новая сессия", use_container_width=True, type="secondary"):
-                reset_session()
-        with col2:
             if st.button("🗑 Очистить чат", use_container_width=True, type="secondary"):
-                username = _current_username()
-                if username:
-                    try:
-                        get_auth_service().clear_chat_history(username=username)
-                    except Exception:
-                        pass
-                st.session_state.messages = []
+                try:
+                    _clear_active_chat()
+                except Exception as exc:
+                    st.error(str(exc))
                 st.rerun()
-        with col3:
+        with col2:
             if st.button("🚪 Выход", use_container_width=True, type="secondary"):
                 logout_user()
 
@@ -4111,22 +4444,20 @@ async def handle_message(text: str):
         "role": "assistant",
         "content": content,
     })
-    _persist_chat_message("assistant", content)
+    if _persist_chat_message("assistant", content):
+        _reload_current_chat_state(force_messages=False)
 
 
 # --- State utils -------------------------------------------------------------
 def reset_session():
-    new_session_id = None
     username = _current_username()
     if st.session_state.get("auth_is_authenticated") and username:
-        try:
-            new_session_id = get_auth_service().rotate_user_session(username)
-        except Exception:
-            new_session_id = None
+        _create_new_chat_session()
+        return
 
     apply_state_patch(
         st.session_state,
-        build_session_reset_state(new_session_id),
+        build_session_reset_state(None),
         clear_keys=SESSION_WIDGET_KEYS_TO_CLEAR,
     )
     st.rerun()
@@ -4163,6 +4494,7 @@ def main():
         render_auth_window()
         st.stop()
 
+    _ensure_chat_state_loaded()
     sidebar()
 
     ok, error = asyncio.run(ensure_session())

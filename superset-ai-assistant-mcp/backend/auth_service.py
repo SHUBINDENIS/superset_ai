@@ -642,6 +642,43 @@ class AuthService:
     def rotate_user_session(self, username: str) -> str:
         return str(self.create_chat_session(username)["session_id"])
 
+    def set_active_chat_session(
+        self,
+        *,
+        username: str,
+        session_id: str,
+    ) -> Dict[str, Any]:
+        clean_username = self._normalize_username(username)
+        clean_session_id = str(session_id or "").strip()
+        if not clean_username or not clean_session_id:
+            raise ValueError("username and session_id are required")
+        if self._get_user_row(clean_username) is None:
+            raise ValueError("Пользователь не найден.")
+
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT session_id, last_message_at, updated_at
+                FROM auth_chat_sessions
+                WHERE username = ? COLLATE NOCASE AND session_id = ?
+                LIMIT 1
+                """,
+                (clean_username, clean_session_id),
+            ).fetchone()
+            if row is None:
+                raise ValueError("Chat session не найдена.")
+            self._set_active_session(
+                conn,
+                username=clean_username,
+                session_id=clean_session_id,
+                updated_at=str(row["last_message_at"] or row["updated_at"] or "").strip() or None,
+            )
+
+        session = self.get_chat_session(username=clean_username, session_id=clean_session_id)
+        if session is None:
+            raise RuntimeError("Failed to load active chat session.")
+        return session
+
     def list_chat_sessions(
         self,
         *,

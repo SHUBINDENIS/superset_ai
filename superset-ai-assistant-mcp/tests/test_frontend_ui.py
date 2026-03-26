@@ -69,7 +69,69 @@ class FakeAuthService:
         self.clear_history_calls = []
         self.rotate_calls = []
         self.sessions = {}
+        self.chat_sessions_by_user = {}
         self.history_by_user = {}
+        self._time_index = 0
+        self._session_index = 0
+
+    def _timestamp(self) -> str:
+        self._time_index += 1
+        minute = self._time_index % 60
+        hour = self._time_index // 60
+        return f"2026-01-01T{hour:02d}:{minute:02d}:00+00:00"
+
+    def _ensure_user_structures(self, username):
+        self.chat_sessions_by_user.setdefault(username, {})
+        self.history_by_user.setdefault(username, {})
+
+    def _session_sort_key(self, session):
+        return (
+            str(session.get("last_message_at", "")),
+            str(session.get("updated_at", "")),
+            str(session.get("created_at", "")),
+            str(session.get("session_id", "")),
+        )
+
+    def _ensure_session(self, username, session_id, title="Новый чат", created_at=None):
+        self._ensure_user_structures(username)
+        clean_session_id = str(session_id).strip()
+        created = str(created_at or self._timestamp()).strip()
+        if clean_session_id not in self.chat_sessions_by_user[username]:
+            self.chat_sessions_by_user[username][clean_session_id] = {
+                "username": username,
+                "session_id": clean_session_id,
+                "title": str(title or "Новый чат").strip() or "Новый чат",
+                "created_at": created,
+                "updated_at": created,
+                "last_message_at": created,
+                "is_archived": False,
+            }
+        self.history_by_user[username].setdefault(clean_session_id, [])
+        return self.chat_sessions_by_user[username][clean_session_id]
+
+    def _new_session_id(self, username):
+        self._session_index += 1
+        return f"session-{username}-{self._session_index}"
+
+    def _sync_session_activity(self, username, session_id):
+        self._ensure_session(username, session_id)
+        session = self.chat_sessions_by_user[username][session_id]
+        history = self.history_by_user[username].get(session_id, [])
+        updated_at = self._timestamp()
+        session["updated_at"] = updated_at
+        if history:
+            session["last_message_at"] = str(history[-1]["created_at"])
+            if session["title"] == "Новый чат":
+                for item in history:
+                    if item["role"] == "user" and item["content"].strip():
+                        session["title"] = item["content"].strip()
+                        break
+        else:
+            session["last_message_at"] = str(session["created_at"])
+
+    def _set_active_session(self, username, session_id):
+        self._ensure_session(username, session_id)
+        self.sessions[username] = session_id
 
     def validate_token(self, token):
         raise ValueError("invalid token")
@@ -84,33 +146,104 @@ class FakeAuthService:
             "session_id": session_id,
         }
 
-    def list_chat_history(self, username, limit=None):
-        return list(self.history_by_user.get(username, []))
+    def list_chat_sessions(self, username, include_archived=False):
+        self._ensure_user_structures(username)
+        sessions = list(self.chat_sessions_by_user.get(username, {}).values())
+        if not include_archived:
+            sessions = [item for item in sessions if not item.get("is_archived", False)]
+        sessions.sort(key=self._session_sort_key, reverse=True)
+        return [dict(item) for item in sessions]
+
+    def create_chat_session(self, username, title=None):
+        session_id = self._new_session_id(username)
+        session = self._ensure_session(username, session_id, title=title or "Новый чат")
+        self._set_active_session(username, session_id)
+        return dict(session)
+
+    def get_chat_session(self, username, session_id):
+        self._ensure_user_structures(username)
+        session = self.chat_sessions_by_user.get(username, {}).get(session_id)
+        if session is None:
+            return None
+        return dict(session)
+
+    def rename_chat_session(self, username, session_id, title):
+        clean_title = str(title or "").strip()
+        if not clean_title:
+            raise ValueError("title is required")
+        session = self._ensure_session(username, session_id)
+        session["title"] = clean_title
+        session["updated_at"] = self._timestamp()
+        return dict(session)
+
+    def set_active_chat_session(self, username, session_id):
+        session = self.get_chat_session(username, session_id)
+        if session is None:
+            raise ValueError("Chat session не найдена.")
+        self._set_active_session(username, session_id)
+        return self.get_chat_session(username, session_id)
+
+    def list_chat_history(self, username, session_id=None, limit=None):
+        self._ensure_user_structures(username)
+        safe_limit = None if limit is None else max(1, int(limit))
+        if session_id:
+            history = list(self.history_by_user.get(username, {}).get(session_id, []))
+        else:
+            history = []
+            for items in self.history_by_user.get(username, {}).values():
+                history.extend(items)
+            history.sort(key=lambda item: str(item.get("created_at", "")))
+        if safe_limit is not None:
+            history = history[-safe_limit:]
+        return [dict(item) for item in history]
 
     def get_or_create_user_session(self, username):
-        return self.sessions.setdefault(username, f"session-{username}")
+        self._ensure_user_structures(username)
+        session_id = str(self.sessions.get(username, "")).strip()
+        if session_id:
+            self._ensure_session(username, session_id)
+            return session_id
+        sessions = self.list_chat_sessions(username)
+        if sessions:
+            session_id = str(sessions[0]["session_id"]).strip()
+            self._set_active_session(username, session_id)
+            return session_id
+        session_id = f"session-{username}"
+        self._ensure_session(username, session_id)
+        self._set_active_session(username, session_id)
+        return session_id
 
     def save_chat_message(self, username, session_id, role, content):
+        self._ensure_session(username, session_id)
+        created_at = self._timestamp()
         payload = {
             "username": username,
             "session_id": session_id,
             "role": role,
             "content": content,
+            "created_at": created_at,
         }
         self.saved_messages.append(payload)
-        self.history_by_user.setdefault(username, []).append({"role": role, "content": content})
+        self.history_by_user.setdefault(username, {}).setdefault(session_id, []).append(dict(payload))
+        self._sync_session_activity(username, session_id)
 
-    def clear_chat_history(self, username):
-        self.clear_history_calls.append(username)
-        removed = len(self.history_by_user.get(username, []))
-        self.history_by_user[username] = []
+    def clear_chat_history(self, username, session_id=None):
+        self.clear_history_calls.append((username, session_id))
+        self._ensure_user_structures(username)
+        if session_id:
+            removed = len(self.history_by_user.get(username, {}).get(session_id, []))
+            self.history_by_user.setdefault(username, {})[session_id] = []
+            self._sync_session_activity(username, session_id)
+            return removed
+        removed = sum(len(items) for items in self.history_by_user.get(username, {}).values())
+        for item_session_id in list(self.history_by_user.get(username, {}).keys()):
+            self.history_by_user[username][item_session_id] = []
+            self._sync_session_activity(username, item_session_id)
         return removed
 
     def rotate_user_session(self, username):
         self.rotate_calls.append(username)
-        rotated = f"rotated-{len(self.rotate_calls)}"
-        self.sessions[username] = rotated
-        return rotated
+        return str(self.create_chat_session(username)["session_id"])
 
 
 class FakeVizService:
@@ -326,6 +459,26 @@ class TestFrontendUISmoke(unittest.TestCase):
         available = [button.label for button in at.button]
         self.fail(f"Button '{label}' not found. Available buttons: {available}")
 
+    def _click_button_by_key(self, at: AppTest, key: str) -> None:
+        for button in at.button:
+            if getattr(button, "key", None) == key:
+                button.click()
+                return
+        available = [(getattr(button, "key", None), button.label) for button in at.button]
+        self.fail(f"Button with key '{key}' not found. Available buttons: {available}")
+
+    def _seed_chat(self, title: str, messages: list[tuple[str, str]]) -> str:
+        session = self.auth_service.create_chat_session("alice", title=title)
+        session_id = str(session["session_id"])
+        for role, content in messages:
+            self.auth_service.save_chat_message(
+                username="alice",
+                session_id=session_id,
+                role=role,
+                content=content,
+            )
+        return session_id
+
     def _login(self, at: AppTest, username: str = "alice", password: str = "secret-pass") -> None:
         at.text_input(key="auth_login_username").set_value(username)
         at.text_input(key="auth_login_password").set_value(password)
@@ -373,6 +526,160 @@ class TestFrontendUISmoke(unittest.TestCase):
         self.assertEqual(
             self.agent.chat_calls[-1][-1],
             {"role": "user", "content": "Покажи доступные датасеты"},
+        )
+        sessions = self.auth_service.list_chat_sessions("alice")
+        self.assertEqual(sessions[0]["title"], "Покажи доступные датасеты")
+
+    def test_authenticated_user_sees_chat_list_in_sidebar(self):
+        first_session_id = self.auth_service.get_or_create_user_session("alice")
+        self.auth_service.rename_chat_session("alice", first_session_id, "Основной чат")
+        self._seed_chat(
+            "Второй чат",
+            [
+                ("user", "Покажи прибыль"),
+                ("assistant", "Готово"),
+            ],
+        )
+
+        at = self._new_app(authenticated=True)
+        at.run()
+
+        labels = [button.label for button in at.button]
+        self.assertIn("Основной чат", labels)
+        self.assertIn("Второй чат", labels)
+        self.assertIn("+ Новый чат", labels)
+        self.assertEqual(len(at.session_state["chat_sessions"]), 2)
+
+    def test_creating_new_chat_creates_separate_empty_chat(self):
+        initial_session_id = self.auth_service.get_or_create_user_session("alice")
+        self.auth_service.save_chat_message(
+            username="alice",
+            session_id=initial_session_id,
+            role="user",
+            content="Первый чат",
+        )
+        at = self._new_app(authenticated=True)
+        at.run()
+
+        self._click_button(at, "+ Новый чат")
+        at.run()
+
+        new_session_id = str(at.session_state["session_id"])
+        self.assertNotEqual(new_session_id, initial_session_id)
+        self.assertEqual(list(at.session_state["messages"]), [])
+        self.assertEqual(len(at.session_state["chat_sessions"]), 2)
+        old_history = self.auth_service.list_chat_history(username="alice", session_id=initial_session_id)
+        new_history = self.auth_service.list_chat_history(username="alice", session_id=new_session_id)
+        self.assertEqual(len(old_history), 1)
+        self.assertEqual(new_history, [])
+
+    def test_switching_between_chats_shows_isolated_histories(self):
+        first_session_id = self.auth_service.get_or_create_user_session("alice")
+        self.auth_service.rename_chat_session("alice", first_session_id, "Основной чат")
+        self.auth_service.save_chat_message(
+            username="alice",
+            session_id=first_session_id,
+            role="user",
+            content="История первого чата",
+        )
+        second_session_id = self._seed_chat(
+            "Отчёт по продажам",
+            [
+                ("user", "История второго чата"),
+                ("assistant", "Ответ второго чата"),
+            ],
+        )
+        self.auth_service.set_active_chat_session(username="alice", session_id=first_session_id)
+
+        at = self._new_app(authenticated=True)
+        at.run()
+
+        self.assertEqual(str(at.session_state["session_id"]), first_session_id)
+        self.assertEqual(at.session_state["messages"][0]["content"], "История первого чата")
+
+        self._click_button(at, "Отчёт по продажам")
+        at.run()
+
+        self.assertEqual(str(at.session_state["session_id"]), second_session_id)
+        self.assertEqual([item["content"] for item in at.session_state["messages"]], ["История второго чата", "Ответ второго чата"])
+
+    def test_active_chat_restores_from_backend_pointer_on_new_app_run(self):
+        first_session_id = self.auth_service.get_or_create_user_session("alice")
+        self.auth_service.rename_chat_session("alice", first_session_id, "Основной чат")
+        second_session_id = self._seed_chat(
+            "Второй сценарий",
+            [("user", "Переключённый чат")],
+        )
+        self.auth_service.set_active_chat_session(username="alice", session_id=first_session_id)
+
+        at = self._new_app(authenticated=True)
+        at.run()
+        self._click_button(at, "Второй сценарий")
+        at.run()
+
+        self.assertEqual(str(at.session_state["session_id"]), second_session_id)
+        self.assertEqual(self.auth_service.sessions["alice"], second_session_id)
+
+        restored = self._new_app(authenticated=True)
+        restored.run()
+        self.assertEqual(str(restored.session_state["session_id"]), second_session_id)
+        self.assertEqual(restored.session_state["messages"][0]["content"], "Переключённый чат")
+
+    def test_clearing_chat_affects_only_current_chat(self):
+        first_session_id = self.auth_service.get_or_create_user_session("alice")
+        self.auth_service.rename_chat_session("alice", first_session_id, "Основной чат")
+        self.auth_service.save_chat_message(
+            username="alice",
+            session_id=first_session_id,
+            role="user",
+            content="История первого чата",
+        )
+        second_session_id = self._seed_chat(
+            "Второй чат",
+            [
+                ("user", "История второго чата"),
+                ("assistant", "Ответ второго чата"),
+            ],
+        )
+
+        at = self._new_app(authenticated=True)
+        at.run()
+        self._click_button(at, "Второй чат")
+        at.run()
+
+        self._click_button(at, "🗑 Очистить чат")
+        at.run()
+
+        self.assertEqual(str(at.session_state["session_id"]), second_session_id)
+        self.assertEqual(list(at.session_state["messages"]), [])
+        self.assertEqual(
+            [item["content"] for item in self.auth_service.list_chat_history(username="alice", session_id=first_session_id)],
+            ["История первого чата"],
+        )
+        self.assertEqual(
+            self.auth_service.list_chat_history(username="alice", session_id=second_session_id),
+            [],
+        )
+        self.assertIn(("alice", second_session_id), self.auth_service.clear_history_calls)
+
+    def test_rename_flow_updates_backend_and_ui(self):
+        session_id = self.auth_service.get_or_create_user_session("alice")
+        self.auth_service.rename_chat_session("alice", session_id, "Старое имя")
+
+        at = self._new_app(authenticated=True)
+        at.run()
+
+        self._click_button_by_key(at, f"chat_session_rename_{session_id}")
+        at.run()
+        at.text_input(key="chat_rename_value").set_value("Новое имя чата")
+        self._click_button_by_key(at, f"chat_session_rename_save_{session_id}")
+        at.run()
+
+        labels = [button.label for button in at.button]
+        self.assertIn("Новое имя чата", labels)
+        self.assertEqual(
+            self.auth_service.get_chat_session("alice", session_id)["title"],
+            "Новое имя чата",
         )
 
     def test_navigation_smoke_respects_active_window(self):
@@ -443,10 +750,19 @@ class TestFrontendUISmoke(unittest.TestCase):
         )
 
     def test_reset_and_logout_clear_expected_state(self):
-        self.auth_service.history_by_user["alice"] = [
-            {"role": "user", "content": "старый вопрос"},
-            {"role": "assistant", "content": "старый ответ"},
-        ]
+        initial_session_id = self.auth_service.get_or_create_user_session("alice")
+        self.auth_service.save_chat_message(
+            username="alice",
+            session_id=initial_session_id,
+            role="user",
+            content="старый вопрос",
+        )
+        self.auth_service.save_chat_message(
+            username="alice",
+            session_id=initial_session_id,
+            role="assistant",
+            content="старый ответ",
+        )
         at = self._new_app(
             authenticated=True,
             extra_state={
@@ -460,12 +776,13 @@ class TestFrontendUISmoke(unittest.TestCase):
         )
         at.run()
 
-        self._click_button(at, "🔄 Новая сессия")
+        self._click_button(at, "+ Новый чат")
         at.run()
-        self.assertEqual(at.session_state["session_id"], "rotated-1")
+        self.assertNotEqual(str(at.session_state["session_id"]), initial_session_id)
         self.assertEqual(list(at.session_state["messages"]), [])
         self.assertIsNone(at.session_state["pending_input"])
-        self.assertIsNone(at.session_state["us13_preview_result"])
+        self.assertEqual(at.session_state["us13_preview_result"], {"rows_count": 2})
+        self.assertEqual(len(at.session_state["chat_sessions"]), 2)
 
         self._click_button(at, "🚪 Выход")
         at.run()

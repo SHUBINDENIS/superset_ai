@@ -34,6 +34,9 @@ APP_STATE_DEFAULTS = {
     "auth_cookie_sync_token": "",
     "auth_cookie_clear_requested": False,
     "messages": [],
+    "chat_sessions": [],
+    "chat_rename_session_id": "",
+    "chat_rename_value": "",
     "session_id": None,
     "agent_initialized": False,
     "active_window": WINDOW_CHAT,
@@ -137,6 +140,9 @@ SESSION_RESET_KEYS = (
     "agent_initialized",
     "active_window",
     "messages",
+    "chat_sessions",
+    "chat_rename_session_id",
+    "chat_rename_value",
     "pending_input",
     "us4_draft_query",
     "us4_entity_to_apply",
@@ -252,6 +258,7 @@ def build_authenticated_state(
     auth_token: str,
     session_id: str,
     messages: list[dict[str, Any]],
+    chat_sessions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     return {
         "auth_is_authenticated": True,
@@ -261,6 +268,9 @@ def build_authenticated_state(
         "session_id": session_id,
         "agent_initialized": False,
         "messages": messages,
+        "chat_sessions": list(chat_sessions or []),
+        "chat_rename_session_id": "",
+        "chat_rename_value": "",
         "pending_input": None,
         "active_window": WINDOW_CHAT,
     }

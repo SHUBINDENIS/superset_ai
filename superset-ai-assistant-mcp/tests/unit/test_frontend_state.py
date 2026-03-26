@@ -31,12 +31,16 @@ class TestFrontendState(unittest.TestCase):
             auth_token="token-alice",
             session_id="session-alice",
             messages=[{"role": "assistant", "content": "saved"}],
+            chat_sessions=[{"session_id": "session-alice", "title": "Чат"}],
         )
 
         self.assertTrue(state["auth_is_authenticated"])
         self.assertEqual(state["auth_username"], "alice")
         self.assertEqual(state["session_id"], "session-alice")
         self.assertEqual(state["messages"], [{"role": "assistant", "content": "saved"}])
+        self.assertEqual(state["chat_sessions"], [{"session_id": "session-alice", "title": "Чат"}])
+        self.assertEqual(state["chat_rename_session_id"], "")
+        self.assertEqual(state["chat_rename_value"], "")
         self.assertIsNone(state["pending_input"])
         self.assertFalse(state["agent_initialized"])
 
@@ -45,6 +49,8 @@ class TestFrontendState(unittest.TestCase):
 
         self.assertEqual(state["session_id"], "rotated-1")
         self.assertEqual(state["messages"], [])
+        self.assertEqual(state["chat_sessions"], [])
+        self.assertEqual(state["chat_rename_session_id"], "")
         self.assertEqual(state["us13_sql"], APP_STATE_DEFAULTS["us13_sql"])
         self.assertEqual(state["us15_chart_title"], "AI Widget")
         self.assertIsNone(state["us14_recommendation"])
