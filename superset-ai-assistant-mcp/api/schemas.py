@@ -8,9 +8,9 @@ backend.auth_service.AuthService.
 
 from __future__ import annotations
 
-from typing import Any, List
+from typing import Any, Dict, List
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 # ---------------------------------------------------------------------------
@@ -42,6 +42,12 @@ class MessageResponse(BaseModel):
     """Generic single-message response body."""
 
     message: str
+
+
+class _AliasModel(BaseModel):
+    """Base model that permits internal field names with public aliases."""
+
+    model_config = ConfigDict(populate_by_name=True)
 
 
 # ---------------------------------------------------------------------------
@@ -113,3 +119,129 @@ class SendMessageResponse(BaseModel):
 
 class ClearMessagesResponse(BaseModel):
     deleted_count: int
+
+
+# ---------------------------------------------------------------------------
+# US13-US15 preview / recommend / share
+# ---------------------------------------------------------------------------
+
+class DatabaseResponse(BaseModel):
+    id: int
+    name: str
+    backend: str
+
+
+class DatabaseListResponse(BaseModel):
+    databases: List[DatabaseResponse]
+
+
+class DatasetResponse(_AliasModel):
+    id: int
+    table_name: str
+    schema_name: str = Field(default="", alias="schema")
+    database_name: str = ""
+    database_id: int | None = None
+
+
+class DatasetListResponse(BaseModel):
+    datasets: List[DatasetResponse]
+
+
+class DatasetColumnResponse(BaseModel):
+    column_name: str
+    verbose_name: str = ""
+    type: str = ""
+
+
+class DatasetMetadataResponse(_AliasModel):
+    id: int
+    table_name: str = ""
+    schema_name: str = Field(default="", alias="schema")
+    database_id: int | None = None
+    database_name: str = ""
+    columns: List[DatasetColumnResponse] = Field(default_factory=list)
+    metrics: List[str] = Field(default_factory=list)
+
+
+class PreviewRequest(_AliasModel):
+    database_id: int = Field(..., ge=1)
+    sql: str = Field(..., min_length=1)
+    schema_name: str = Field(default="", alias="schema")
+    preview_limit: int = Field(default=20, ge=1, le=500)
+    dataset_id: int | None = Field(default=None, ge=1)
+
+
+class PreviewColumnProfileResponse(BaseModel):
+    column: str
+    inferred_type: str = ""
+    unit: str = ""
+    non_null_count: int = 0
+    distinct_count: int = 0
+    sample_value: Any = None
+    explanation: str = ""
+
+
+class FieldExplanationResponse(BaseModel):
+    column: str
+    explanation: str
+
+
+class PreviewResponse(_AliasModel):
+    dataset_id: int | None = None
+    database_id: int
+    schema_name: str = Field(default="", alias="schema")
+    sql_executed: str
+    preview_limit: int
+    rows_count: int
+    rows: List[Dict[str, Any]] = Field(default_factory=list)
+    columns: List[PreviewColumnProfileResponse] = Field(default_factory=list)
+    field_explanations: List[FieldExplanationResponse] = Field(default_factory=list)
+
+
+class RecommendVizRequest(BaseModel):
+    rows: List[Dict[str, Any]] = Field(default_factory=list)
+    columns: List[PreviewColumnProfileResponse] = Field(default_factory=list)
+    metric_column: str = ""
+    dimension_column: str = ""
+    time_column: str = ""
+
+
+class RecommendationCandidateResponse(BaseModel):
+    viz_type: str
+    score: float
+    reason: str
+
+
+class RecommendationSelectedColumnsResponse(BaseModel):
+    metric: str = ""
+    dimension: str = ""
+    time: str = ""
+
+
+class RecommendVizResponse(BaseModel):
+    recommended: str
+    candidates: List[RecommendationCandidateResponse] = Field(default_factory=list)
+    selected_columns: RecommendationSelectedColumnsResponse
+
+
+class ShareWidgetRequest(BaseModel):
+    dataset_id: int = Field(..., ge=1)
+    dashboard_title: str = Field(default="AI Dashboard", max_length=250)
+    slice_name: str = Field(default="AI Widget", max_length=250)
+    viz_type: str = Field(default="table", max_length=64)
+    metric_column: str = ""
+    dimension_column: str = ""
+    time_column: str = ""
+    row_limit: int = Field(default=1000, ge=1, le=10000)
+    description: str = ""
+
+
+class ShareWidgetResponse(BaseModel):
+    dashboard_id: int
+    chart_id: int
+    dashboard_url: str
+    chart_url: str
+    dashboard_link: str
+    chart_link: str
+    params: Dict[str, Any] = Field(default_factory=dict)
+    viz_type: str

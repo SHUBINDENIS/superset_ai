@@ -93,6 +93,7 @@ def get_current_user(
 # ---------------------------------------------------------------------------
 
 _agent_session_manager: Any = None
+_us13_15_viz_service_instance: Any = None
 
 
 def get_agent_session_manager():
@@ -108,3 +109,17 @@ def get_agent_session_manager():
         from backend.ai_agent import get_session_manager
         _agent_session_manager = get_session_manager()
     return _agent_session_manager
+
+
+# ---------------------------------------------------------------------------
+# US13-US15 viz service (lazy-loaded to avoid heavy imports at startup)
+# ---------------------------------------------------------------------------
+
+def get_viz_service():
+    """Return the US13-US15 service singleton for preview/recommend/share."""
+    global _us13_15_viz_service_instance
+    if _us13_15_viz_service_instance is None:
+        from backend.us13_15_viz_service import get_us13_15_viz_service
+
+        _us13_15_viz_service_instance = get_us13_15_viz_service()
+    return _us13_15_viz_service_instance

@@ -91,13 +91,16 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml up -d
 перенесены:
 - auth shell с cookie-based FastAPI auth,
 - `/app/chat` с multi-chat sidebar,
-- отправка сообщений через FastAPI `/api/chats/...`.
+- отправка сообщений через FastAPI `/api/chats/...`,
+- `/app/preview` для preview и объяснения полей,
+- `/app/recommend` для рекомендаций по типу графика,
+- `/app/share` для создания chart/dashboard и открытия ссылок.
 
 Локальный запуск:
 
 ```bash
 cd /home/superset_ai/superset-ai-assistant-mcp
-uvicorn api.main:app --host 0.0.0.0 --port 8100
+.venv/bin/python -m uvicorn api.main:app --host 0.0.0.0 --port 8100
 ```
 
 В отдельном терминале:
@@ -111,10 +114,14 @@ NEXT_PUBLIC_API_URL=http://127.0.0.1:8100 npm run dev -- --hostname 0.0.0.0 --po
 Открыть:
 - `http://127.0.0.1:3000/login`
 - после входа основной маршрут: `http://127.0.0.1:3000/app/chat`
+- demo-critical аналитические страницы:
+  - `http://127.0.0.1:3000/app/preview`
+  - `http://127.0.0.1:3000/app/recommend`
+  - `http://127.0.0.1:3000/app/share`
 
 Важно:
 - Streamlit UI остаётся рабочим и не заменяется этим запуском;
-- preview/recommend/share/scan пока ещё не перенесены и остаются на Streamlit.
+- `preview/recommend/share` уже доступны и в Next.js, а `scan` пока остаётся placeholder и продолжает жить в Streamlit.
 
 ## Как пользоваться
 - В `sidebar` есть кнопки навигации по окнам: `Чат`, `US1`, `US2`, `US3`, `US4`, `US5`, `US13`, `US14`, `US15`.

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
 import { AppSidebar } from "@/components/app-sidebar";
 import { ChatUIProvider } from "@/hooks/use-chats";
+import { VizFlowProvider } from "@/hooks/use-viz";
 
 /**
  * Protected layout for `/app/*` routes.
@@ -33,10 +34,12 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <ChatUIProvider>
-      <div className="flex h-screen overflow-hidden">
-        <AppSidebar />
-        <main className="flex-1 overflow-hidden">{children}</main>
-      </div>
+      <VizFlowProvider>
+        <div className="flex h-screen overflow-hidden">
+          <AppSidebar />
+          <main className="flex-1 overflow-hidden">{children}</main>
+        </div>
+      </VizFlowProvider>
     </ChatUIProvider>
   );
 }
