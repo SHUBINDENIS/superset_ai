@@ -3,8 +3,8 @@
 Status: final legacy runtime removal pass complete.
 
 This report describes the current migration state of the assistant product from
-`superset-mcp/main.py` to the built-in Superset MCP service. This report now
-describes the post-removal state.
+the former external MCP server in `superset-mcp/main.py` to the built-in
+Superset MCP service. This report now describes the post-removal state.
 
 ## Validated Green Paths
 
@@ -72,9 +72,6 @@ Some compatibility-oriented names remain by design, but they are not a legacy ru
   - kept as the intentional contract adapter from legacy product call shapes to built-in MCP tools
 - `mcp_ext.legacy_chart_create`
   - kept as the narrow compatibility bridge for the remaining pie-chart creation gap
-- `superset-mcp/`
-  - kept only as a historical archive directory; it is no longer part of deployment or runtime
-
 No normal product flow requires legacy token-based auth helpers, CSRF, raw
 `database/<id>/tables`, legacy subprocess launchers, or the deleted external MCP server.
 
@@ -92,8 +89,9 @@ Completed in this pass:
 1. Removed the low-level assistant runtime mode named `legacy`.
 2. Removed the legacy-only branches from `backend/us13_15_viz_service.py`.
 3. Deleted `superset-mcp/main.py`.
-4. Updated CI so lint/compile no longer target the deleted file.
-5. Re-ran the parity and stability suites on the built-in-only path.
+4. Deleted the obsolete top-level `superset-mcp/` directory.
+5. Updated docs and ignore rules so they no longer describe that directory as present.
+6. Re-ran the parity and stability suites on the built-in-only path.
 
 ## Current Gate Assessment
 

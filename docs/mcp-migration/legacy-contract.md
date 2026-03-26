@@ -1,11 +1,12 @@
 # Legacy MCP Contract Snapshot
 
-Status: phase 0 discovery snapshot taken from repository code on 2026-03-25.
+Status: phase 0 discovery snapshot captured on 2026-03-25 before the final
+repository cleanup removed `superset-mcp/`.
 
-This document records what the legacy MCP server in `superset-mcp/main.py` does today.
-It is not a golden oracle. When observed legacy behavior conflicts with intended product
-behavior or built-in Superset MCP semantics, the migration target is to fix the behavior,
-not freeze the bug.
+This document records what the legacy MCP server in `superset-mcp/main.py` did
+before removal from the repository. It is not a golden oracle. When observed
+legacy behavior conflicts with intended product behavior or built-in Superset
+MCP semantics, the migration target is to fix the behavior, not freeze the bug.
 
 See also:
 
@@ -25,13 +26,13 @@ The legacy server is only one input into migration design. Other sources of trut
 - existing tests, especially `superset-ai-assistant-mcp/tests/test_ai_agent_clarifications.py`
 - explicit migration instructions in `AGENTS.md`
 
-## 2. Current runtime architecture
+## 2. Captured legacy runtime architecture
 
 Expected legacy path for chat:
 
 `Streamlit chat -> backend/ai_agent.py -> mcp-use MCPClient -> python subprocess -> superset-mcp/main.py -> Superset REST API`
 
-Important discovery note:
+Important discovery note from the snapshot:
 
 - The repository is already hybrid, not purely legacy-MCP-based.
 - `superset-ai-assistant-mcp/backend/ai_agent.py` launches `superset-mcp/main.py` and exposes its full tool surface to the LLM.
@@ -149,7 +150,7 @@ Target migration behavior:
 
 ## 6. Legacy environment and runtime dependencies
 
-Legacy-specific environment or runtime dependencies discovered in the repo:
+Legacy-specific environment or runtime dependencies discovered in the snapshot:
 
 - `SUPERSET_MCP_PATH`
 - `SUPERSET_MCP_PYTHON`

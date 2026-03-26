@@ -2,8 +2,9 @@
 
 Status: built-in-only runtime policy after final legacy runtime removal.
 
-This note explains the current runtime selection policy while the product is being
-migrated from `superset-mcp/main.py` to the built-in Superset MCP service.
+This note explains the current runtime selection policy after the product was
+migrated from the former external server in `superset-mcp/main.py` to the
+built-in Superset MCP service.
 
 ## Current Default
 

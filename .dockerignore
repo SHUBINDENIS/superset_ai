@@ -7,7 +7,3 @@ superset-ai-assistant-mcp/data
 superset-ai-assistant-mcp/tests
 superset-ai-assistant-mcp/backend_logs.log
 superset-ai-assistant-mcp/*.log
-superset-mcp/.env
-superset-mcp/.superset_token
-superset-mcp/build
-superset-mcp/superset_mcp.egg-info

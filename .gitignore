@@ -102,8 +102,6 @@ superset/.venv/
 superset/venv/
 superset-ai-assistant-mcp/.venv/
 superset-ai-assistant-mcp/venv/
-superset-mcp/.venv/
-superset-mcp/venv/
 
 # -----------------------------
 # Сгенерированные артефакты MCP-проектов
@@ -111,5 +109,3 @@ superset-mcp/venv/
 # -----------------------------
 superset-ai-assistant-mcp/dist/
 superset-ai-assistant-mcp/build/
-superset-mcp/dist/
-superset-mcp/build/

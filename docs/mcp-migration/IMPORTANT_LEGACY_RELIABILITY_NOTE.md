@@ -1,6 +1,7 @@
 # Important note: legacy MCP is partially broken
 
-This note is **mandatory context** for all migration work from `superset-mcp/main.py` to the built-in Superset MCP service.
+This note is **mandatory context** for migration work from the former
+`superset-mcp/main.py` server to the built-in Superset MCP service.
 
 ## Core rule
 The legacy MCP is **not** a fully trustworthy oracle.

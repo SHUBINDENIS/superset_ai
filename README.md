@@ -45,8 +45,8 @@
   - пример переменных окружения для `docker-compose.dev.yml`.
 - `ruff.toml`
   - конфигурация линтера Ruff.
-- `superset-mcp/`
-  - сохранённый исторический архив legacy MCP-пакета; не используется в текущем runtime.
+- `docs/mcp-migration/`
+  - исторические материалы миграции и parity-отчёты по удалённому legacy MCP runtime.
 
 ## Архитектура (кратко)
 - Пользователь работает в `Streamlit UI`.

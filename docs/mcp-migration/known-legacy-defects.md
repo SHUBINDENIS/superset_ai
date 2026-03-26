@@ -1,7 +1,7 @@
 # Known Legacy Defects
 
 This file records confirmed legacy defects and structural reliability problems in
-`superset-mcp/main.py`. These are migration inputs, not parity targets.
+the former `superset-mcp/main.py`. These are migration inputs, not parity targets.
 
 Testing rule:
 
