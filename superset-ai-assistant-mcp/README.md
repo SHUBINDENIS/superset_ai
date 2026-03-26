@@ -36,6 +36,12 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
 - primary FastAPI health: `http://localhost:8100/api/health`
 - Streamlit fallback/admin UI: `http://localhost:8051`
 
+Для production-like server rollout рекомендуемая публичная модель такая:
+- `https://assistant.example.com/` -> primary Next.js UI
+- `https://assistant.example.com/api/*` -> primary FastAPI API
+- `https://assistant-fallback.example.com/` -> Streamlit fallback
+- reverse proxy example: `docs/examples/nginx-primary-ui.conf.example`
+
 Ниже оставлен ручной split-run сценарий, если unified compose не используется.
 
 1. Скопируйте `.env.example` в `.env` и заполните:
@@ -144,6 +150,8 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml up -d
 - `docs/demo-query-pack.md`
 - `docs/dual-run-parity-readiness.md`
 - `docs/phased-cutover-plan.md`
+- `docs/phased-cutover-signoff.md`
+- `docs/production-rollout-runbook.md`
 
 ## Primary core UI: Next.js + FastAPI
 
@@ -196,6 +204,8 @@ NEXT_PUBLIC_API_URL=http://127.0.0.1:8100 npm run dev -- --hostname 0.0.0.0 --po
 - `docs/demo-query-pack.md`
 - `docs/phased-cutover-plan.md`
 - `docs/phased-cutover-signoff.md`
+- `docs/production-rollout-runbook.md`
+- `docs/examples/nginx-primary-ui.conf.example`
 
 ## Как пользоваться Streamlit fallback path
 - В `sidebar` есть кнопки навигации по окнам: `Чат`, `US1`, `US2`, `US3`, `US4`, `US5`, `US13`, `US14`, `US15`.

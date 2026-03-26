@@ -60,6 +60,7 @@
 - Superset выполняет SQL, строит графики и дашборды в подключённых источниках данных.
 
 Подробная схема развёртывания (Deployment): `docs/deployment.md`.
+Production-like rollout runbook: `docs/production-rollout-runbook.md`.
 
 ## Текущие entrypoints по умолчанию
 - Primary core UI: `http://<host>:3001/login`
@@ -69,6 +70,12 @@
 Для текущего phased switch именно `Next.js/FastAPI` считается default path для
 core flows. `Streamlit` больше не считается основным пользовательским входом и
 используется только для `US2-US5` и rollback-сценариев.
+
+Рекомендуемая production-like публикация:
+- `https://assistant.example.com/` -> primary UI
+- `https://assistant.example.com/api/*` -> primary API
+- `https://assistant-fallback.example.com/` -> Streamlit fallback
+- reverse proxy example: `docs/examples/nginx-primary-ui.conf.example`
 
 ## Требования к окружению
 - Docker + Docker Compose
@@ -266,6 +273,7 @@ curl -I http://127.0.0.1:8051
 - `docs/dual-run-parity-readiness.md`
 - `docs/phased-cutover-plan.md`
 - `docs/phased-cutover-signoff.md`
+- `docs/production-rollout-runbook.md`
 
 ## Линтеры и CI
 В репозитории настроен рабочий pipeline/workflow для автоматического запуска линтеров:

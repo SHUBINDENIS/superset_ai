@@ -5,6 +5,8 @@ default core-flow path and `Streamlit` remains fallback/admin only for
 `US2-US5`. Do not remove Streamlit in this phase.
 
 Current signoff outcome is tracked in `docs/phased-cutover-signoff.md`.
+Production-like rollout and rollback steps are tracked in
+`docs/production-rollout-runbook.md`.
 
 ## Goal
 

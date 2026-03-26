@@ -1,0 +1,87 @@
+# Example Nginx config for the phased primary UI rollout.
+#
+# Recommended public model:
+# - https://assistant.example.com       -> Next.js primary UI
+# - https://assistant.example.com/api/* -> FastAPI primary API
+# - https://assistant-fallback.example.com -> Streamlit fallback UI
+#
+# Keep Superset on its own public host, for example:
+# - https://superset.example.com
+#
+# Make sure the application env matches the public hosts:
+# - SUPERSET_PUBLIC_URL=https://superset.example.com
+# - US15_SHARE_BASE_URL=https://superset.example.com
+# - API_CORS_ORIGINS=https://assistant.example.com
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
+
+upstream assistant_web {
+    server 127.0.0.1:3001;
+}
+
+upstream assistant_api {
+    server 127.0.0.1:8100;
+}
+
+upstream assistant_fallback {
+    server 127.0.0.1:8051;
+}
+
+server {
+    listen 80;
+    server_name assistant.example.com;
+
+    client_max_body_size 16m;
+
+    location /api/ {
+        proxy_pass http://assistant_api;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location /_next/ {
+        proxy_pass http://assistant_web;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+
+    location / {
+        proxy_pass http://assistant_web;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+
+server {
+    listen 80;
+    server_name assistant-fallback.example.com;
+
+    client_max_body_size 16m;
+
+    location / {
+        proxy_pass http://assistant_fallback;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+    }
+}

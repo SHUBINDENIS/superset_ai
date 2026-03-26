@@ -5,6 +5,8 @@
 
 Phased cutover scope и rollback-логика зафиксированы отдельно в
 `docs/phased-cutover-plan.md`.
+Production-like rollout steps зафиксированы в
+`docs/production-rollout-runbook.md`.
 
 Текущее состояние после упрощения транспорта:
 
@@ -102,6 +104,23 @@ flowchart TB
 
 Примечание: built-in MCP в текущем проекте обычно запускается как subprocess через `stdio`, но также поддерживается режим `built_in_http`. Отдельный assistant Docker image не включает код `superset.mcp_service`, поэтому для контейнерного запуска нужен либо `built_in_http`, либо явный stdio launcher.
 
+## 4.1) Recommended Public Access Model
+
+Для production-like rollout рекомендуем публиковать primary path так:
+
+- `https://assistant.example.com/` -> `Next.js`
+- `https://assistant.example.com/api/*` -> `FastAPI`
+- `https://assistant-fallback.example.com/` -> `Streamlit`
+- `https://superset.example.com/` -> `Superset`
+
+Это даёт:
+- один default user URL для core flows
+- тот же origin для UI и API cookie-auth
+- отдельный fallback host для rollback и `US2-US5`
+
+Пример reverse proxy:
+- `docs/examples/nginx-primary-ui.conf.example`
+
 ## 5) Потоки данных
 
 1. Пользователь для core flows открывает `Next.js`.
@@ -142,6 +161,11 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
 - `http://<host>:3001` как primary UI
 - `http://<host>:8100` как primary API
 - `http://<host>:8051` как Streamlit fallback
+
+Для production-like rollout сверху обычно ставится reverse proxy, который
+публикует:
+- `assistant.example.com` как default primary URL
+- `assistant-fallback.example.com` как fallback URL
 
 Если unified compose не используется, поддерживается и split-run ниже.
 1. Поднять Superset стек:
@@ -207,6 +231,8 @@ curl -I http://127.0.0.1:8051
 
 - Конфигурация ориентирована на MVP/демо и учебный контур.
 - Для production требуются отдельные меры: TLS, секреты, hardening, отказоустойчивость, мониторинг/алертинг, backup-политики.
+- В репозитории сейчас даётся production-like rollout path и proxy example, а не
+  полноценно готовый production stack с managed ingress и secret management.
 
 ## 10) Как показать текущий HTTP-only assistant path на практике
 
@@ -214,3 +240,10 @@ curl -I http://127.0.0.1:8051
 2. Пройти авторизацию и пройти core path: chat -> preview -> recommend -> share -> scan.
 3. Показать trace correlation в `frontend.log`, `agent.log`, `mcp.log`, `artifact.log`.
 4. При необходимости открыть `http://<host>:8051` и показать, что Streamlit остаётся fallback path для `US2-US5`.
+
+## 11) Operator References
+
+- `docs/phased-cutover-plan.md`
+- `docs/phased-cutover-signoff.md`
+- `docs/production-rollout-runbook.md`
+- `docs/examples/nginx-primary-ui.conf.example`
