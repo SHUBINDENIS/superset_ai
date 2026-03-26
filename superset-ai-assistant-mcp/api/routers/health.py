@@ -3,6 +3,7 @@ Health check router.
 
 Endpoint:
     GET /api/health
+    HEAD /api/health
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from api.schemas import HealthResponse
 router = APIRouter(tags=["health"])
 
 
-@router.get("/api/health", response_model=HealthResponse)
+@router.api_route("/api/health", methods=["GET", "HEAD"], response_model=HealthResponse)
 def health() -> HealthResponse:
     auth_db_ok = False
     try:

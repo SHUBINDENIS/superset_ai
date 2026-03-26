@@ -216,6 +216,10 @@ class TestAuthAPI(unittest.TestCase):
         self.assertEqual(data["status"], "ok")
         self.assertTrue(data["auth_db_ok"])
 
+    def test_health_head_ok(self):
+        resp = self.client.head("/api/health")
+        self.assertEqual(resp.status_code, 200)
+
     # -----------------------------------------------------------------------
     # Full flow: register -> /me -> logout -> /me fails
     # -----------------------------------------------------------------------
