@@ -479,6 +479,9 @@ class TestFrontendUISmoke(unittest.TestCase):
             )
         return session_id
 
+    def _text_values(self, items) -> list[str]:
+        return [str(getattr(item, "value", "")).strip() for item in items]
+
     def _login(self, at: AppTest, username: str = "alice", password: str = "secret-pass") -> None:
         at.text_input(key="auth_login_username").set_value(username)
         at.text_input(key="auth_login_password").set_value(password)
@@ -529,6 +532,27 @@ class TestFrontendUISmoke(unittest.TestCase):
         )
         sessions = self.auth_service.list_chat_sessions("alice")
         self.assertEqual(sessions[0]["title"], "Покажи доступные датасеты")
+
+    def test_authenticated_user_sees_chat_onboarding_and_quick_start_help(self):
+        at = self._new_app(authenticated=True)
+        at.run()
+
+        info_values = self._text_values(at.info)
+        markdown_values = self._text_values(at.markdown)
+
+        self.assertTrue(any("Как начать:" in value for value in info_values))
+        self.assertTrue(any("Рекомендуемый путь" in value for value in markdown_values))
+        self.assertTrue(any("1. Спросите бизнес-вопрос" in value for value in markdown_values))
+
+    def test_chat_examples_are_business_first_not_sql_first(self):
+        at = self._new_app(authenticated=True)
+        at.run()
+
+        labels = [button.label for button in at.button]
+        self.assertIn("Покажи выручку по месяцам", labels)
+        self.assertIn("Какие категории товаров приносят больше всего продаж?", labels)
+        self.assertIn("Сделай график по заказам за 2025 год", labels)
+        self.assertFalse(any("SELECT" in label for label in labels))
 
     def test_authenticated_user_sees_chat_list_in_sidebar(self):
         first_session_id = self.auth_service.get_or_create_user_session("alice")
@@ -681,6 +705,18 @@ class TestFrontendUISmoke(unittest.TestCase):
             self.auth_service.get_chat_session("alice", session_id)["title"],
             "Новое имя чата",
         )
+
+    def test_us13_shows_guidance_that_table_inspection_is_optional(self):
+        at = self._new_app(authenticated=True, active_window="us13")
+        at.run()
+
+        info_values = self._text_values(at.info)
+        caption_values = self._text_values(at.caption)
+        labels = [button.label for button in at.button]
+
+        self.assertTrue(any("можно начать прямо с чата" in value for value in info_values))
+        self.assertTrue(any("Не хотите писать запрос сами?" in value for value in caption_values))
+        self.assertIn("Заполнить пример запроса", labels)
 
     def test_navigation_smoke_respects_active_window(self):
         at = self._new_app(authenticated=True, active_window="us1")
