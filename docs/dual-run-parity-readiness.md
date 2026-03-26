@@ -1,6 +1,6 @@
 # Dual-Run Parity And Cutover Readiness
 
-Status: continue dual-run; do not cut over yet.
+Status: continue dual-run; core-flow logging blocker closed, but keep cutover gated on one explicit dual-run smoke signoff.
 
 Этот документ фиксирует repo-backed audit между:
 - текущим Streamlit UI
@@ -27,6 +27,7 @@ Repo-backed evidence для этого аудита:
   - `superset-ai-assistant-mcp/tests/test_api_viz.py`
   - `superset-ai-assistant-mcp/tests/test_api_scan.py`
   - `npm run build` в `superset-ai-assistant-mcp/frontend-next`
+  - `superset-ai-assistant-mcp/tests/test_api_frontend_logs.py`
 
 ## Current Repo-Backed Coverage
 
@@ -61,6 +62,7 @@ Repo-backed evidence для этого аудита:
 - Current FastAPI routers:
   - `auth.py`
   - `chats.py`
+  - `frontend_logs.py`
   - `viz.py`
   - `scan.py`
   - `health.py`
@@ -78,7 +80,7 @@ Repo-backed evidence для этого аудита:
 | Chart/dashboard creation | Create chart/dashboard and show results | Present | parity achieved | `frontend-next/src/app/app/share/page.tsx`, `api/routers/viz.py`, `tests/test_api_viz.py::test_share_widget_endpoint` | Core demo share path migrated |
 | Useful links | Surface links in chat/share flows | Present | parity acceptable with known limitations | `frontend-next/src/components/chat-message.tsx`, `frontend-next/src/components/link-result-card.tsx`, `frontend-next/src/app/app/share/page.tsx` | Next.js chat currently extracts URLs heuristically; Streamlit shows richer outcome framing |
 | Schema scan | Run scan, show summary/report | Present | parity acceptable with known limitations | `frontend-next/src/app/app/scan/page.tsx`, `api/routers/scan.py`, `tests/test_api_scan.py` | Next page does not yet expose report download button; scan remains synchronous |
-| Structured logging compatibility | Frontend + agent + MCP + artifact correlation | Partial only | parity missing / blocker | Streamlit logging in `frontend/app.py` and `backend/observability.py`; no equivalent instrumentation under `frontend-next/src/` or `api/` | Backend/MCP logs remain, but Next.js frontend actions are not yet emitting comparable structured events |
+| Structured logging compatibility | Frontend + agent + MCP + artifact correlation | Present for migrated core flows | parity achieved | `frontend-next/src/lib/observability.ts`, `frontend-next/src/lib/api-client.ts`, `api/routers/frontend_logs.py`, `tests/test_api_frontend_logs.py` | Next.js logs land in `frontend.log`; chat/viz/scan propagate `trace_id` / `request_id` into backend logs |
 
 ## Flow-Level Findings
 
@@ -89,6 +91,7 @@ Repo-backed evidence для этого аудита:
 - blocked request handling
 - recommendation
 - chart/dashboard creation
+- structured logging compatibility
 
 ### Parity acceptable with known limitations
 - preview
@@ -101,25 +104,30 @@ Repo-backed evidence для этого аудита:
   - Core scan/report path is available in Next.js.
   - Streamlit still has a slightly richer operational affordance set around the result.
 
-### Parity missing / blocker
-- structured logging compatibility
-  - Streamlit currently emits structured frontend events and binds trace/request IDs into the broader assistant flow.
-  - The new Next.js UI does not yet emit comparable frontend-side structured logs, and there is no repo-backed evidence of equivalent correlation across browser action -> API -> backend logs.
+### No current blocker inside the migrated core path
+- The previously missing frontend-side structured logging parity is now present for:
+  - auth
+  - navigation between migrated routes
+  - chat + multi-chat actions
+  - preview / recommend / share
+  - schema scan
+- Correlation now works practically through:
+  - Next.js frontend events in `frontend.log`
+  - `x-trace-id` / `x-request-id` propagation into chat/viz/scan API calls
+  - existing `agent.log`, `mcp.log`, and `artifact.log`
 
 ## Cutover Readiness Assessment
 
 ### Current recommendation
 - Safe to continue dual-run: `yes`
-- Safe to cut over the primary user-facing core flow today: `not yet`
+- Safe to cut over the primary user-facing core flow today: `almost, but run one explicit dual-run smoke signoff first`
 
-### Why not yet
-The new stack now covers the core user/demo path, but a safe cutover still
-lacks one important operational parity item:
-- frontend-side structured logging compatibility
-
-This is the remaining repo-backed blocker for a safe cutover decision because
-it weakens production/demo debugging exactly at the point where the frontend is
-being replaced.
+### Why still not automatically yes
+The main repo-backed blocker is closed, but this document still recommends one
+more explicit dual-run smoke pass before changing the default route:
+- confirm the new `frontend.log` events appear during real Next.js usage
+- confirm `trace_id` / `request_id` match the downstream backend logs
+- confirm no regression in the existing Streamlit fallback path
 
 ### What is already strong enough
 - Core demo path exists in the new stack:
@@ -162,7 +170,7 @@ They are helper/admin flows, not part of the current core demo baseline.
 They remain blockers for the later milestone “remove Streamlit entirely”.
 
 So the practical decision is:
-- primary core-flow cutover: possible after the logging blocker is closed
+- primary core-flow cutover: possible after one final dual-run smoke signoff
 - Streamlit decommission: not possible until US2-US5 are either migrated or formally dropped
 
 ## Dual-Run Decision
@@ -172,7 +180,7 @@ Recommended near-term mode:
 2. Treat Next.js/FastAPI as the candidate primary UX for the core path.
 3. Re-run `docs/manual-smoke-checklist.md` against both stacks.
 4. Use `docs/demo-query-pack.md` for the live Pagila demo path on both stacks.
-5. Close the structured logging parity gap before default-route cutover.
+5. Use the new Next.js frontend logs as part of the signoff evidence before default-route cutover.
 
 ## Minimal Evidence Collected In This Audit
 
@@ -189,7 +197,7 @@ These checks support:
 ## Safe Next Step Before Cutover
 
 One more scoped iteration should focus on:
-- adding structured, privacy-safe frontend-side logging compatibility for the Next.js/FastAPI path
-- then running one explicit dual-run smoke signoff using `docs/manual-smoke-checklist.md`
+- running one explicit dual-run smoke signoff using `docs/manual-smoke-checklist.md`
+- deciding whether to switch the default core route after that signoff
 
 After that, the repo should be in a position to make a safer primary-frontend cutover decision.

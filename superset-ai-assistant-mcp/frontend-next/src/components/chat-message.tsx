@@ -3,6 +3,11 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AlertTriangle, ShieldAlert, User, Bot } from "lucide-react";
+import {
+  createTraceContext,
+  describeUsefulLink,
+  logFrontendEvent,
+} from "@/lib/observability";
 import { cn } from "@/lib/utils";
 import type { ChatMessage as ChatMessageType } from "@/lib/chats";
 
@@ -138,6 +143,22 @@ export function ChatMessage({ message }: Props) {
                     target="_blank"
                     rel="noreferrer"
                     className="underline underline-offset-2"
+                    onClick={() =>
+                      logFrontendEvent(
+                        "useful_link_open",
+                        {
+                          source: "assistant_reply",
+                          ...describeUsefulLink(link.url),
+                        },
+                        {
+                          traceContext: createTraceContext({
+                            sessionId: message.session_id,
+                            chatId: message.session_id,
+                            route: "/app/chat",
+                          }),
+                        },
+                      )
+                    }
                   >
                     {link.label}
                   </a>

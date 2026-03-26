@@ -1,4 +1,5 @@
 import { apiFetch } from "./api-client";
+import type { FrontendTraceContext } from "./observability";
 
 export interface DatabaseItem {
   id: number;
@@ -302,21 +303,33 @@ export const vizApi = {
   getDatasetMetadata: (datasetId: number) =>
     apiFetch<DatasetMetadata>(`/viz/datasets/${datasetId}`),
 
-  preview: (payload: PreviewRequest) =>
+  preview: (
+    payload: PreviewRequest,
+    traceContext?: Partial<FrontendTraceContext>,
+  ) =>
     apiFetch<PreviewResult>("/viz/preview", {
       method: "POST",
+      traceContext,
       body: JSON.stringify(payload),
     }),
 
-  recommend: (payload: RecommendRequest) =>
+  recommend: (
+    payload: RecommendRequest,
+    traceContext?: Partial<FrontendTraceContext>,
+  ) =>
     apiFetch<RecommendationResult>("/viz/recommend", {
       method: "POST",
+      traceContext,
       body: JSON.stringify(payload),
     }),
 
-  createWidget: (payload: ShareWidgetRequest) =>
+  createWidget: (
+    payload: ShareWidgetRequest,
+    traceContext?: Partial<FrontendTraceContext>,
+  ) =>
     apiFetch<ShareWidgetResult>("/viz/share/widget", {
       method: "POST",
+      traceContext,
       body: JSON.stringify(payload),
     }),
 };

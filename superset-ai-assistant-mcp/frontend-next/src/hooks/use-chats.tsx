@@ -19,6 +19,12 @@ import {
   type MessageList,
   type SendMessageResponse,
 } from "@/lib/chats";
+import {
+  extractLinkCount,
+  extendTraceContext,
+  logFrontendEvent,
+  type FrontendTraceContext,
+} from "@/lib/observability";
 
 interface ChatUIContextValue {
   activeSessionId: string | null;
@@ -83,9 +89,24 @@ export function useCreateChat() {
   const { setActiveSessionId } = useChatUI();
 
   return useMutation({
-    mutationFn: (title?: string | null) => chatsApi.create(title),
-    onSuccess: (created) => {
+    mutationFn: (variables: {
+      title?: string | null;
+      traceContext?: Partial<FrontendTraceContext>;
+      source?: string;
+    }) => chatsApi.create(variables.title, variables.traceContext),
+    onSuccess: (created, variables) => {
       setActiveSessionId(created.session_id);
+      logFrontendEvent(
+        "chat_new",
+        { source: variables.source || "unknown" },
+        {
+          traceContext: extendTraceContext(variables.traceContext, {
+            sessionId: created.session_id,
+            chatId: created.session_id,
+            route: "/app/chat",
+          }),
+        },
+      );
       qc.invalidateQueries({ queryKey: CHATS_KEY });
     },
   });
@@ -95,9 +116,27 @@ export function useRenameChat() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ sessionId, title }: { sessionId: string; title: string }) =>
-      chatsApi.rename(sessionId, title),
-    onSuccess: () => {
+    mutationFn: ({
+      sessionId,
+      title,
+      traceContext,
+    }: {
+      sessionId: string;
+      title: string;
+      traceContext?: Partial<FrontendTraceContext>;
+    }) => chatsApi.rename(sessionId, title, traceContext),
+    onSuccess: (_updated, variables) => {
+      logFrontendEvent(
+        "chat_rename",
+        { title_chars: variables.title.trim().length },
+        {
+          traceContext: extendTraceContext(variables.traceContext, {
+            sessionId: variables.sessionId,
+            chatId: variables.sessionId,
+            route: "/app/chat",
+          }),
+        },
+      );
       qc.invalidateQueries({ queryKey: CHATS_KEY });
     },
   });
@@ -108,12 +147,26 @@ export function useActivateChat() {
   const { setActiveSessionId } = useChatUI();
 
   return useMutation({
-    mutationFn: (sessionId: string) => chatsApi.activate(sessionId),
+    mutationFn: (variables: {
+      sessionId: string;
+      traceContext?: Partial<FrontendTraceContext>;
+    }) => chatsApi.activate(variables.sessionId, variables.traceContext),
     onMutate: async (sessionId) => {
-      setActiveSessionId(sessionId);
+      setActiveSessionId(sessionId.sessionId);
     },
-    onSuccess: (session) => {
+    onSuccess: (session, variables) => {
       setActiveSessionId(session.session_id);
+      logFrontendEvent(
+        "chat_switch",
+        { target_session_id: session.session_id },
+        {
+          traceContext: extendTraceContext(variables.traceContext, {
+            sessionId: session.session_id,
+            chatId: session.session_id,
+            route: "/app/chat",
+          }),
+        },
+      );
       qc.invalidateQueries({ queryKey: CHATS_KEY });
     },
   });
@@ -123,9 +176,23 @@ export function useClearMessages() {
   const qc = useQueryClient();
 
   return useMutation({
-    mutationFn: (sessionId: string) => chatsApi.clearMessages(sessionId),
-    onSuccess: (_, sessionId) => {
-      qc.setQueryData<MessageList>(messagesKey(sessionId), { messages: [] });
+    mutationFn: (variables: {
+      sessionId: string;
+      traceContext?: Partial<FrontendTraceContext>;
+    }) => chatsApi.clearMessages(variables.sessionId, variables.traceContext),
+    onSuccess: (_data, variables) => {
+      qc.setQueryData<MessageList>(messagesKey(variables.sessionId), { messages: [] });
+      logFrontendEvent(
+        "chat_clear",
+        { cleared_session_id: variables.sessionId },
+        {
+          traceContext: extendTraceContext(variables.traceContext, {
+            sessionId: variables.sessionId,
+            chatId: variables.sessionId,
+            route: "/app/chat",
+          }),
+        },
+      );
       qc.invalidateQueries({ queryKey: CHATS_KEY });
     },
   });
@@ -134,6 +201,7 @@ export function useClearMessages() {
 type SendMessageVariables = {
   sessionId: string;
   content: string;
+  traceContext?: Partial<FrontendTraceContext>;
 };
 
 type SendMessageContext = {
@@ -150,8 +218,8 @@ export function useSendMessage() {
     SendMessageVariables,
     SendMessageContext
   >({
-    mutationFn: ({ sessionId, content }) =>
-      chatsApi.sendMessage(sessionId, content),
+    mutationFn: ({ sessionId, content, traceContext }) =>
+      chatsApi.sendMessage(sessionId, content, traceContext),
 
     onMutate: async ({ sessionId, content }) => {
       const key = messagesKey(sessionId);
@@ -171,7 +239,7 @@ export function useSendMessage() {
       return { previous, optimisticUserMessage };
     },
 
-    onSuccess: (reply, { sessionId }) => {
+    onSuccess: (reply, { sessionId, traceContext }) => {
       const key = messagesKey(sessionId);
       qc.setQueryData<MessageList>(key, (old) => ({
         messages: [
@@ -185,9 +253,31 @@ export function useSendMessage() {
           },
         ],
       }));
+      const resolvedTrace = extendTraceContext(traceContext, {
+        sessionId,
+        chatId: sessionId,
+        route: "/app/chat",
+      });
+      logFrontendEvent(
+        "assistant_reply_received",
+        {
+          finish_reason: reply.finish_reason,
+          status: reply.finish_reason === "blocked" ? "blocked" : "ok",
+          link_count: extractLinkCount(reply.content),
+          message_chars: reply.content.length,
+        },
+        { traceContext: resolvedTrace },
+      );
+      if (reply.finish_reason === "blocked") {
+        logFrontendEvent(
+          "blocked_response_received",
+          { message_chars: reply.content.length },
+          { traceContext: resolvedTrace },
+        );
+      }
     },
 
-    onError: (error, { sessionId }, context) => {
+    onError: (error, { sessionId, traceContext }, context) => {
       const previousMessages = context?.previous?.messages ?? [];
       const optimisticUserMessage = context?.optimisticUserMessage;
       const nextMessages = optimisticUserMessage
@@ -200,6 +290,17 @@ export function useSendMessage() {
       qc.setQueryData<MessageList>(messagesKey(sessionId), {
         messages: nextMessages,
       });
+      logFrontendEvent(
+        "assistant_reply_error",
+        { status: "error", error_message: error.message },
+        {
+          traceContext: extendTraceContext(traceContext, {
+            sessionId,
+            chatId: sessionId,
+            route: "/app/chat",
+          }),
+        },
+      );
     },
 
     onSettled: (_data, error, variables) => {

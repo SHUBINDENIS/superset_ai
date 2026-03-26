@@ -4,8 +4,22 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { authApi, type AuthUser } from "@/lib/auth";
 import { ApiError } from "@/lib/api-client";
+import {
+  extendTraceContext,
+  logFrontendEvent,
+  type FrontendTraceContext,
+} from "@/lib/observability";
 
 const AUTH_KEY = ["auth", "me"] as const;
+type AuthMutationVariables = {
+  username: string;
+  password: string;
+  traceContext?: Partial<FrontendTraceContext>;
+};
+
+type LogoutVariables = {
+  traceContext?: Partial<FrontendTraceContext>;
+};
 
 /** Current-user query.  Fires on mount and caches for 5 min. */
 export function useAuth() {
@@ -33,9 +47,24 @@ export function useLogin() {
   const router = useRouter();
 
   return useMutation({
-    mutationFn: authApi.login,
-    onSuccess: (user) => {
+    mutationFn: (variables: AuthMutationVariables) =>
+      authApi.login(
+        { username: variables.username, password: variables.password },
+        variables.traceContext,
+      ),
+    onSuccess: (user, variables) => {
       qc.setQueryData(AUTH_KEY, user);
+      logFrontendEvent(
+        "auth_login_success",
+        { role: user.role },
+        {
+          traceContext: extendTraceContext(variables.traceContext, {
+            sessionId: user.session_id,
+            chatId: user.session_id,
+            route: "/login",
+          }),
+        },
+      );
       router.push("/app");
     },
   });
@@ -47,9 +76,24 @@ export function useRegister() {
   const router = useRouter();
 
   return useMutation({
-    mutationFn: authApi.register,
-    onSuccess: (user) => {
+    mutationFn: (variables: AuthMutationVariables) =>
+      authApi.register(
+        { username: variables.username, password: variables.password },
+        variables.traceContext,
+      ),
+    onSuccess: (user, variables) => {
       qc.setQueryData(AUTH_KEY, user);
+      logFrontendEvent(
+        "auth_register_success",
+        { role: user.role },
+        {
+          traceContext: extendTraceContext(variables.traceContext, {
+            sessionId: user.session_id,
+            chatId: user.session_id,
+            route: "/register",
+          }),
+        },
+      );
       router.push("/app");
     },
   });
@@ -61,8 +105,13 @@ export function useLogout() {
   const router = useRouter();
 
   return useMutation({
-    mutationFn: authApi.logout,
-    onSuccess: () => {
+    mutationFn: (variables?: LogoutVariables) => authApi.logout(variables?.traceContext),
+    onSuccess: (_data, variables) => {
+      logFrontendEvent(
+        "auth_logout",
+        {},
+        { traceContext: extendTraceContext(variables?.traceContext, { route: "/app" }) },
+      );
       qc.setQueryData(AUTH_KEY, null);
       qc.invalidateQueries({ queryKey: AUTH_KEY });
       router.push("/login");

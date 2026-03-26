@@ -9,9 +9,9 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-from api.deps import get_current_user, get_viz_service
+from api.deps import bind_request_log_context, get_current_user, get_viz_service
 from api.schemas import (
     DatabaseListResponse,
     DatabaseResponse,
@@ -88,18 +88,20 @@ def get_dataset_metadata(
 @router.post("/preview", response_model=PreviewResponse)
 def preview_sql(
     body: PreviewRequest,
+    request: Request,
     _current_user: Dict[str, Any] = Depends(get_current_user),
     svc=Depends(get_viz_service),
 ) -> PreviewResponse:
-    try:
-        preview = svc.preview_sql(
-            database_id=body.database_id,
-            sql=body.sql,
-            schema=body.schema_name,
-            preview_limit=body.preview_limit,
-        )
-    except Exception as exc:
-        raise _service_error(exc) from exc
+    with bind_request_log_context(request, _current_user):
+        try:
+            preview = svc.preview_sql(
+                database_id=body.database_id,
+                sql=body.sql,
+                schema=body.schema_name,
+                preview_limit=body.preview_limit,
+            )
+        except Exception as exc:
+            raise _service_error(exc) from exc
 
     preview_payload = dict(preview)
     if body.dataset_id is not None:
@@ -110,19 +112,21 @@ def preview_sql(
 @router.post("/recommend", response_model=RecommendVizResponse)
 def recommend_viz(
     body: RecommendVizRequest,
+    request: Request,
     _current_user: Dict[str, Any] = Depends(get_current_user),
     svc=Depends(get_viz_service),
 ) -> RecommendVizResponse:
-    try:
-        recommendation = svc.recommend_viz_types(
-            rows=body.rows,
-            columns=[column.model_dump() for column in body.columns],
-            metric_column=body.metric_column,
-            dimension_column=body.dimension_column,
-            time_column=body.time_column,
-        )
-    except Exception as exc:
-        raise _service_error(exc) from exc
+    with bind_request_log_context(request, _current_user):
+        try:
+            recommendation = svc.recommend_viz_types(
+                rows=body.rows,
+                columns=[column.model_dump() for column in body.columns],
+                metric_column=body.metric_column,
+                dimension_column=body.dimension_column,
+                time_column=body.time_column,
+            )
+        except Exception as exc:
+            raise _service_error(exc) from exc
 
     return RecommendVizResponse(**recommendation)
 
@@ -130,22 +134,24 @@ def recommend_viz(
 @router.post("/share/widget", response_model=ShareWidgetResponse)
 def create_widget_with_share(
     body: ShareWidgetRequest,
+    request: Request,
     _current_user: Dict[str, Any] = Depends(get_current_user),
     svc=Depends(get_viz_service),
 ) -> ShareWidgetResponse:
-    try:
-        result = svc.create_dashboard_widget_with_share(
-            dataset_id=body.dataset_id,
-            dashboard_title=body.dashboard_title,
-            slice_name=body.slice_name,
-            viz_type=body.viz_type,
-            metric_column=body.metric_column,
-            dimension_column=body.dimension_column,
-            time_column=body.time_column,
-            row_limit=body.row_limit,
-            description=body.description,
-        )
-    except Exception as exc:
-        raise _service_error(exc) from exc
+    with bind_request_log_context(request, _current_user):
+        try:
+            result = svc.create_dashboard_widget_with_share(
+                dataset_id=body.dataset_id,
+                dashboard_title=body.dashboard_title,
+                slice_name=body.slice_name,
+                viz_type=body.viz_type,
+                metric_column=body.metric_column,
+                dimension_column=body.dimension_column,
+                time_column=body.time_column,
+                row_limit=body.row_limit,
+                description=body.description,
+            )
+        except Exception as exc:
+            raise _service_error(exc) from exc
 
     return ShareWidgetResponse(**result)

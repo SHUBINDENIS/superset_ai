@@ -17,6 +17,7 @@ import {
   PREVIEW_TEMPLATE_LABELS,
   type PreviewTemplate,
 } from "@/lib/viz";
+import { createTraceContext, logFrontendEvent } from "@/lib/observability";
 import {
   useDatasetMetadata,
   usePreviewMutation,
@@ -169,12 +170,26 @@ export default function PreviewPage() {
       setLocalError("Подготовьте основу для просмотра или вставьте SQL.");
       return;
     }
+    const traceContext = createTraceContext({ route: "/app/preview" });
+    logFrontendEvent(
+      "preview_run",
+      {
+        database_id: databaseId,
+        dataset_id: datasetId ?? "",
+        preview_limit: previewLimit,
+        has_schema: Boolean(schema.trim()),
+        sql_chars: sql.trim().length,
+        source_window: "preview",
+      },
+      { traceContext },
+    );
     previewMutation.mutate({
       database_id: databaseId,
       dataset_id: datasetId,
       schema,
       sql,
       preview_limit: previewLimit,
+      traceContext,
     });
   }
 

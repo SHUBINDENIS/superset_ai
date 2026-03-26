@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ResultTable } from "@/components/result-table";
 import { useSchemaScanMutation } from "@/hooks/use-scan";
+import { createTraceContext, logFrontendEvent } from "@/lib/observability";
 import {
   buildScanDatabaseRows,
   buildScanRelationRows,
@@ -64,7 +65,13 @@ export default function ScanPage() {
   function handleRunScan() {
     setFeedback("");
     setResult(null);
-    scanMutation.mutate(undefined, {
+    const traceContext = createTraceContext({ route: "/app/scan" });
+    logFrontendEvent(
+      "schema_scan_run",
+      { source_window: "scan" },
+      { traceContext },
+    );
+    scanMutation.mutate({ traceContext }, {
       onSuccess: (payload) => {
         setResult(payload);
         setFeedback("Отчёт построен.");

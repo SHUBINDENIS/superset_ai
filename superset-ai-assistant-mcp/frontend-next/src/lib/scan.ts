@@ -1,4 +1,5 @@
 import { apiFetch } from "./api-client";
+import type { FrontendTraceContext } from "./observability";
 
 export interface SchemaScanSummary {
   database_candidates_count: number;
@@ -135,5 +136,9 @@ export function buildScanRelationRows(
 }
 
 export const scanApi = {
-  run: () => apiFetch<SchemaScanResult>("/scan", { method: "POST" }),
+  run: (traceContext?: Partial<FrontendTraceContext>) =>
+    apiFetch<SchemaScanResult>("/scan", {
+      method: "POST",
+      traceContext,
+    }),
 };

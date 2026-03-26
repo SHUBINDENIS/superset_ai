@@ -125,6 +125,8 @@ NEXT_PUBLIC_API_URL=http://127.0.0.1:8100 npm run dev -- --hostname 0.0.0.0 --po
 Важно:
 - Streamlit UI остаётся рабочим и не заменяется этим запуском;
 - `chat/preview/recommend/share/scan` уже доступны и в Next.js;
+- core Next.js routes теперь тоже пишут structured frontend events в `data/logs/frontend.log` через FastAPI `/api/frontend/logs`;
+- для correlation Next.js прокидывает `x-trace-id` / `x-request-id` в chat/viz/scan API-вызовы, поэтому `frontend.log` можно сопоставлять с `agent.log`, `mcp.log` и `artifact.log`;
 - Streamlit US1 тоже остаётся рабочим и не отключается этим запуском.
 - helper/admin окна `US2-US5` пока остаются Streamlit-only; их cutover-статус зафиксирован в `docs/dual-run-parity-readiness.md`.
 

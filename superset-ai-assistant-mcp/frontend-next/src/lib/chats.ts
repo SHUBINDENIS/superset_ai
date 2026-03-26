@@ -5,6 +5,7 @@
  */
 
 import { apiFetch } from "./api-client";
+import type { FrontendTraceContext } from "./observability";
 
 /* ------------------------------------------------------------------ */
 /* Types                                                              */
@@ -52,23 +53,36 @@ export const chatsApi = {
   list: () => apiFetch<ChatSessionList>("/chats"),
 
   /** Create a new chat session. */
-  create: (title?: string | null) =>
+  create: (
+    title?: string | null,
+    traceContext?: Partial<FrontendTraceContext>,
+  ) =>
     apiFetch<ChatSession>("/chats", {
       method: "POST",
+      traceContext,
       body: JSON.stringify({ title }),
     }),
 
   /** Rename a chat session. */
-  rename: (sessionId: string, title: string) =>
+  rename: (
+    sessionId: string,
+    title: string,
+    traceContext?: Partial<FrontendTraceContext>,
+  ) =>
     apiFetch<ChatSession>(`/chats/${sessionId}`, {
       method: "PATCH",
+      traceContext,
       body: JSON.stringify({ title }),
     }),
 
   /** Mark a chat session as active for future auth restore. */
-  activate: (sessionId: string) =>
+  activate: (
+    sessionId: string,
+    traceContext?: Partial<FrontendTraceContext>,
+  ) =>
     apiFetch<ChatSession>(`/chats/${sessionId}/activate`, {
       method: "POST",
+      traceContext,
     }),
 
   /** List messages for a chat session. */
@@ -76,15 +90,24 @@ export const chatsApi = {
     apiFetch<MessageList>(`/chats/${sessionId}/messages`),
 
   /** Clear all messages in a chat session. */
-  clearMessages: (sessionId: string) =>
+  clearMessages: (
+    sessionId: string,
+    traceContext?: Partial<FrontendTraceContext>,
+  ) =>
     apiFetch<{ deleted_count: number }>(`/chats/${sessionId}/messages`, {
       method: "DELETE",
+      traceContext,
     }),
 
   /** Send a user message and receive the assistant reply. */
-  sendMessage: (sessionId: string, content: string) =>
+  sendMessage: (
+    sessionId: string,
+    content: string,
+    traceContext?: Partial<FrontendTraceContext>,
+  ) =>
     apiFetch<SendMessageResponse>(`/chats/${sessionId}/messages`, {
       method: "POST",
+      traceContext,
       body: JSON.stringify({ content }),
     }),
 };

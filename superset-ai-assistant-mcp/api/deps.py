@@ -12,10 +12,11 @@ from __future__ import annotations
 
 import importlib.util
 import os
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Dict
 
-from fastapi import Cookie, HTTPException, status
+from fastapi import Cookie, HTTPException, Request, status
 
 # Cookie name — matches the one Streamlit already uses so that both
 # transport paths share the same browser cookie when served on the
@@ -28,6 +29,7 @@ AUTH_COOKIE_NAME = "ai_assistant_auth_token"
 # ---------------------------------------------------------------------------
 
 _AuthService: type | None = None
+_observability_module: Any = None
 
 
 def _get_auth_service_class():
@@ -43,6 +45,20 @@ def _get_auth_service_class():
     spec.loader.exec_module(mod)
     _AuthService = mod.AuthService
     return _AuthService
+
+
+def _get_observability_module():
+    """Load backend/observability.py without importing backend/__init__.py."""
+    global _observability_module
+    if _observability_module is not None:
+        return _observability_module
+
+    module_path = Path(__file__).resolve().parent.parent / "backend" / "observability.py"
+    spec = importlib.util.spec_from_file_location("_observability_standalone", str(module_path))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    _observability_module = mod
+    return _observability_module
 
 
 # ---------------------------------------------------------------------------
@@ -86,6 +102,51 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=str(exc),
         ) from exc
+
+
+def get_optional_current_user(
+    ai_assistant_auth_token: str | None = Cookie(default=None),
+) -> Dict[str, Any] | None:
+    """Return the validated user dict when the auth cookie is present."""
+    token = (ai_assistant_auth_token or "").strip()
+    if not token:
+        return None
+    try:
+        return get_auth_service().validate_token(token)
+    except ValueError:
+        return None
+
+
+def bind_request_log_context(
+    request: Request,
+    current_user: Dict[str, Any] | None = None,
+    **fields: Any,
+):
+    """Bind trace/request/session fields from request headers for backend logs."""
+    mod = _get_observability_module()
+    headers = request.headers
+    payload = {
+        "trace_id": str(fields.pop("trace_id", "") or headers.get("x-trace-id", "")).strip(),
+        "request_id": str(fields.pop("request_id", "") or headers.get("x-request-id", "")).strip(),
+        "session_id": str(fields.pop("session_id", "") or headers.get("x-session-id", "")).strip(),
+        "chat_id": str(fields.pop("chat_id", "") or headers.get("x-chat-id", "")).strip(),
+        "route": request.url.path,
+        "http_method": request.method,
+        "frontend_source": str(headers.get("x-frontend-source", "")).strip(),
+        **fields,
+    }
+    username = str((current_user or {}).get("username", "")).strip()
+    if username:
+        payload["username"] = username
+    if not any(payload.values()):
+        return nullcontext({})
+    return mod.bind_log_context(**payload)
+
+
+def emit_frontend_log_event(event: str, *, level: str = "INFO", **fields: Any) -> Dict[str, Any]:
+    """Write a structured frontend event into frontend.log."""
+    mod = _get_observability_module()
+    return mod.emit_event("frontend", event, level=level, **fields)
 
 
 # ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { AuthForm } from "@/components/auth-form";
 import { useAuth, useLogin } from "@/hooks/use-auth";
+import { createTraceContext, logFrontendEvent } from "@/lib/observability";
 
 export default function LoginPage() {
   const { isAuthenticated, isLoading } = useAuth();
@@ -13,6 +14,14 @@ export default function LoginPage() {
   useEffect(() => {
     if (isAuthenticated) router.replace("/app");
   }, [isAuthenticated, router]);
+
+  useEffect(() => {
+    logFrontendEvent(
+      "window_navigation",
+      { from_window: "", to_window: "login", from_route: "", to_route: "/login" },
+      { traceContext: createTraceContext({ route: "/login" }) },
+    );
+  }, []);
 
   if (isLoading || isAuthenticated) return null;
 

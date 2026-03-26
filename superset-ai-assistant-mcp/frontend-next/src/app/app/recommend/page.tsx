@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ResultTable } from "@/components/result-table";
 import { useRecommendMutation, useVizFlow } from "@/hooks/use-viz";
+import { createTraceContext, logFrontendEvent } from "@/lib/observability";
 
 function SelectField(props: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
@@ -94,12 +95,26 @@ export default function RecommendPage() {
       setLocalError("Сначала выполните предпросмотр с непустым результатом.");
       return;
     }
+    const traceContext = createTraceContext({ route: "/app/recommend" });
+    logFrontendEvent(
+      "viz_recommend_request",
+      {
+        row_count: preview.rows.length,
+        column_count: preview.columns.length,
+        metric_selected: Boolean(metricColumn),
+        dimension_selected: Boolean(dimensionColumn),
+        time_selected: Boolean(timeColumn),
+        source_window: "recommend",
+      },
+      { traceContext },
+    );
     recommendMutation.mutate({
       rows: preview.rows,
       columns: preview.columns,
       metric_column: metricColumn,
       dimension_column: dimensionColumn,
       time_column: timeColumn,
+      traceContext,
     });
   }
 

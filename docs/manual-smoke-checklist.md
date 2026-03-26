@@ -337,6 +337,8 @@ Go только если все `Critical` сценарии прошли.
     - `agent.log`
     - `mcp.log`
     - `artifact.log`
+  - в Next.js сценариях `frontend.log` содержит `source=nextjs`
+  - Next.js chat/viz/scan действия прокидывают `trace_id` и `request_id` в backend logs
   - у одного сценария совпадают `trace_id` и `request_id`
 - Status:
   - [ ] Pass

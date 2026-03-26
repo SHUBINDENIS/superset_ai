@@ -14,10 +14,15 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ApiError } from "@/lib/api-client";
+import { createTraceContext, type FrontendTraceContext } from "@/lib/observability";
 
 interface AuthFormProps {
   mode: "login" | "register";
-  onSubmit: (data: { username: string; password: string }) => void;
+  onSubmit: (data: {
+    username: string;
+    password: string;
+    traceContext?: Partial<FrontendTraceContext>;
+  }) => void;
   isPending: boolean;
   error: Error | null;
 }
@@ -40,7 +45,13 @@ export function AuthForm({ mode, onSubmit, isPending, error }: AuthFormProps) {
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
-    onSubmit({ username, password });
+    onSubmit({
+      username,
+      password,
+      traceContext: createTraceContext({
+        route: isLogin ? "/login" : "/register",
+      }),
+    });
   }
 
   const errorMessage =

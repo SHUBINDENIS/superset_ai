@@ -15,9 +15,14 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from api.deps import get_agent_session_manager, get_auth_service, get_current_user
+from api.deps import (
+    bind_request_log_context,
+    get_agent_session_manager,
+    get_auth_service,
+    get_current_user,
+)
 from api.schemas import (
     ChatMessageResponse,
     ChatSessionListResponse,
@@ -166,6 +171,7 @@ def clear_messages(
 async def send_message(
     session_id: str,
     body: SendMessageRequest,
+    request: Request,
     current_user: Dict[str, Any] = Depends(get_current_user),
     auth_service=Depends(get_auth_service),
     agent_manager=Depends(get_agent_session_manager),
@@ -201,31 +207,37 @@ async def send_message(
     )
     messages = [{"role": m["role"], "content": m["content"]} for m in history]
 
-    # 4. Get or create agent for this session
-    agent = await agent_manager.get_or_create_agent(session_id, owner=username)
-
-    # 5. Run agent
-    try:
-        reply = await agent.chat(messages)
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail=f"Agent processing failed: {exc}",
-        ) from exc
-
-    # 6. Persist assistant reply
-    auth_service.save_chat_message(
-        username=username,
+    with bind_request_log_context(
+        request,
+        current_user,
         session_id=session_id,
-        role="assistant",
-        content=reply.get("content", ""),
-    )
+        chat_id=session_id,
+    ):
+        # 4. Get or create agent for this session
+        agent = await agent_manager.get_or_create_agent(session_id, owner=username)
 
-    # 7. Return
-    return SendMessageResponse(
-        content=reply.get("content", ""),
-        role=reply.get("role", "assistant"),
-        finish_reason=reply.get("finish_reason", "stop"),
-        model=reply.get("model", ""),
-        session_id=session_id,
-    )
+        # 5. Run agent
+        try:
+            reply = await agent.chat(messages)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Agent processing failed: {exc}",
+            ) from exc
+
+        # 6. Persist assistant reply
+        auth_service.save_chat_message(
+            username=username,
+            session_id=session_id,
+            role="assistant",
+            content=reply.get("content", ""),
+        )
+
+        # 7. Return
+        return SendMessageResponse(
+            content=reply.get("content", ""),
+            role=reply.get("role", "assistant"),
+            finish_reason=reply.get("finish_reason", "stop"),
+            model=reply.get("model", ""),
+            session_id=session_id,
+        )

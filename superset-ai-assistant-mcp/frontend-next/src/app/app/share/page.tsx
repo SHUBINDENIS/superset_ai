@@ -16,6 +16,7 @@ import {
   COMMON_VIZ_TYPES,
   type ShareWidgetResult,
 } from "@/lib/viz";
+import { createTraceContext, logFrontendEvent } from "@/lib/observability";
 import {
   useDatasetMetadata,
   useShareWidgetMutation,
@@ -107,6 +108,20 @@ export default function SharePage() {
       setLocalError("Выберите датасет Superset для создания графика.");
       return;
     }
+    const traceContext = createTraceContext({ route: "/app/share" });
+    logFrontendEvent(
+      "widget_create",
+      {
+        dataset_id: datasetId,
+        viz_type: vizType,
+        row_limit: rowLimit,
+        dashboard_title_chars: dashboardTitle.trim().length,
+        slice_name_chars: sliceName.trim().length,
+        description_chars: description.trim().length,
+        source_window: "share",
+      },
+      { traceContext },
+    );
     shareMutation.mutate(
       {
         dataset_id: datasetId,
@@ -118,6 +133,7 @@ export default function SharePage() {
         time_column: timeColumn,
         row_limit: rowLimit,
         description,
+        traceContext,
       },
       {
         onSuccess: (payload) => {

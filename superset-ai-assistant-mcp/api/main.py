@@ -28,7 +28,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 load_dotenv()
 
-from api.routers import auth, chats, health, scan, viz  # noqa: E402
+from api.routers import auth, chats, frontend_logs, health, scan, viz  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -64,6 +64,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(chats.router)
+app.include_router(frontend_logs.router)
 app.include_router(viz.router)
 app.include_router(scan.router)
 app.include_router(health.router)

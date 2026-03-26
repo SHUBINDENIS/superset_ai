@@ -7,6 +7,7 @@ import { ChatEmpty } from "@/components/chat-empty";
 import { ChatInput } from "@/components/chat-input";
 import { ChatMessage, ChatThinking } from "@/components/chat-message";
 import { useAuth } from "@/hooks/use-auth";
+import { createTraceContext, extendTraceContext, logFrontendEvent } from "@/lib/observability";
 import {
   useChatUI,
   useChats,
@@ -54,21 +55,47 @@ export default function ChatPage() {
   }, [messages.length, sendMessage.isPending]);
 
   function handleSend(content: string) {
+    const baseTrace = createTraceContext({
+      sessionId: activeSessionId || user?.session_id || undefined,
+      chatId: activeSessionId || undefined,
+      route: "/app/chat",
+    });
+    logFrontendEvent(
+      "chat_submit",
+      {
+        message_chars: content.length,
+        source_window: "chat",
+      },
+      { traceContext: baseTrace },
+    );
+
     if (!activeSessionId) {
-      createChat.mutate("Новый чат", {
+      createChat.mutate(
+        {
+          title: "Новый чат",
+          source: "chat_submit",
+          traceContext: baseTrace,
+        },
+        {
         onSuccess: (created) => {
           sendMessage.mutate({
             sessionId: created.session_id,
             content,
+            traceContext: extendTraceContext(baseTrace, {
+              sessionId: created.session_id,
+              chatId: created.session_id,
+            }),
           });
         },
-      });
+        },
+      );
       return;
     }
 
     sendMessage.mutate({
       sessionId: activeSessionId,
       content,
+      traceContext: baseTrace,
     });
   }
 
@@ -97,7 +124,17 @@ export default function ChatPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => createChat.mutate("Новый чат")}
+              onClick={() =>
+                createChat.mutate({
+                  title: "Новый чат",
+                  source: "chat_page_empty_state",
+                  traceContext: createTraceContext({
+                    sessionId: activeSessionId || user?.session_id || undefined,
+                    chatId: activeSessionId || undefined,
+                    route: "/app/chat",
+                  }),
+                })
+              }
               disabled={createChat.isPending}
             >
               <Plus className="mr-2 h-4 w-4" />

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import type { ChatSession } from "@/lib/chats";
+import { createTraceContext } from "@/lib/observability";
 import {
   useActivateChat,
   useChatUI,
@@ -36,7 +37,15 @@ export function ChatSidebar({ sessions }: ChatSidebarProps) {
   function confirmRename() {
     if (renamingId && renameValue.trim()) {
       renameChat.mutate(
-        { sessionId: renamingId, title: renameValue.trim() },
+        {
+          sessionId: renamingId,
+          title: renameValue.trim(),
+          traceContext: createTraceContext({
+            sessionId: renamingId,
+            chatId: renamingId,
+            route: "/app/chat",
+          }),
+        },
         { onSettled: () => setRenamingId(null) },
       );
     }
@@ -68,7 +77,17 @@ export function ChatSidebar({ sessions }: ChatSidebarProps) {
         variant="default"
         size="sm"
         className="w-full justify-start gap-2"
-        onClick={() => createChat.mutate(null)}
+        onClick={() =>
+          createChat.mutate({
+            title: null,
+            source: "sidebar",
+            traceContext: createTraceContext({
+              sessionId: activeSessionId || undefined,
+              chatId: activeSessionId || undefined,
+              route: "/app/chat",
+            }),
+          })
+        }
         disabled={createChat.isPending}
       >
         <Plus className="h-3.5 w-3.5" />
@@ -86,7 +105,7 @@ export function ChatSidebar({ sessions }: ChatSidebarProps) {
           const isActive = s.session_id === activeSessionId;
           const isRenaming = renamingId === s.session_id;
           const isActivating =
-            activateChat.isPending && activateChat.variables === s.session_id;
+            activateChat.isPending && activateChat.variables?.sessionId === s.session_id;
 
           return (
             <div
@@ -100,7 +119,14 @@ export function ChatSidebar({ sessions }: ChatSidebarProps) {
               )}
               onClick={() => {
                 if (!isRenaming && !isActive && !isActivating) {
-                  activateChat.mutate(s.session_id);
+                  activateChat.mutate({
+                    sessionId: s.session_id,
+                    traceContext: createTraceContext({
+                      sessionId: s.session_id,
+                      chatId: s.session_id,
+                      route: "/app/chat",
+                    }),
+                  });
                 }
               }}
             >
@@ -174,7 +200,16 @@ export function ChatSidebar({ sessions }: ChatSidebarProps) {
           variant="ghost"
           size="sm"
           className="mt-1 justify-start gap-2 text-xs text-muted-foreground"
-          onClick={() => clearMessages.mutate(activeSessionId)}
+          onClick={() =>
+            clearMessages.mutate({
+              sessionId: activeSessionId,
+              traceContext: createTraceContext({
+                sessionId: activeSessionId,
+                chatId: activeSessionId,
+                route: "/app/chat",
+              }),
+            })
+          }
           disabled={clearMessages.isPending}
         >
           <Trash2 className="h-3.5 w-3.5" />

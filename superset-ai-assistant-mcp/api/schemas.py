@@ -44,6 +44,17 @@ class MessageResponse(BaseModel):
     message: str
 
 
+class FrontendLogRequest(BaseModel):
+    event: str = Field(..., min_length=1, max_length=120)
+    level: str = Field(default="INFO", max_length=16)
+    trace_id: str = Field(default="", max_length=64)
+    request_id: str = Field(default="", max_length=64)
+    session_id: str = Field(default="", max_length=128)
+    chat_id: str = Field(default="", max_length=128)
+    route: str = Field(default="", max_length=255)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
 class _AliasModel(BaseModel):
     """Base model that permits internal field names with public aliases."""
 

@@ -5,6 +5,7 @@
  */
 
 import { apiFetch } from "./api-client";
+import type { FrontendTraceContext } from "./observability";
 
 export interface AuthUser {
   username: string;
@@ -26,18 +27,23 @@ export const authApi = {
   /** Validate the current cookie and return the authenticated user. */
   me: () => apiFetch<AuthUser>("/auth/me"),
 
-  login: (data: LoginRequest) =>
+  login: (data: LoginRequest, traceContext?: Partial<FrontendTraceContext>) =>
     apiFetch<AuthUser>("/auth/login", {
       method: "POST",
+      traceContext,
       body: JSON.stringify(data),
     }),
 
-  register: (data: RegisterRequest) =>
+  register: (data: RegisterRequest, traceContext?: Partial<FrontendTraceContext>) =>
     apiFetch<AuthUser>("/auth/register", {
       method: "POST",
+      traceContext,
       body: JSON.stringify(data),
     }),
 
-  logout: () =>
-    apiFetch<{ message: string }>("/auth/logout", { method: "POST" }),
+  logout: (traceContext?: Partial<FrontendTraceContext>) =>
+    apiFetch<{ message: string }>("/auth/logout", {
+      method: "POST",
+      traceContext,
+    }),
 };

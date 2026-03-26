@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { useAuth, useLogout } from "@/hooks/use-auth";
 import { useChats } from "@/hooks/use-chats";
 import { ChatSidebar } from "@/components/chat-sidebar";
+import { createTraceContext } from "@/lib/observability";
 import { cn } from "@/lib/utils";
 
 const navItems = [
@@ -85,7 +86,15 @@ export function AppSidebar() {
           variant="ghost"
           size="sm"
           className="w-full justify-start gap-2"
-          onClick={() => logout.mutate()}
+          onClick={() =>
+            logout.mutate({
+              traceContext: createTraceContext({
+                sessionId: user?.session_id,
+                chatId: user?.session_id,
+                route: pathname,
+              }),
+            })
+          }
           disabled={logout.isPending}
         >
           <LogOut className="h-4 w-4" />
