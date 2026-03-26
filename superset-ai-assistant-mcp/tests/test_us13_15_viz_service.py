@@ -131,6 +131,104 @@ class TestUS13To15VizService(unittest.TestCase):
         self.assertEqual(databases[0]["name"], "examples")
         self.assertEqual(calls[0][0], "list_databases")
 
+    def test_list_databases_caches_results_until_ttl_expires(self):
+        calls = []
+        current_time = [100.0]
+        self.service._cache_now = lambda: current_time[0]
+        self.service.metadata_cache_ttl_seconds = 60.0
+
+        def fake_call_product_client(method_name, request):
+            calls.append((method_name, request))
+            if method_name == "list_databases":
+                return {
+                    "databases": [
+                        {"id": 2, "name": "pagila_demo", "backend": "postgresql"},
+                    ]
+                }
+            raise AssertionError(f"unexpected method {method_name}")
+
+        self.service._call_product_client = fake_call_product_client
+
+        first = self.service.list_databases()
+        second = self.service.list_databases()
+        second[0]["name"] = "mutated"
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(first[0]["name"], "pagila_demo")
+        self.assertEqual(self.service.list_databases()[0]["name"], "pagila_demo")
+
+        current_time[0] += 61.0
+        refreshed = self.service.list_databases()
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(refreshed[0]["name"], "pagila_demo")
+
+    def test_list_datasets_cache_is_keyed_by_limit(self):
+        calls = []
+
+        def fake_call_product_client(method_name, request):
+            calls.append((method_name, request))
+            if method_name == "list_datasets":
+                page_size = int(request["page_size"])
+                return {
+                    "datasets": [
+                        {
+                            "id": page_size,
+                            "table_name": f"dataset_{page_size}",
+                            "schema": "public",
+                            "database_id": 7,
+                            "database_name": "Pagila Demo (PostgreSQL)",
+                        }
+                    ]
+                }
+            raise AssertionError(f"unexpected method {method_name}")
+
+        self.service._call_product_client = fake_call_product_client
+
+        first = self.service.list_datasets(limit=10)
+        second = self.service.list_datasets(limit=10)
+        third = self.service.list_datasets(limit=25)
+
+        self.assertEqual(first[0]["id"], 10)
+        self.assertEqual(second[0]["id"], 10)
+        self.assertEqual(third[0]["id"], 25)
+        self.assertEqual([request["page_size"] for _, request in calls], [10, 25])
+
+    def test_get_dataset_metadata_caches_results(self):
+        calls = []
+
+        def fake_call_product_client(method_name, request):
+            calls.append((method_name, request))
+            if method_name == "get_dataset_info":
+                return {
+                    "result": {
+                        "id": 42,
+                        "table_name": "sales_by_store",
+                        "schema": "public",
+                        "database_id": 7,
+                        "database_name": "Pagila Demo (PostgreSQL)",
+                        "columns": [
+                            {
+                                "column_name": "store",
+                                "type": "TEXT",
+                            }
+                        ],
+                    }
+                }
+            raise AssertionError(f"unexpected method {method_name}")
+
+        self.service._call_product_client = fake_call_product_client
+
+        first = self.service.get_dataset_metadata(42)
+        second = self.service.get_dataset_metadata(42)
+        second["columns"][0]["column_name"] = "mutated"
+
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(first["table_name"], "sales_by_store")
+        self.assertEqual(
+            self.service.get_dataset_metadata(42)["columns"][0]["column_name"],
+            "store",
+        )
+
     def test_preview_sql_uses_execute_sql_through_mcp(self):
         calls = []
 
@@ -153,6 +251,25 @@ class TestUS13To15VizService(unittest.TestCase):
         self.assertEqual(preview["rows_count"], 2)
         self.assertEqual(calls[0][0], "execute_sql")
         self.assertIn("LIMIT 20", calls[0][1]["sql"])
+
+    def test_preview_sql_is_not_cached(self):
+        calls = []
+
+        def fake_call_product_client(method_name, request):
+            calls.append((method_name, request))
+            if method_name == "execute_sql":
+                return {
+                    "success": True,
+                    "rows": [{"store": "Store 1", "sales": 10}],
+                }
+            raise AssertionError(f"unexpected method {method_name}")
+
+        self.service._call_product_client = fake_call_product_client
+
+        self.service.preview_sql(database_id=7, sql="SELECT store, sales FROM sales_by_store")
+        self.service.preview_sql(database_id=7, sql="SELECT store, sales FROM sales_by_store")
+
+        self.assertEqual(len(calls), 2)
 
     def test_create_dashboard_widget_with_share_uses_built_in_mcp_flow(self):
         calls = []

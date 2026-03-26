@@ -194,8 +194,12 @@ curl -I http://127.0.0.1:8051
 Важные детали:
 - unified stack использует `SUPERSET_PRODUCT_MCP_RUNTIME=built_in_http`
 - `mcp-http` запускает built-in MCP из локального дерева `superset/`, примонтированного в dev-контур
-- по умолчанию рекомендуется `SUPERSET_LOAD_EXAMPLES=no`, чтобы первый `up -d` был быстрее и детерминированнее
+- в `.env.dev.example` по умолчанию `SUPERSET_LOAD_EXAMPLES=no`, чтобы первый `up -d` был быстрее и детерминированнее
+- unified stack теперь поднимает отдельный `pagila-db` и автоматически регистрирует `Pagila Demo (PostgreSQL)` как реальный demo-source в Superset
 - если `8088` или `8051` уже заняты, задайте `DEV_SUPERSET_PORT` и `DEV_ASSISTANT_PORT` в `.env.dev`
+
+Подробный demo runbook и набор рекомендованных вопросов:
+- `docs/demo-pagila.md`
 
 ## Линтеры и CI
 В репозитории настроен рабочий pipeline/workflow для автоматического запуска линтеров:

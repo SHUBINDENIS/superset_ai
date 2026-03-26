@@ -10,6 +10,12 @@ x-superset-env: &superset-env
   environment:
     SUPERSET_LOAD_EXAMPLES: ${SUPERSET_LOAD_EXAMPLES:-yes}
     SUPERSET_PUBLIC_URL: ${SUPERSET_PUBLIC_URL:-http://103.54.18.91:8088}
+    DEMO_PAGILA_ENABLED: ${DEMO_PAGILA_ENABLED:-yes}
+    DEMO_PAGILA_HOST: pagila-db
+    DEMO_PAGILA_PORT: "5432"
+    DEMO_PAGILA_DB: ${DEMO_PAGILA_DB:-pagila}
+    DEMO_PAGILA_USER: ${DEMO_PAGILA_USER:-pagila}
+    DEMO_PAGILA_PASSWORD: ${DEMO_PAGILA_PASSWORD:-pagila}
 x-superset-volumes: &superset-volumes
   - ./superset/docker:/app/docker
   - ./superset/pyproject.toml:/app/pyproject.toml:ro
@@ -36,6 +42,25 @@ services:
       - db_dev_home:/var/lib/postgresql/data
       - ./superset/docker/docker-entrypoint-initdb.d:/docker-entrypoint-initdb.d
 
+  pagila-db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DEMO_PAGILA_DB:-pagila}
+      POSTGRES_USER: ${DEMO_PAGILA_USER:-pagila}
+      POSTGRES_PASSWORD: ${DEMO_PAGILA_PASSWORD:-pagila}
+    ports:
+      - "${DEV_PAGILA_PORT:-5433}:5432"
+    volumes:
+      - pagila_dev_home:/var/lib/postgresql/data
+      - ./docker/dev/pagila/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
   superset-init:
     <<: *superset-env
     image: *superset-image
@@ -43,6 +68,8 @@ services:
     depends_on:
       db:
         condition: service_started
+      pagila-db:
+        condition: service_healthy
       redis:
         condition: service_started
     user: "root"
@@ -162,5 +189,6 @@ services:
 volumes:
   superset_dev_home:
   db_dev_home:
+  pagila_dev_home:
   redis_dev:
   assistant_dev_data:

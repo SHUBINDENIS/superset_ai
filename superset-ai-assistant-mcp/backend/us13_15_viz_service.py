@@ -8,9 +8,11 @@ US13-US15 service:
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -125,6 +127,8 @@ class US13To15VizService:
     timeout_seconds: float = 30.0
     default_preview_limit: int = 20
     share_base_url: str = ""
+    metadata_cache_ttl_seconds: float = 45.0
+    metadata_cache_max_entries: int = 128
     _loop: asyncio.AbstractEventLoop | None = field(
         default=None,
         init=False,
@@ -132,6 +136,11 @@ class US13To15VizService:
     )
     _mcp_runtime: ProductMCPRuntime | None = field(
         default=None,
+        init=False,
+        repr=False,
+    )
+    _metadata_cache: Dict[Tuple[Any, ...], Tuple[float, Any]] = field(
+        default_factory=dict,
         init=False,
         repr=False,
     )
@@ -150,6 +159,8 @@ class US13To15VizService:
         if self._is_localhost_netloc(share_netloc) and not self._is_localhost_netloc(base_netloc):
             # Для внешних ссылок предпочитаем публичный host Superset.
             self.share_base_url = self.base_url
+        self.metadata_cache_ttl_seconds = max(0.0, float(self.metadata_cache_ttl_seconds))
+        self.metadata_cache_max_entries = max(0, int(self.metadata_cache_max_entries))
 
     @classmethod
     def from_env(cls) -> "US13To15VizService":
@@ -158,11 +169,17 @@ class US13To15VizService:
         preview_limit = int(os.getenv("US13_PREVIEW_LIMIT", "20"))
         public_base = os.getenv("SUPERSET_PUBLIC_URL", "").strip()
         share_base = os.getenv("US15_SHARE_BASE_URL", "").strip()
+        metadata_cache_ttl = float(os.getenv("US13_15_METADATA_CACHE_TTL_SECONDS", "45"))
+        metadata_cache_max_entries = int(
+            os.getenv("US13_15_METADATA_CACHE_MAX_ENTRIES", "128")
+        )
         return cls(
             base_url=base_url,
             timeout_seconds=timeout,
             default_preview_limit=preview_limit,
             share_base_url=public_base or share_base,
+            metadata_cache_ttl_seconds=metadata_cache_ttl,
+            metadata_cache_max_entries=metadata_cache_max_entries,
         )
 
     def close(self) -> None:
@@ -172,6 +189,7 @@ class US13To15VizService:
             self._loop.close()
         self._mcp_runtime = None
         self._loop = None
+        self._metadata_cache.clear()
 
     def _get_loop(self) -> asyncio.AbstractEventLoop:
         if self._loop is None or self._loop.is_closed():
@@ -193,6 +211,47 @@ class US13To15VizService:
         runtime = self._ensure_mcp_runtime()
         method = getattr(runtime.product_client, method_name)
         return self._run_async(method(*args))
+
+    def _cache_now(self) -> float:
+        return time.monotonic()
+
+    def _prune_metadata_cache(self) -> None:
+        if not self._metadata_cache:
+            return
+        now = self._cache_now()
+        expired_keys = [
+            key
+            for key, (stored_at, _) in self._metadata_cache.items()
+            if (now - stored_at) >= self.metadata_cache_ttl_seconds
+        ]
+        for key in expired_keys:
+            self._metadata_cache.pop(key, None)
+
+    def _get_cached_metadata(self, key: Tuple[Any, ...]) -> Any:
+        if self.metadata_cache_ttl_seconds <= 0 or self.metadata_cache_max_entries <= 0:
+            return None
+        self._prune_metadata_cache()
+        entry = self._metadata_cache.get(key)
+        if entry is None:
+            return None
+        _, payload = entry
+        return copy.deepcopy(payload)
+
+    def _store_cached_metadata(self, key: Tuple[Any, ...], value: Any) -> Any:
+        if self.metadata_cache_ttl_seconds <= 0 or self.metadata_cache_max_entries <= 0:
+            return value
+        self._prune_metadata_cache()
+        if (
+            key not in self._metadata_cache
+            and len(self._metadata_cache) >= self.metadata_cache_max_entries
+        ):
+            oldest_key = min(
+                self._metadata_cache.items(),
+                key=lambda item: item[1][0],
+            )[0]
+            self._metadata_cache.pop(oldest_key, None)
+        self._metadata_cache[key] = (self._cache_now(), copy.deepcopy(value))
+        return copy.deepcopy(value)
 
     @staticmethod
     def _raise_if_tool_error(payload: Dict[str, Any], *, default_message: str) -> None:
@@ -348,6 +407,10 @@ class US13To15VizService:
         }
 
     def list_databases(self) -> List[Dict[str, Any]]:
+        cache_key = ("list_databases",)
+        cached = self._get_cached_metadata(cache_key)
+        if cached is not None:
+            return cached
         payload = self._call_product_client(
             "list_databases",
             {"page": 1, "page_size": 1000},
@@ -355,10 +418,15 @@ class US13To15VizService:
         items = payload.get("databases", [])
         if not isinstance(items, list):
             return []
-        return self._normalize_database_items([x for x in items if isinstance(x, dict)])
+        normalized = self._normalize_database_items([x for x in items if isinstance(x, dict)])
+        return self._store_cached_metadata(cache_key, normalized)
 
     def list_datasets(self, limit: int = 200) -> List[Dict[str, Any]]:
         page_size = max(1, min(int(limit), 1000))
+        cache_key = ("list_datasets", page_size)
+        cached = self._get_cached_metadata(cache_key)
+        if cached is not None:
+            return cached
         payload = self._call_product_client(
             "list_datasets",
             {"page": 1, "page_size": page_size},
@@ -366,11 +434,18 @@ class US13To15VizService:
         items = payload.get("datasets", [])
         if not isinstance(items, list):
             return []
-        return self._normalize_dataset_items([x for x in items if isinstance(x, dict)])
+        normalized = self._normalize_dataset_items([x for x in items if isinstance(x, dict)])
+        return self._store_cached_metadata(cache_key, normalized)
 
     def get_dataset_metadata(self, dataset_id: int) -> Dict[str, Any]:
+        safe_dataset_id = int(dataset_id)
+        cache_key = ("dataset_metadata", safe_dataset_id)
+        cached = self._get_cached_metadata(cache_key)
+        if cached is not None:
+            return cached
         payload = self._call_product_client("get_dataset_info", int(dataset_id))
-        return self._normalize_dataset_metadata_payload(payload, int(dataset_id))
+        normalized = self._normalize_dataset_metadata_payload(payload, safe_dataset_id)
+        return self._store_cached_metadata(cache_key, normalized)
 
     def preview_sql(
         self,

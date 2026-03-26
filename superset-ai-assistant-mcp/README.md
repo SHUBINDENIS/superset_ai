@@ -71,12 +71,17 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml up -d
 
 Этот сценарий:
 - оставляет текущую split-модель основной
-- поднимает `superset`, `mcp-http`, `assistant`, `db`, `redis`, `superset-init`
+- поднимает `superset`, `mcp-http`, `assistant`, `db`, `pagila-db`, `redis`, `superset-init`
 - подключает ассистент к built-in MCP по HTTP
+- автоматически регистрирует `Pagila Demo (PostgreSQL)` и ключевые datasets для demo-сценариев
 
 Если порты заняты локально, переопределите в `.env.dev`:
 - `DEV_SUPERSET_PORT`
 - `DEV_ASSISTANT_PORT`
+- `DEV_PAGILA_PORT`
+
+Рекомендуемый demo runbook и набор бизнес-вопросов:
+- `docs/demo-pagila.md`
 
 ## Как пользоваться
 - В `sidebar` есть кнопки навигации по окнам: `Чат`, `US1`, `US2`, `US3`, `US4`, `US5`, `US13`, `US14`, `US15`.
