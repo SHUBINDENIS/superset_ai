@@ -33,13 +33,20 @@
 ```bash
 cd /home/superset_ai
 cp .env.dev.example .env.dev
-docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
+./docker/dev/deploy-primary-stack.sh
 ```
 
 Endpoints:
 - UI: `http://localhost:3001/login`
 - API: `http://localhost:8100/api/health`
 - Superset: `http://localhost:8088`
+
+Low-level compose path for debugging only:
+
+```bash
+cd /home/superset_ai
+docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
+```
 
 ### Split run
 
@@ -90,12 +97,15 @@ Runbooks:
 
 ```bash
 cd /home/superset_ai
+./docker/dev/deploy-primary-stack.sh
 ./docker/dev/check-primary-stack.sh
 ```
 
 Operator helpers:
+- `../docker/dev/deploy-primary-stack.sh`
 - `../docker/dev/refresh-primary-stack.sh`
 - `../docker/dev/check-primary-stack.sh`
+- `../docker/dev/validate-primary-env.sh`
 - `../docker/dev/tail-primary-logs.sh`
 
 Recommended test set:

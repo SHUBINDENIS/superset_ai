@@ -215,10 +215,30 @@ class TestAuthAPI(unittest.TestCase):
         data = resp.json()
         self.assertEqual(data["status"], "ok")
         self.assertTrue(data["auth_db_ok"])
+        self.assertIn("release_version", data)
+        self.assertIn("build_sha", data)
+        self.assertEqual(data["runtime"], "nextjs-fastapi")
 
     def test_health_head_ok(self):
         resp = self.client.head("/api/health")
         self.assertEqual(resp.status_code, 200)
+
+    def test_health_uses_release_env_metadata(self):
+        with patch.dict(
+            os.environ,
+            {
+                "ASSISTANT_RELEASE_VERSION": "rc-1",
+                "ASSISTANT_BUILD_SHA": "abc123def456",
+                "ASSISTANT_BUILD_TIMESTAMP": "2026-03-27T00:00:00Z",
+            },
+            clear=False,
+        ):
+            resp = self.client.get("/api/health")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["release_version"], "rc-1")
+        self.assertEqual(data["build_sha"], "abc123def456")
+        self.assertEqual(data["build_timestamp"], "2026-03-27T00:00:00Z")
 
     # -----------------------------------------------------------------------
     # Full flow: register -> /me -> logout -> /me fails

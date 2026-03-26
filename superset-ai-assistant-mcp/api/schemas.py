@@ -68,6 +68,10 @@ class _AliasModel(BaseModel):
 class HealthResponse(BaseModel):
     status: str = "ok"
     auth_db_ok: bool = False
+    release_version: str = ""
+    build_sha: str = ""
+    build_timestamp: str = ""
+    runtime: str = "nextjs-fastapi"
 
 
 # ---------------------------------------------------------------------------

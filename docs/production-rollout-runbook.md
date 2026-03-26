@@ -21,9 +21,19 @@
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
 - `SUPERSET_PUBLIC_URL=https://superset.example.com`
-- `US15_SHARE_BASE_URL=https://superset.example.com`
 - `API_CORS_ORIGINS=https://assistant.example.com`
 - `AUTH_JWT_SECRET`
+
+Optional but recommended for release visibility:
+
+- `ASSISTANT_RELEASE_VERSION`
+- `ASSISTANT_BUILD_SHA`
+- `ASSISTANT_BUILD_TIMESTAMP`
+
+Optional share-link override:
+
+- `US15_SHARE_BASE_URL=https://superset.example.com`
+  - if omitted, the assistant uses `SUPERSET_PUBLIC_URL`
 
 ## 3. Bring-Up Options
 
@@ -32,7 +42,7 @@
 ```bash
 cd /home/superset_ai
 cp .env.dev.example .env.dev
-docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
+./docker/dev/deploy-primary-stack.sh
 ```
 
 ### Option B: split services
@@ -61,13 +71,14 @@ curl -I https://superset.example.com/health
 
 ## 5. Post-Deploy Smoke
 
-1. run `./docker/dev/refresh-primary-stack.sh`
-2. run `./docker/dev/check-primary-stack.sh`
-3. open `https://assistant.example.com/login`
-4. login or register
-5. run `chat -> preview -> recommend -> share -> scan`
-6. run `docs/demo-query-pack.md`
-7. confirm trace correlation in logs via `./docker/dev/tail-primary-logs.sh structured`
+1. run `./docker/dev/deploy-primary-stack.sh`
+2. confirm release/build metadata through `GET /api/health`
+3. run `./docker/dev/check-primary-stack.sh`
+4. open `https://assistant.example.com/login`
+5. login or register
+6. run `chat -> preview -> recommend -> share -> scan`
+7. run `docs/demo-query-pack.md`
+8. confirm trace correlation in logs via `./docker/dev/tail-primary-logs.sh structured`
 
 ## 6. Rollback
 
@@ -77,7 +88,7 @@ rollback:
 1. stop exposing the faulty release
 2. restore the previous known-good assistant-web / assistant-api deployment
 3. keep traces and logs for incident analysis
-4. rerun `./docker/dev/check-primary-stack.sh`
+4. rerun `./docker/dev/deploy-primary-stack.sh`
 5. rerun `docs/manual-smoke-checklist.md`
 
 ## 7. Proxy Reference

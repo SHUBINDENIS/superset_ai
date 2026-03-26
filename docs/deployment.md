@@ -76,7 +76,7 @@ Reverse proxy example:
 ```bash
 cd /home/superset_ai
 cp .env.dev.example .env.dev
-docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
+./docker/dev/deploy-primary-stack.sh
 ```
 
 Stack services:
@@ -85,6 +85,13 @@ Stack services:
 - `assistant-api`
 - `assistant-web`
 - supporting `db`, `redis`, `pagila-db`, `superset-init`
+
+Low-level compose path for debugging or manual recovery:
+
+```bash
+cd /home/superset_ai
+docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
+```
 
 ### Split run
 
@@ -108,6 +115,8 @@ NEXT_PUBLIC_API_URL=http://127.0.0.1:8100 npm run dev -- --hostname 0.0.0.0 --po
 ## Health Verification
 
 ```bash
+./docker/dev/validate-primary-env.sh
+./docker/dev/deploy-primary-stack.sh
 ./docker/dev/check-primary-stack.sh
 ./docker/dev/tail-primary-logs.sh compose assistant-api
 ```
@@ -137,8 +146,12 @@ Recommended operator actions:
 
 - `docker/dev/refresh-primary-stack.sh`
   - rebuild or restart `assistant-api` / `assistant-web`, then wait for HTTP readiness
+- `docker/dev/deploy-primary-stack.sh`
+  - validate env, stamp release/build metadata, rebuild the selected services, run health checks
 - `docker/dev/check-primary-stack.sh`
   - one-command health verification
+- `docker/dev/validate-primary-env.sh`
+  - fail early on missing required env vars and show release/build metadata inputs
 - `docker/dev/tail-primary-logs.sh`
   - compose log tail or structured assistant file logs
 

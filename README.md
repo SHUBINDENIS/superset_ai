@@ -41,7 +41,7 @@
 ```bash
 cd /home/superset_ai
 cp .env.dev.example .env.dev
-docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
+./docker/dev/deploy-primary-stack.sh
 ```
 
 После запуска доступны:
@@ -49,6 +49,13 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
 - primary UI: `http://<host>:3001/login`
 - primary API health: `http://<host>:8100/api/health`
 - Superset: `http://<host>:8088`
+
+Low-level compose path for debugging only:
+
+```bash
+cd /home/superset_ai
+docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
+```
 
 ## Split Local Bring-Up
 
@@ -90,6 +97,7 @@ Deployment and rollout docs:
 Primary health checks:
 
 ```bash
+./docker/dev/deploy-primary-stack.sh
 ./docker/dev/check-primary-stack.sh
 ```
 
@@ -99,8 +107,10 @@ Manual smoke:
 - `docs/update-and-debug.md`
 
 Operator helpers:
+- `docker/dev/deploy-primary-stack.sh`
 - `docker/dev/refresh-primary-stack.sh`
 - `docker/dev/check-primary-stack.sh`
+- `docker/dev/validate-primary-env.sh`
 - `docker/dev/tail-primary-logs.sh`
 
 ## Test Commands

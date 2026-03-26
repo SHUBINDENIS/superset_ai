@@ -30,13 +30,20 @@ Default local or production-like compose run:
 ```bash
 cd /home/superset_ai
 cp .env.dev.example .env.dev
-docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
+./docker/dev/deploy-primary-stack.sh
 ```
 
 Primary endpoints:
 - UI: `http://<host>:3001/login`
 - API: `http://<host>:8100/api/health`
 - Superset: `http://<host>:8088`
+
+Low-level compose path for debugging only:
+
+```bash
+cd /home/superset_ai
+docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
+```
 
 ## Operator Helpers
 
@@ -45,6 +52,13 @@ Primary health:
 ```bash
 cd /home/superset_ai
 ./docker/dev/check-primary-stack.sh
+```
+
+Standard deploy/update path:
+
+```bash
+cd /home/superset_ai
+./docker/dev/deploy-primary-stack.sh
 ```
 
 Update or rebuild primary services:
@@ -87,7 +101,6 @@ Minimum variables before local smoke or server rollout:
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
 - `SUPERSET_PUBLIC_URL`
-- `US15_SHARE_BASE_URL`
 - `AUTH_JWT_SECRET`
 
 Only when calling FastAPI directly outside the Next.js origin:
@@ -96,10 +109,28 @@ Only when calling FastAPI directly outside the Next.js origin:
 Optional log override:
 - `ASSISTANT_LOG_DIR`
 
+Optional share-link override:
+- `US15_SHARE_BASE_URL`
+  - if omitted, runtime falls back to `SUPERSET_PUBLIC_URL`
+
+Optional release visibility:
+- `ASSISTANT_RELEASE_VERSION`
+- `ASSISTANT_BUILD_SHA`
+- `ASSISTANT_BUILD_TIMESTAMP`
+
+Preflight validation:
+
+```bash
+cd /home/superset_ai
+./docker/dev/validate-primary-env.sh
+```
+
+`deploy-primary-stack.sh` runs the validation automatically before rebuild.
+
 ## Minimal Post-Update Verification Path
 
-1. `./docker/dev/refresh-primary-stack.sh`
-2. `./docker/dev/check-primary-stack.sh`
+1. `./docker/dev/deploy-primary-stack.sh`
+2. confirm release/build metadata in `/api/health`
 3. Open `/login`
 4. Run `chat -> preview -> recommend -> share -> scan`
 5. Run `docs/demo-query-pack.md`
@@ -129,8 +160,8 @@ What to check first:
 
 Rollback is deployment rollback of the same single stack:
 
-1. restore the previous known-good revision or image build
-2. rerun `./docker/dev/refresh-primary-stack.sh`
+1. move the repo or deployment selection back to the previous known-good revision
+2. rerun `./docker/dev/deploy-primary-stack.sh`
 3. rerun `./docker/dev/check-primary-stack.sh`
 4. rerun `docs/manual-smoke-checklist.md`
 5. inspect compose + structured logs before reopening traffic
@@ -139,6 +170,6 @@ Rollback is deployment rollback of the same single stack:
 
 1. pull the new revision
 2. review `README.md` and `docs/production-rollout-runbook.md`
-3. run `./docker/dev/refresh-primary-stack.sh`
+3. run `./docker/dev/deploy-primary-stack.sh`
 4. run `./docker/dev/check-primary-stack.sh`
 5. rerun `docs/manual-smoke-checklist.md`

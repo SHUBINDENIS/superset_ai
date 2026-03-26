@@ -11,6 +11,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from api.deps import get_auth_service
+from api.release import get_release_info
 from api.schemas import HealthResponse
 
 router = APIRouter(tags=["health"])
@@ -30,4 +31,5 @@ def health() -> HealthResponse:
     return HealthResponse(
         status="ok" if auth_db_ok else "degraded",
         auth_db_ok=auth_db_ok,
+        **get_release_info(),
     )
