@@ -94,6 +94,7 @@ def get_current_user(
 
 _agent_session_manager: Any = None
 _us13_15_viz_service_instance: Any = None
+_us1_scan_runner_instance: Any = None
 
 
 def get_agent_session_manager():
@@ -123,3 +124,13 @@ def get_viz_service():
 
         _us13_15_viz_service_instance = get_us13_15_viz_service()
     return _us13_15_viz_service_instance
+
+
+def get_us1_scan_runner():
+    """Return the async US1 scan runner callable."""
+    global _us1_scan_runner_instance
+    if _us1_scan_runner_instance is None:
+        from backend.us1_schema_profiler import run_us1_scan_from_env
+
+        _us1_scan_runner_instance = run_us1_scan_from_env
+    return _us1_scan_runner_instance

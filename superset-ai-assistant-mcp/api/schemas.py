@@ -245,3 +245,25 @@ class ShareWidgetResponse(BaseModel):
     chart_link: str
     params: Dict[str, Any] = Field(default_factory=dict)
     viz_type: str
+
+
+# ---------------------------------------------------------------------------
+# US1 schema scan
+# ---------------------------------------------------------------------------
+
+class SchemaScanSummaryResponse(BaseModel):
+    database_candidates_count: int = 0
+    postgres_candidates_count: int = 0
+    selected_databases_count: int = 0
+    postgres_databases_count: int = 0
+    tables_profiled_count: int = 0
+    relations_detected_count: int = 0
+
+
+class SchemaScanResponse(BaseModel):
+    status: str = "success"
+    started_at: str
+    finished_at: str
+    report_path: str = ""
+    summary: SchemaScanSummaryResponse
+    report: Dict[str, Any] = Field(default_factory=dict)

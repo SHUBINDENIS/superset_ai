@@ -94,7 +94,8 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml up -d
 - отправка сообщений через FastAPI `/api/chats/...`,
 - `/app/preview` для preview и объяснения полей,
 - `/app/recommend` для рекомендаций по типу графика,
-- `/app/share` для создания chart/dashboard и открытия ссылок.
+- `/app/share` для создания chart/dashboard и открытия ссылок,
+- `/app/scan` для schema scan и чтения итогового отчёта.
 
 Локальный запуск:
 
@@ -118,10 +119,12 @@ NEXT_PUBLIC_API_URL=http://127.0.0.1:8100 npm run dev -- --hostname 0.0.0.0 --po
   - `http://127.0.0.1:3000/app/preview`
   - `http://127.0.0.1:3000/app/recommend`
   - `http://127.0.0.1:3000/app/share`
+  - `http://127.0.0.1:3000/app/scan`
 
 Важно:
 - Streamlit UI остаётся рабочим и не заменяется этим запуском;
-- `preview/recommend/share` уже доступны и в Next.js, а `scan` пока остаётся placeholder и продолжает жить в Streamlit.
+- `chat/preview/recommend/share/scan` уже доступны и в Next.js;
+- Streamlit US1 тоже остаётся рабочим и не отключается этим запуском.
 
 ## Как пользоваться
 - В `sidebar` есть кнопки навигации по окнам: `Чат`, `US1`, `US2`, `US3`, `US4`, `US5`, `US13`, `US14`, `US15`.
