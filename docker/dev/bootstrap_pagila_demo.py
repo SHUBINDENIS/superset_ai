@@ -5,16 +5,10 @@ from __future__ import annotations
 import json
 import os
 from urllib.parse import quote_plus
+from typing import Any
 from uuid import UUID
 
-from superset import security_manager
 from superset.app import create_app
-from superset.commands.dataset.create import CreateDatasetCommand
-from superset.commands.database.utils import add_permissions
-from superset.connectors.sqla.models import SqlaTable
-from superset.daos.database import DatabaseDAO
-from superset.extensions import db
-from superset.models.core import Database
 from superset.utils.core import override_user
 
 
@@ -88,7 +82,12 @@ def _build_demo_sqlalchemy_uri() -> str:
     return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database_name}"
 
 
-def _ensure_demo_database(sqlalchemy_uri: str) -> tuple[Database, bool]:
+def _ensure_demo_database(sqlalchemy_uri: str) -> tuple[Any, bool]:
+    from superset.commands.database.utils import add_permissions
+    from superset.daos.database import DatabaseDAO
+    from superset.extensions import db
+    from superset.models.core import Database
+
     database = DatabaseDAO.get_database_by_name(DEMO_DATABASE_NAME)
     if database is None:
         database = (
@@ -133,7 +132,11 @@ def _ensure_demo_database(sqlalchemy_uri: str) -> tuple[Database, bool]:
     return database, created
 
 
-def _ensure_demo_datasets(database: Database) -> tuple[list[str], list[str]]:
+def _ensure_demo_datasets(database: Any) -> tuple[list[str], list[str]]:
+    from superset.commands.dataset.create import CreateDatasetCommand
+    from superset.connectors.sqla.models import SqlaTable
+    from superset.extensions import db
+
     created: list[str] = []
     existing: list[str] = []
 
@@ -185,6 +188,8 @@ def main() -> int:
 
     app = create_app()
     with app.app_context():
+        from superset import security_manager
+
         admin_user = security_manager.find_user(username="admin")
         if admin_user is None:
             raise RuntimeError("Superset admin user was not created before Pagila bootstrap.")
@@ -193,13 +198,14 @@ def main() -> int:
             sqlalchemy_uri = _build_demo_sqlalchemy_uri()
             database, created_database = _ensure_demo_database(sqlalchemy_uri)
             created_datasets, existing_datasets = _ensure_demo_datasets(database)
+            database_name = str(database.database_name)
 
     created_summary = ", ".join(created_datasets) if created_datasets else "none"
     existing_summary = ", ".join(existing_datasets) if existing_datasets else "none"
     status = "created" if created_database else "updated"
     print(
         "[pagila-demo] "
-        f"database={database.database_name!r} ({status}); "
+        f"database={database_name!r} ({status}); "
         f"new_datasets={created_summary}; existing_datasets={existing_summary}"
     )
     return 0
