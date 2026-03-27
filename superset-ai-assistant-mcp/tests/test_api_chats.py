@@ -606,6 +606,39 @@ class TestSendMessage(unittest.TestCase):
             detail_level="detailed",
         )
 
+    def test_send_message_normalizes_agent_reply_style_and_detail(self):
+        self._install_mock_agent({
+            "content": "Normalized answer",
+            "role": "assistant",
+            "finish_reason": "stop",
+            "model": "test-model",
+            "session_id": self.session_id,
+            "response_style": "TECHNICAL ",
+            "detail_level": "DETAILED ",
+            "artifacts": [],
+        })
+
+        resp = self.client.post(
+            f"/api/chats/{self.session_id}/messages",
+            json={
+                "content": "Покажи технический ответ",
+                "response_style": "technical",
+                "detail_level": "detailed",
+            },
+            cookies=self._auth_cookies(),
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["response_style"], "technical")
+        self.assertEqual(resp.json()["detail_level"], "detailed")
+
+        history = self.client.get(
+            f"/api/chats/{self.session_id}/messages",
+            cookies=self._auth_cookies(),
+        ).json()["messages"]
+        self.assertEqual(history[-1]["response_style"], "technical")
+        self.assertEqual(history[-1]["detail_level"], "detailed")
+
     def test_send_message_uses_persisted_chat_settings_when_body_omits_them(self):
         self.client.patch(
             f"/api/chats/{self.session_id}/settings",

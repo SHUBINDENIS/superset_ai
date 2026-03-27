@@ -425,15 +425,24 @@ class US13To15VizService:
         normalized = self._normalize_database_items([x for x in items if isinstance(x, dict)])
         return self._store_cached_metadata(cache_key, normalized)
 
-    def list_datasets(self, limit: int = 200) -> List[Dict[str, Any]]:
+    def list_datasets(
+        self,
+        limit: int = 200,
+        *,
+        search: str = "",
+    ) -> List[Dict[str, Any]]:
         page_size = max(1, min(int(limit), 1000))
-        cache_key = ("list_datasets", page_size)
+        safe_search = _normalize_text(search)
+        cache_key = ("list_datasets", page_size, safe_search.casefold())
         cached = self._get_cached_metadata(cache_key)
         if cached is not None:
             return cached
+        request_payload: Dict[str, Any] = {"page": 1, "page_size": page_size}
+        if safe_search:
+            request_payload["search"] = safe_search
         payload = self._call_product_client(
             "list_datasets",
-            {"page": 1, "page_size": page_size},
+            request_payload,
         )
         items = payload.get("datasets", [])
         if not isinstance(items, list):

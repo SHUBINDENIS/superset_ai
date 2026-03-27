@@ -9,7 +9,7 @@ from backend.mcp_client.tool_registry import (
 
 
 class _FakeStructuredVizService:
-    def list_datasets(self, limit: int = 300):
+    def list_datasets(self, limit: int = 300, *, search: str = ""):
         return [
             {
                 "id": 42,
@@ -120,6 +120,32 @@ class _FakeStructuredVizService:
         title: str = "AI SQL Preview",
     ):
         return f"http://superset.local/sqllab?dbid={database_id}&table={dataset_in_context}"
+
+
+class _SearchFirstStructuredVizService(_FakeStructuredVizService):
+    def list_datasets(self, limit: int = 300, *, search: str = ""):
+        normalized = str(search or "").strip().casefold()
+        if not normalized:
+            return [
+                {
+                    "id": 99,
+                    "table_name": "misc_reference",
+                    "schema": "public",
+                    "database_name": "Pagila Demo (PostgreSQL)",
+                    "database_id": 7,
+                }
+            ]
+        if normalized in {"order", "orders", "payment", "date"}:
+            return [
+                {
+                    "id": 43,
+                    "table_name": "payment",
+                    "schema": "public",
+                    "database_name": "Pagila Demo (PostgreSQL)",
+                    "database_id": 7,
+                }
+            ]
+        return super().list_datasets(limit=limit, search=search)
 
 
 class TestAIAgentClarifications(unittest.TestCase):
@@ -296,6 +322,22 @@ class TestAIAgentClarifications(unittest.TestCase):
         self.assertIn("[Открыть SQL Lab](", reply["content"])
         self.assertEqual(reply["artifacts"][0]["artifact_type"], "chart_preview")
         self.assertEqual(reply["artifacts"][1]["payload"]["link_label"], "Открыть SQL Lab")
+
+    def test_structured_reply_uses_search_results_when_generic_dataset_list_misses(self):
+        with unittest.mock.patch(
+            "backend.ai_agent.get_us13_15_viz_service",
+            return_value=_SearchFirstStructuredVizService(),
+        ):
+            reply = self.agent._build_structured_analytics_reply_sync(
+                user_message="Сделай график по заказам за 2025 год",
+                response_style="technical",
+                detail_level="standard",
+            )
+
+        self.assertIsNotNone(reply)
+        self.assertIn("Dataset `payment`", reply["content"])
+        self.assertIn("YEAR(payment_date) = 2025", reply["content"])
+        self.assertEqual(reply["artifacts"][0]["artifact_type"], "chart_preview")
 
 
 class TestAIAgentStyleRewrite(unittest.IsolatedAsyncioTestCase):

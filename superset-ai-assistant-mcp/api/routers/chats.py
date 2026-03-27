@@ -57,6 +57,17 @@ def _session_or_404(auth_service, username: str, session_id: str) -> Dict[str, A
     return session
 
 
+def _normalize_response_style(value: Any) -> str:
+    return "technical" if str(value or "").strip().lower() == "technical" else "business"
+
+
+def _normalize_detail_level(value: Any) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"concise", "detailed"}:
+        return normalized
+    return "standard"
+
+
 # ---------------------------------------------------------------------------
 # Chat session CRUD
 # ---------------------------------------------------------------------------
@@ -256,12 +267,12 @@ async def send_message(
     # 1. Verify session exists and belongs to user
     session = _session_or_404(auth_service, username, session_id)
     session_settings = session.get("settings", {}) if isinstance(session, dict) else {}
-    resolved_response_style = str(
+    resolved_response_style = _normalize_response_style(
         body.response_style
         or session_settings.get("response_style")
         or "business"
     )
-    resolved_detail_level = str(
+    resolved_detail_level = _normalize_detail_level(
         body.detail_level
         or session_settings.get("detail_level")
         or "standard"
@@ -304,29 +315,46 @@ async def send_message(
                 detail=f"Agent processing failed: {exc}",
             ) from exc
 
-        # 6. Persist assistant reply
-        auth_service.save_chat_message(
-            username=username,
-            session_id=session_id,
-            role="assistant",
-            content=reply.get("content", ""),
-            metadata={
-                "finish_reason": reply.get("finish_reason", "stop"),
-                "model": reply.get("model", ""),
-                "response_style": reply.get("response_style") or resolved_response_style,
-                "detail_level": reply.get("detail_level") or resolved_detail_level,
-                "artifacts": reply.get("artifacts", []),
-            },
+        normalized_reply_style = _normalize_response_style(
+            reply.get("response_style") or resolved_response_style
+        )
+        normalized_reply_detail = _normalize_detail_level(
+            reply.get("detail_level") or resolved_detail_level
         )
 
-        # 7. Return
-        return SendMessageResponse(
-            content=reply.get("content", ""),
-            role=reply.get("role", "assistant"),
-            finish_reason=reply.get("finish_reason", "stop"),
-            model=reply.get("model", ""),
-            session_id=session_id,
-            response_style=reply.get("response_style") or resolved_response_style,
-            detail_level=reply.get("detail_level") or resolved_detail_level,
-            artifacts=reply.get("artifacts", []),
-        )
+        try:
+            # 6. Persist assistant reply
+            auth_service.save_chat_message(
+                username=username,
+                session_id=session_id,
+                role="assistant",
+                content=reply.get("content", ""),
+                metadata={
+                    "finish_reason": reply.get("finish_reason", "stop"),
+                    "model": reply.get("model", ""),
+                    "response_style": normalized_reply_style,
+                    "detail_level": normalized_reply_detail,
+                    "artifacts": reply.get("artifacts", []),
+                },
+            )
+
+            # 7. Return
+            return SendMessageResponse(
+                content=reply.get("content", ""),
+                role=reply.get("role", "assistant"),
+                finish_reason=reply.get("finish_reason", "stop"),
+                model=reply.get("model", ""),
+                session_id=session_id,
+                response_style=normalized_reply_style,
+                detail_level=normalized_reply_detail,
+                artifacts=reply.get("artifacts", []),
+            )
+        except Exception as exc:
+            logger.exception(
+                "Failed to persist or serialize assistant reply for session %s",
+                session_id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Assistant reply handling failed: {exc}",
+            ) from exc

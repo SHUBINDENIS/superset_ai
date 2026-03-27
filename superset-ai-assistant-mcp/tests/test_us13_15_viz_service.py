@@ -217,6 +217,40 @@ class TestUS13To15VizService(unittest.TestCase):
         self.assertEqual(third[0]["id"], 25)
         self.assertEqual([request["page_size"] for _, request in calls], [10, 25])
 
+    def test_list_datasets_search_is_forwarded_and_cached_separately(self):
+        calls = []
+
+        def fake_call_product_client(method_name, request):
+            calls.append((method_name, request))
+            if method_name == "list_datasets":
+                search = str(request.get("search") or "")
+                return {
+                    "datasets": [
+                        {
+                            "id": 7 if search == "payment" else 8,
+                            "table_name": search or "default",
+                            "schema": "public",
+                            "database_id": 7,
+                            "database_name": "Pagila Demo (PostgreSQL)",
+                        }
+                    ]
+                }
+            raise AssertionError(f"unexpected method {method_name}")
+
+        self.service._call_product_client = fake_call_product_client
+
+        first = self.service.list_datasets(limit=10, search="payment")
+        second = self.service.list_datasets(limit=10, search="payment")
+        third = self.service.list_datasets(limit=10, search="sales")
+
+        self.assertEqual(first[0]["table_name"], "payment")
+        self.assertEqual(second[0]["table_name"], "payment")
+        self.assertEqual(third[0]["table_name"], "sales")
+        self.assertEqual(
+            [request.get("search", "") for _, request in calls],
+            ["payment", "sales"],
+        )
+
     def test_get_dataset_metadata_caches_results(self):
         calls = []
 

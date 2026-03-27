@@ -544,6 +544,91 @@ class SupersetAIAgent:
             score += 120
         return score
 
+    def _build_structured_dataset_search_terms(
+        self,
+        user_message: str,
+    ) -> List[str]:
+        query = str(user_message or "").casefold()
+        ordered: List[str] = []
+        seen: set[str] = set()
+
+        def _push(*values: str) -> None:
+            for raw in values:
+                value = str(raw or "").strip()
+                if not value:
+                    continue
+                key = value.casefold()
+                if key in seen:
+                    continue
+                seen.add(key)
+                ordered.append(value)
+
+        if self._contains_any_pattern(query, ["выруч", "sales", "revenue", "продаж"]):
+            _push("sales", "revenue", "payment")
+        if self._contains_any_pattern(query, ["магазин", "store", "shop"]):
+            _push("store", "sales")
+        if self._contains_any_pattern(query, ["категор", "category"]):
+            _push("category", "film", "sales")
+        if self._contains_any_pattern(query, ["заказ", "order", "orders"]):
+            _push("order", "orders", "payment", "rental")
+        if self._contains_any_pattern(query, ["оплат", "payment"]):
+            _push("payment", "sales")
+        if self._contains_any_pattern(query, ["аренд", "rental"]):
+            _push("rental", "payment")
+        if self._contains_any_pattern(query, ["клиент", "customer", "client"]):
+            _push("customer", "client", "payment")
+        if self._contains_any_pattern(query, ["фильм", "film", "movie"]):
+            _push("film", "category", "rental")
+        if self._contains_any_pattern(query, ["месяц", "month", "год", "year", "date", "время", "time"]):
+            _push("date", "payment", "sales")
+
+        return ordered[:6]
+
+    def _collect_structured_dataset_candidates(
+        self,
+        *,
+        svc: Any,
+        user_message: str,
+        limit: int = 300,
+    ) -> List[Dict[str, Any]]:
+        candidates: List[Dict[str, Any]] = []
+        seen_ids: set[int] = set()
+
+        def _add(items: Any) -> None:
+            if not isinstance(items, list):
+                return
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                try:
+                    dataset_id = int(item.get("id", 0) or 0)
+                except Exception:
+                    dataset_id = 0
+                if dataset_id <= 0 or dataset_id in seen_ids:
+                    continue
+                seen_ids.add(dataset_id)
+                candidates.append(item)
+
+        for term in self._build_structured_dataset_search_terms(user_message):
+            try:
+                _add(svc.list_datasets(limit=min(limit, 80), search=term))
+            except TypeError:
+                _add(svc.list_datasets(limit=min(limit, 80)))
+                break
+            except Exception as exc:
+                backend_logger.warning(
+                    f"Session {self.session_id}: dataset search '{term}' failed: {exc}"
+                )
+
+        try:
+            _add(svc.list_datasets(limit=limit))
+        except Exception as exc:
+            backend_logger.warning(
+                f"Session {self.session_id}: fallback dataset listing failed: {exc}"
+            )
+
+        return candidates
+
     @staticmethod
     def _classify_dataset_columns(columns: List[Dict[str, Any]]) -> Dict[str, List[str]]:
         metric_candidates: List[str] = []
@@ -1371,7 +1456,11 @@ class SupersetAIAgent:
             return None
 
         svc = get_us13_15_viz_service()
-        datasets = svc.list_datasets(limit=300)
+        datasets = self._collect_structured_dataset_candidates(
+            svc=svc,
+            user_message=query,
+            limit=300,
+        )
         scored_candidates: List[Dict[str, Any]] = []
         for item in datasets:
             if not isinstance(item, dict):
