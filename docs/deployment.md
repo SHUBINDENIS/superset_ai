@@ -57,6 +57,13 @@ Recommended production-like publication:
 - `https://assistant.example.com/api/*` -> `FastAPI`
 - `https://superset.example.com/` -> `Superset`
 
+Recommended public-host rules:
+- publish one assistant host and keep API same-origin under `/api/*`
+- keep `assistant-api` internal; do not expose `:8100` directly to the public internet
+- leave `API_CORS_ORIGINS` unset unless you intentionally need cross-origin API access
+- set `SUPERSET_PUBLIC_URL` to the public Superset host used in share/explore links
+- if `US15_SHARE_BASE_URL` is set, keep it on the same origin as `SUPERSET_PUBLIC_URL`
+
 Reverse proxy example:
 - `docs/examples/nginx-primary-ui.conf.example`
 
@@ -129,6 +136,9 @@ curl -I https://assistant.example.com/api/health
 curl -I https://superset.example.com/health
 ```
 
+Final public signoff:
+- `docs/public-go-live-checklist.md`
+
 ## Rollback Model
 
 Rollback now means restoring the previous known-good `Next.js/FastAPI`
@@ -158,6 +168,7 @@ Recommended operator actions:
 ## Related Docs
 
 - `docs/production-rollout-runbook.md`
+- `docs/public-go-live-checklist.md`
 - `docs/update-and-debug.md`
 - `docs/manual-smoke-checklist.md`
 - `docs/streamlit-retirement-summary.md`

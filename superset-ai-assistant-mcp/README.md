@@ -90,6 +90,7 @@ Reverse proxy example:
 Runbooks:
 - `../docs/deployment.md`
 - `../docs/production-rollout-runbook.md`
+- `../docs/public-go-live-checklist.md`
 - `../docs/manual-smoke-checklist.md`
 - `../docs/update-and-debug.md`
 

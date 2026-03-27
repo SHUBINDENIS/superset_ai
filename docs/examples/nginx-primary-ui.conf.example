@@ -5,10 +5,18 @@
 # - https://assistant.example.com/api/* -> FastAPI API
 # - https://superset.example.com        -> Superset
 #
+# Keep internal service ports private. Publish only the proxy listener.
+#
 # Make sure application env matches the public hosts:
+# - ASSISTANT_DEPLOYMENT_MODE=production
 # - SUPERSET_PUBLIC_URL=https://superset.example.com
 # - US15_SHARE_BASE_URL=https://superset.example.com
-# - API_CORS_ORIGINS=https://assistant.example.com
+# - API_CORS_ORIGINS is usually left unset for same-origin public rollout
+
+map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+}
 
 upstream assistant_web {
     server 127.0.0.1:3001;
@@ -16,6 +24,10 @@ upstream assistant_web {
 
 upstream assistant_api {
     server 127.0.0.1:8100;
+}
+
+upstream superset_web {
+    server 127.0.0.1:8088;
 }
 
 server {
@@ -27,6 +39,7 @@ server {
     location /api/ {
         proxy_pass http://assistant_api;
         proxy_http_version 1.1;
+        proxy_redirect off;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -37,6 +50,9 @@ server {
     location /_next/ {
         proxy_pass http://assistant_web;
         proxy_http_version 1.1;
+        proxy_redirect off;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;
@@ -47,6 +63,27 @@ server {
     location / {
         proxy_pass http://assistant_web;
         proxy_http_version 1.1;
+        proxy_redirect off;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+
+server {
+    listen 80;
+    server_name superset.example.com;
+
+    client_max_body_size 16m;
+
+    location / {
+        proxy_pass http://superset_web;
+        proxy_http_version 1.1;
+        proxy_redirect off;
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-Host $host;
         proxy_set_header X-Forwarded-Proto $scheme;

@@ -90,6 +90,7 @@ Reverse-proxy example:
 Deployment and rollout docs:
 - `docs/deployment.md`
 - `docs/production-rollout-runbook.md`
+- `docs/public-go-live-checklist.md`
 - `docs/update-and-debug.md`
 
 ## Verification
@@ -104,6 +105,7 @@ Primary health checks:
 Manual smoke:
 - `docs/manual-smoke-checklist.md`
 - `docs/demo-query-pack.md`
+- `docs/public-go-live-checklist.md`
 - `docs/update-and-debug.md`
 
 Operator helpers:

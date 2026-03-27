@@ -14,6 +14,11 @@
 - `https://assistant.example.com/api/*` -> `FastAPI`
 - `https://superset.example.com/` -> `Superset`
 
+Recommended public exposure rule:
+- publish `Next.js` and Superset through the reverse proxy
+- keep `assistant-api` on an internal port and expose it only through same-origin `/api/*`
+- do not publish `:8100` directly
+
 ## 2. Required Environment
 
 Проверьте перед rollout:
@@ -22,7 +27,6 @@
 - `OPENAI_API_KEY`
 - `OPENAI_MODEL`
 - `SUPERSET_PUBLIC_URL=https://superset.example.com`
-- `API_CORS_ORIGINS=https://assistant.example.com`
 - `AUTH_JWT_SECRET`
 
 Optional but recommended for release visibility:
@@ -35,6 +39,9 @@ Optional share-link override:
 
 - `US15_SHARE_BASE_URL=https://superset.example.com`
   - if omitted, the assistant uses `SUPERSET_PUBLIC_URL`
+- `API_CORS_ORIGINS=https://assistant.example.com`
+  - set this only if you intentionally expose FastAPI cross-origin
+  - preferred same-origin public rollout: leave it unset
 
 Production-mode safety checks now fail rollout if:
 - `AUTH_JWT_SECRET` is placeholder-like or shorter than 32 characters
@@ -102,13 +109,19 @@ rollback:
 
 See:
 - `docs/examples/nginx-primary-ui.conf.example`
+- `docs/public-go-live-checklist.md`
 
 ## 8. Day-2 Update And Debug
 
 See:
 - `docs/update-and-debug.md`
 
-## 9. Historical References
+## 9. Final Public Go-Live Signoff
+
+Use:
+- `docs/public-go-live-checklist.md`
+
+## 10. Historical References
 
 For the previous phased-cutover evidence only:
 - `docs/dual-run-parity-readiness.md`
