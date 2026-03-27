@@ -79,6 +79,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 package-lock.json
+!superset-ai-assistant-mcp/frontend-next/package-lock.json
 pnpm-lock.yaml
 yarn.lock
 
