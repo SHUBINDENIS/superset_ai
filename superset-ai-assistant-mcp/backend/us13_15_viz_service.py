@@ -1028,6 +1028,36 @@ class US13To15VizService:
         )
         return self._to_absolute_url(url)
 
+    def open_sql_lab_link(
+        self,
+        *,
+        database_id: int,
+        schema_name: str = "",
+        dataset_in_context: str = "",
+        title: str = "AI SQL Preview",
+    ) -> str:
+        payload = self._call_product_client(
+            "open_sql_lab_with_context",
+            {
+                "database_connection_id": int(database_id),
+                "schema_name": _normalize_text(schema_name),
+                "dataset_in_context": _normalize_text(dataset_in_context),
+                "title": _normalize_text(title) or "AI SQL Preview",
+            },
+        )
+        self._raise_if_tool_error(payload, default_message="SQL Lab link generation failed.")
+        url = _normalize_text(payload.get("url"))
+        if not url:
+            raise RuntimeError(f"SQL Lab response does not contain url: {payload}")
+        self._emit_artifact_event(
+            "useful_links_produced",
+            status="ok",
+            database_id=int(database_id),
+            link_count=1,
+            link_kinds=["sql_lab"],
+        )
+        return self._to_absolute_url(url)
+
     def _create_dashboard(self, dashboard_title: str) -> Dict[str, Any]:
         result = self._call_product_client(
             "create_empty_dashboard",

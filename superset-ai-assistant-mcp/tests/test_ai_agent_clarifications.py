@@ -100,6 +100,27 @@ class _FakeStructuredVizService:
             return {"recommended": "line", "candidates": []}
         return {"recommended": "bar", "candidates": []}
 
+    def generate_explore_link(
+        self,
+        *,
+        dataset_id: int,
+        viz_type: str,
+        metric_column: str = "",
+        dimension_column: str = "",
+        time_column: str = "",
+    ):
+        return f"http://superset.local/explore/?dataset_id={dataset_id}&viz={viz_type}"
+
+    def open_sql_lab_link(
+        self,
+        *,
+        database_id: int,
+        schema_name: str = "",
+        dataset_in_context: str = "",
+        title: str = "AI SQL Preview",
+    ):
+        return f"http://superset.local/sqllab?dbid={database_id}&table={dataset_in_context}"
+
 
 class TestAIAgentClarifications(unittest.TestCase):
     def setUp(self):
@@ -137,9 +158,9 @@ class TestAIAgentClarifications(unittest.TestCase):
         business = self.agent._build_response_style_guidance("business")
         technical = self.agent._build_response_style_guidance("technical")
         self.assertIn("Краткий вывод", business)
-        self.assertIn("Что было использовано", business)
-        self.assertIn("Источник данных", technical)
-        self.assertIn("Техническая конфигурация", technical)
+        self.assertIn("Что использовано", business)
+        self.assertIn("Источник", technical)
+        self.assertIn("SQL", technical)
 
     def test_detail_level_guidance_contains_supported_variants(self):
         self.assertIn("CONCISE", self.agent._build_detail_level_guidance("concise"))
@@ -147,17 +168,17 @@ class TestAIAgentClarifications(unittest.TestCase):
         self.assertIn("DETAILED", self.agent._build_detail_level_guidance("detailed"))
 
     def test_style_envelope_differs_between_business_and_technical(self):
-        business = self.agent._apply_style_response_envelope(
-            "Продажи выросли на 12%",
+        structured = self.agent._apply_style_response_envelope(
+            "**Краткий вывод**\nПродажи выросли на 12%",
             "business",
         )
         technical = self.agent._apply_style_response_envelope(
             "Продажи выросли на 12%",
             "technical",
         )
-        self.assertTrue(business.startswith("Кратко для бизнеса:"))
+        self.assertEqual(structured, "**Краткий вывод**\nПродажи выросли на 12%")
         self.assertTrue(technical.startswith("Технический разбор:"))
-        self.assertNotEqual(business, technical)
+        self.assertNotEqual(structured, technical)
 
     def test_style_rewrite_prompt_mentions_selected_contract(self):
         prompt = self.agent._build_style_rewrite_prompt(
@@ -246,10 +267,13 @@ class TestAIAgentClarifications(unittest.TestCase):
         self.assertIsNotNone(reply)
         self.assertEqual(reply["response_style"], "business")
         self.assertEqual(reply["detail_level"], "standard")
-        self.assertTrue(reply["content"].startswith("Кратко для бизнеса:"))
+        self.assertTrue(reply["content"].startswith("**Краткий вывод**"))
+        self.assertIn("[Открыть график](", reply["content"])
         artifact_types = [item["artifact_type"] for item in reply["artifacts"]]
         self.assertIn("table_preview", artifact_types)
         self.assertIn("chart_preview", artifact_types)
+        self.assertEqual(reply["artifacts"][0]["payload"]["link_label"], "Открыть график")
+        self.assertIn("/explore/?dataset_id=", reply["artifacts"][0]["payload"]["href"])
 
     def test_structured_technical_reply_contains_sql_and_sections(self):
         with unittest.mock.patch(
@@ -265,10 +289,13 @@ class TestAIAgentClarifications(unittest.TestCase):
         self.assertIsNotNone(reply)
         self.assertEqual(reply["response_style"], "technical")
         self.assertEqual(reply["detail_level"], "detailed")
-        self.assertTrue(reply["content"].startswith("Технический разбор:"))
-        self.assertIn("## Техническая конфигурация", reply["content"])
-        self.assertIn("- sql:", reply["content"])
+        self.assertTrue(reply["content"].startswith("**Источник**"))
+        self.assertIn("**SQL**", reply["content"])
+        self.assertIn("```sql", reply["content"])
+        self.assertIn("**Preview summary**", reply["content"])
+        self.assertIn("[Открыть SQL Lab](", reply["content"])
         self.assertEqual(reply["artifacts"][0]["artifact_type"], "chart_preview")
+        self.assertEqual(reply["artifacts"][1]["payload"]["link_label"], "Открыть SQL Lab")
 
 
 class TestAIAgentStyleRewrite(unittest.IsolatedAsyncioTestCase):
@@ -309,6 +336,178 @@ class TestAIAgentStyleRewrite(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(self.agent._safe_agent_run.await_count, 0)
         self.assertTrue(rewritten.startswith("Кратко для бизнеса:"))
+
+
+class TestRawUrlStripping(unittest.IsolatedAsyncioTestCase):
+    """Verify _strip_raw_urls_from_text converts bare URLs to markdown links."""
+
+    def test_raw_url_replaced_with_markdown_link(self):
+        text = "Результат: http://103.54.18.91:8088/explore/?datasource_id=42"
+        result = SupersetAIAgent._strip_raw_urls_from_text(text)
+        # Raw URL is now inside a markdown link, not bare text
+        self.assertIn("[Открыть график]", result)
+        self.assertIn("](http://103.54.18.91:8088/explore/", result)
+
+    def test_markdown_link_preserved(self):
+        text = "Смотрите [Открыть график](http://host/explore/?id=1) для деталей."
+        result = SupersetAIAgent._strip_raw_urls_from_text(text)
+        self.assertIn("[Открыть график](http://host/explore/?id=1)", result)
+
+    def test_dashboard_url_gets_dashboard_label(self):
+        text = "Ваш дашборд: http://host/dashboard/5/"
+        result = SupersetAIAgent._strip_raw_urls_from_text(text)
+        self.assertIn("[Открыть дашборд]", result)
+
+    def test_sqllab_url_gets_sqllab_label(self):
+        text = "SQL: http://host/sqllab?query=1"
+        result = SupersetAIAgent._strip_raw_urls_from_text(text)
+        self.assertIn("[Открыть SQL Lab]", result)
+
+    def test_no_url_returns_text_unchanged(self):
+        text = "Всё хорошо, без ссылок."
+        result = SupersetAIAgent._strip_raw_urls_from_text(text)
+        self.assertEqual(result, text)
+
+    async def test_rewrite_strips_urls_from_long_response(self):
+        agent = SupersetAIAgent.__new__(SupersetAIAgent)
+        agent.session_id = "sess-url"
+        agent._safe_agent_run = AsyncMock(
+            return_value=(
+                "Результат по запросу.\n"
+                "Ссылка: http://host/explore/?datasource_id=42\n"
+                "Дополнительная информация."
+            )
+        )
+        rewritten = await agent._rewrite_response_for_style(
+            draft_response="x" * 100,
+            response_style="business",
+            detail_level="standard",
+            user_message="Покажи выручку",
+        )
+        # Raw URL is converted to markdown link, not shown as bare text
+        self.assertIn("[Открыть график]", rewritten)
+
+
+class TestBusinessTechnicalResponseDifferentiation(unittest.TestCase):
+    """Verify business/technical modes produce distinct structure at each detail level."""
+
+    def setUp(self):
+        self.agent = SupersetAIAgent.__new__(SupersetAIAgent)
+        self.agent.session_id = "sess-diff"
+        self.plan = {
+            "database_id": 1,
+            "database_name": "TestDB",
+            "dataset_id": 10,
+            "table_name": "orders",
+            "schema": "public",
+            "metric_column": "amount",
+            "metric_label": "amount",
+            "metric_description": "SUM(amount)",
+            "dimension_column": "store",
+            "time_column": "created_at",
+            "chart_type": "bar",
+            "x_key": "store",
+            "y_key": "amount",
+            "group_hint": "по полю store",
+            "requested_year": None,
+            "sql": "SELECT store, SUM(amount) AS amount FROM public.orders GROUP BY 1",
+            "assumptions": ["Dataset выбран эвристически."],
+        }
+        self.preview = {
+            "rows": [
+                {"store": "A", "amount": 500},
+                {"store": "B", "amount": 300},
+                {"store": "C", "amount": 100},
+            ],
+            "rows_count": 3,
+            "sql_executed": "SELECT store, SUM(amount) AS amount FROM public.orders GROUP BY 1",
+        }
+        self.recommendation = {
+            "recommended": "bar",
+            "candidates": [
+                {"viz_type": "bar", "score": 90, "reason": "dimension+metric"},
+            ],
+        }
+
+    def test_business_concise_has_3_sections(self):
+        resp = self.agent._build_business_structured_response(
+            plan=self.plan, preview=self.preview, detail_level="concise",
+        )
+        self.assertIn("**Краткий вывод**", resp)
+        self.assertIn("**Что использовано**", resp)
+        self.assertIn("**Следующий шаг**", resp)
+        self.assertNotIn("**Что это значит**", resp)
+
+    def test_business_standard_has_4_sections(self):
+        resp = self.agent._build_business_structured_response(
+            plan=self.plan, preview=self.preview, detail_level="standard",
+        )
+        self.assertIn("**Краткий вывод**", resp)
+        self.assertIn("**Что использовано**", resp)
+        self.assertIn("**Что это значит**", resp)
+        self.assertIn("**Следующий шаг**", resp)
+
+    def test_business_detailed_includes_top_facts(self):
+        resp = self.agent._build_business_structured_response(
+            plan=self.plan, preview=self.preview, detail_level="detailed",
+        )
+        self.assertIn("**Ключевые факты**", resp)
+        self.assertIn("- A", resp)
+        self.assertIn("- B", resp)
+
+    def test_technical_concise_has_source_fields_sql(self):
+        resp = self.agent._build_technical_structured_response(
+            plan=self.plan, preview=self.preview,
+            detail_level="concise", recommendation=self.recommendation,
+        )
+        self.assertIn("**Источник**", resp)
+        self.assertIn("**Поля**", resp)
+        self.assertIn("**SQL / агрегация**", resp)
+        self.assertIn("```sql", resp)
+        self.assertNotIn("**Предположения**", resp)
+
+    def test_technical_standard_has_assumptions_and_sql(self):
+        resp = self.agent._build_technical_structured_response(
+            plan=self.plan, preview=self.preview,
+            detail_level="standard", recommendation=self.recommendation,
+        )
+        self.assertIn("**Источник**", resp)
+        self.assertIn("**Dataset / datasource**", resp)
+        self.assertIn("**Поля**", resp)
+        self.assertIn("**Предположения**", resp)
+        self.assertIn("**SQL**", resp)
+        self.assertIn("```sql", resp)
+        self.assertIn("**Что можно сделать дальше**", resp)
+
+    def test_technical_detailed_has_rows_and_risks(self):
+        resp = self.agent._build_technical_structured_response(
+            plan=self.plan, preview=self.preview,
+            detail_level="detailed", recommendation=self.recommendation,
+        )
+        self.assertIn("**Preview summary**", resp)
+        self.assertIn("**Viz recommendation**", resp)
+        self.assertIn("**Ограничения**", resp)
+        self.assertIn("A", resp)
+
+    def test_no_raw_url_in_structured_response(self):
+        """Structured responses must not contain bare http URLs."""
+        for style in ("business", "technical"):
+            for detail in ("concise", "standard", "detailed"):
+                if style == "business":
+                    resp = self.agent._build_business_structured_response(
+                        plan=self.plan, preview=self.preview, detail_level=detail,
+                    )
+                else:
+                    resp = self.agent._build_technical_structured_response(
+                        plan=self.plan, preview=self.preview,
+                        detail_level=detail, recommendation=self.recommendation,
+                    )
+                import re
+                raw_urls = re.findall(r'(?<!\()https?://[^\s)]+', resp)
+                self.assertEqual(
+                    raw_urls, [],
+                    f"Raw URL found in {style}/{detail}: {raw_urls}",
+                )
 
 
 if __name__ == "__main__":

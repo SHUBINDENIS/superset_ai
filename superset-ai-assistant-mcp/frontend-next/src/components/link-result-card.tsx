@@ -17,6 +17,23 @@ export function LinkResultCard({
   route = "/app/share",
 }: LinkResultCardProps) {
   const [copied, setCopied] = useState(false);
+  const linkMeta = describeUsefulLink(href);
+  const ctaLabel =
+    linkMeta.link_kind === "chart"
+      ? "Открыть график"
+      : linkMeta.link_kind === "dashboard"
+        ? "Открыть дашборд"
+        : linkMeta.link_kind === "sql_lab"
+          ? "Открыть SQL Lab"
+          : "Открыть результат";
+  const hint =
+    linkMeta.link_kind === "chart"
+      ? "Полный интерактивный график в Superset."
+      : linkMeta.link_kind === "dashboard"
+        ? "Дашборд откроется в новой вкладке."
+        : linkMeta.link_kind === "sql_lab"
+          ? "SQL Lab откроется в новой вкладке."
+          : "Результат откроется в новой вкладке.";
 
   async function handleCopy() {
     const traceContext = createTraceContext({ route });
@@ -43,7 +60,7 @@ export function LinkResultCard({
         <Link2 className="h-4 w-4 text-primary" />
         <p className="text-sm font-medium">{title}</p>
       </div>
-      <p className="mt-2 break-all text-xs text-muted-foreground">{href}</p>
+      <p className="mt-2 text-xs text-muted-foreground">{hint}</p>
       <div className="mt-3 flex flex-wrap gap-2">
         <Button asChild size="sm">
           <a
@@ -62,7 +79,7 @@ export function LinkResultCard({
             }
           >
             <ExternalLink className="mr-2 h-4 w-4" />
-            Открыть
+            {ctaLabel}
           </a>
         </Button>
         <Button variant="outline" size="sm" onClick={handleCopy}>

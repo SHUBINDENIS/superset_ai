@@ -400,6 +400,26 @@ class TestUS13To15VizService(unittest.TestCase):
         self.assertEqual(url, "http://localhost:8088/explore/?form_data_key=abc")
         self.assertEqual(calls[0][0], "generate_explore_link")
 
+    def test_open_sql_lab_link_uses_built_in_tool(self):
+        calls = []
+
+        def fake_call_product_client(method_name, request):
+            calls.append((method_name, request))
+            if method_name == "open_sql_lab_with_context":
+                return {"url": "http://localhost:8088/sqllab?dbid=7"}
+            raise AssertionError(f"unexpected method {method_name}")
+
+        self.service._call_product_client = fake_call_product_client
+
+        url = self.service.open_sql_lab_link(
+            database_id=7,
+            schema_name="public",
+            dataset_in_context="sales_by_store",
+        )
+
+        self.assertEqual(url, "http://localhost:8088/sqllab?dbid=7")
+        self.assertEqual(calls[0][0], "open_sql_lab_with_context")
+
 
 if __name__ == "__main__":
     unittest.main()

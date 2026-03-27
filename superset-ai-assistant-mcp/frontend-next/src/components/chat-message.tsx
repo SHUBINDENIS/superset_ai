@@ -42,9 +42,32 @@ function bodyAfterPrefix(content: string, prefix: string): string {
   return rest.startsWith("\n") ? rest.slice(1) : rest;
 }
 
-function extractLinks(content: string) {
-  const matches = content.match(URL_PATTERN) ?? [];
-  return Array.from(new Set(matches)).map((url) => {
+function collectMarkdownLinkRanges(content: string) {
+  const ranges: Array<[number, number]> = [];
+  let match: RegExpExecArray | null;
+  const mdRe = new RegExp(MARKDOWN_LINK_PATTERN.source, "g");
+  while ((match = mdRe.exec(content)) !== null) {
+    ranges.push([match.index, match.index + match[0].length]);
+  }
+  return ranges;
+}
+
+function extractStandaloneLinks(content: string) {
+  const markdownRanges = collectMarkdownLinkRanges(content);
+  const links: string[] = [];
+  let match: RegExpExecArray | null;
+  const rawUrlRe = new RegExp(URL_PATTERN.source, "g");
+  while ((match = rawUrlRe.exec(content)) !== null) {
+    const url = match[0];
+    const offset = match.index;
+    const insideMarkdown = markdownRanges.some(
+      ([start, end]) => offset >= start && offset < end,
+    );
+    if (!insideMarkdown) {
+      links.push(url);
+    }
+  }
+  return Array.from(new Set(links)).map((url) => {
     let label = "Открыть ссылку";
     if (url.includes("/explore/")) label = "Открыть график";
     else if (url.includes("/dashboard/")) label = "Открыть дашборд";
@@ -60,6 +83,7 @@ function isDirectImageUrl(url: string) {
   );
 }
 
+/** Replace markdown images that are not real images with a label hint. */
 function normalizeAssistantMarkdown(content: string) {
   return content.replace(
     MARKDOWN_IMAGE_PATTERN,
@@ -74,6 +98,25 @@ function normalizeAssistantMarkdown(content: string) {
   );
 }
 
+/** Markdown link pattern: [label](url) */
+const MARKDOWN_LINK_PATTERN = /\[([^\]]*)\]\((https?:\/\/[^\s)]+)\)/g;
+
+/**
+ * Strip raw HTTP(S) URLs from body text so the user sees only the
+ * clean "Полезные ссылки" section below. Markdown links [label](url)
+ * are kept because they already have a readable label.
+ */
+function stripRawUrls(content: string): string {
+  const markdownRanges = collectMarkdownLinkRanges(content);
+
+  return content.replace(URL_PATTERN, (match, offset: number) => {
+    if (markdownRanges.some(([start, end]) => offset >= start && offset < end)) {
+      return match;
+    }
+    return "";
+  }).replace(/\n{3,}/g, "\n\n").trim();
+}
+
 /* ------------------------------------------------------------------ */
 /* Component                                                          */
 /* ------------------------------------------------------------------ */
@@ -85,7 +128,7 @@ interface Props {
 
 export function ChatMessage({
   message,
-  responseStyle = "business",
+  responseStyle: _responseStyle = "business",
 }: Props) {
   const isUser = message.role === "user";
   const kind = classify(message);
@@ -96,8 +139,9 @@ export function ChatMessage({
         ? bodyAfterPrefix(message.content, ERROR_PREFIX)
         : message.content;
   const normalizedContent = normalizeAssistantMarkdown(content);
-  const links = extractLinks(normalizedContent);
-  const messageResponseStyle = message.response_style ?? responseStyle;
+  const links = extractStandaloneLinks(normalizedContent);
+  const displayContent = !isUser ? stripRawUrls(normalizedContent) : normalizedContent;
+  const messageResponseStyle = message.response_style ?? "business";
   const isTechnicalMessage =
     !isUser &&
     (
@@ -170,8 +214,43 @@ export function ChatMessage({
               "prose-code:text-[0.85em] prose-pre:border prose-pre:bg-muted/40",
           )}
         >
-          <ReactMarkdown remarkPlugins={[remarkGfm]}>
-            {normalizedContent}
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={{
+              a: ({ href, children }) => {
+                if (!href) {
+                  return <span>{children}</span>;
+                }
+                return (
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium underline underline-offset-2"
+                    onClick={() =>
+                      logFrontendEvent(
+                        "useful_link_open",
+                        {
+                          source: "assistant_markdown_link",
+                          ...describeUsefulLink(href),
+                        },
+                        {
+                          traceContext: createTraceContext({
+                            sessionId: message.session_id,
+                            chatId: message.session_id,
+                            route: "/app/chat",
+                          }),
+                        },
+                      )
+                    }
+                  >
+                    {children}
+                  </a>
+                );
+              },
+            }}
+          >
+            {displayContent}
           </ReactMarkdown>
         </div>
 

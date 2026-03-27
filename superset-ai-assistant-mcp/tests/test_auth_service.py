@@ -309,6 +309,8 @@ class TestAuthService(unittest.TestCase):
                         "title": "Preview",
                         "description": "Rows",
                         "payload": {
+                            "href": "http://host/sqllab?dbid=7",
+                            "link_label": "Открыть SQL Lab",
                             "columns": [{"key": "store", "label": "store"}],
                             "rows": [{"store": "A"}],
                         },
@@ -329,6 +331,7 @@ class TestAuthService(unittest.TestCase):
         self.assertEqual(history[0]["response_style"], "technical")
         self.assertEqual(history[0]["detail_level"], "detailed")
         self.assertEqual(history[0]["artifacts"][0]["artifact_type"], "table_preview")
+        self.assertEqual(history[0]["artifacts"][0]["payload"]["link_label"], "Открыть SQL Lab")
 
     def test_archive_non_active_chat_hides_it_from_default_list(self):
         self.service.register_user("helen", "superpass")

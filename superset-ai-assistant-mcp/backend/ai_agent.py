@@ -533,6 +533,12 @@ class SupersetAIAgent:
         score += self._score_name_for_patterns(query, ["клиент", "customer", "client"], 60) * (
             1 if self._contains_any_pattern(dataset_text, ["customer", "payment", "customer_list"]) else 0
         )
+        score += self._score_name_for_patterns(query, ["аренд", "rental"], 65) * (
+            1 if self._contains_any_pattern(dataset_text, ["rental"]) else 0
+        )
+        score += self._score_name_for_patterns(query, ["топ", "top", "рейтинг", "rating"], 25)
+        score += self._score_name_for_patterns(query, ["сколько", "количеств", "count"], 20)
+        score += self._score_name_for_patterns(query, ["средн", "avg", "average"], 20)
         score += self._score_name_for_patterns(query, ["месяц", "month", "год", "year", "день", "date"], 30)
         if table_name and table_name in query:
             score += 120
@@ -749,6 +755,8 @@ class SupersetAIAgent:
         wants_store = self._contains_any_pattern(query, ["магазин", "store", "shop"])
         wants_category = self._contains_any_pattern(query, ["категор", "category"])
         wants_customer = self._contains_any_pattern(query, ["клиент", "customer", "client"])
+        wants_count = self._contains_any_pattern(query, ["сколько", "количеств", "count"])
+        wants_average = self._contains_any_pattern(query, ["средн", "avg", "average"])
         requested_year = self._extract_requested_year(query)
 
         time_column = self._pick_first_matching_column(
@@ -780,14 +788,26 @@ class SupersetAIAgent:
 
         metric_label = "metric_value"
         metric_description = ""
-        if wants_orders and not wants_revenue:
+        if wants_count and not wants_revenue:
+            metric_sql = "COUNT(*)"
+            metric_label = "total_count"
+            metric_description = "COUNT(*) как количество записей"
+        elif wants_orders and not wants_revenue:
             metric_sql = "COUNT(*)"
             metric_label = "orders_count"
             metric_description = "COUNT(*) как количество заказов/операций"
+        elif wants_average and metric_column:
+            metric_sql = f"AVG({self._quote_sql_identifier(metric_column)})"
+            metric_label = metric_column
+            metric_description = f"AVG({metric_column})"
         elif metric_column:
             metric_sql = f"SUM({self._quote_sql_identifier(metric_column)})"
             metric_label = metric_column
             metric_description = f"SUM({metric_column})"
+        elif wants_count or wants_orders:
+            metric_sql = "COUNT(*)"
+            metric_label = "total_count"
+            metric_description = "COUNT(*)"
         else:
             return None
 
@@ -875,6 +895,8 @@ class SupersetAIAgent:
         title: str,
         description: str,
         rows: List[Dict[str, Any]],
+        href: str = "",
+        link_label: str = "",
     ) -> Dict[str, Any]:
         columns: List[Dict[str, str]] = []
         if rows:
@@ -887,6 +909,8 @@ class SupersetAIAgent:
             "payload": {
                 "columns": columns,
                 "rows": rows[:10],
+                "href": str(href or "").strip(),
+                "link_label": str(link_label or "").strip(),
             },
         }
 
@@ -899,6 +923,8 @@ class SupersetAIAgent:
         rows: List[Dict[str, Any]],
         x_key: str,
         y_key: str,
+        href: str = "",
+        link_label: str = "",
     ) -> Optional[Dict[str, Any]]:
         if chart_type not in {"bar", "line"} or not rows or not x_key or not y_key:
             return None
@@ -911,8 +937,140 @@ class SupersetAIAgent:
                 "rows": rows[:12],
                 "x_key": x_key,
                 "y_key": y_key,
+                "href": str(href or "").strip(),
+                "link_label": str(link_label or "").strip(),
             },
         }
+
+    @staticmethod
+    def _build_markdown_link(label: str, href: str) -> str:
+        clean_label = str(label or "").strip()
+        clean_href = str(href or "").strip()
+        if not clean_label or not clean_href:
+            return ""
+        return f"[{clean_label}]({clean_href})"
+
+    @classmethod
+    def _join_markdown_links(
+        cls,
+        links: List[tuple[str, str]],
+    ) -> str:
+        return " ".join(
+            item
+            for item in (
+                cls._build_markdown_link(label, href)
+                for label, href in links
+            )
+            if item
+        )
+
+    @staticmethod
+    def _safe_float(value: Any) -> Optional[float]:
+        try:
+            parsed = float(value)
+        except Exception:
+            return None
+        if parsed != parsed:
+            return None
+        return parsed
+
+    def _build_business_highlight(
+        self,
+        *,
+        rows: List[Dict[str, Any]],
+        x_key: str,
+        y_key: str,
+        row_count: int,
+    ) -> str:
+        if not rows:
+            return "По текущему источнику данных полезного результата пока нет."
+        top_row = rows[0]
+        if x_key and y_key and x_key in top_row and y_key in top_row:
+            top_name = str(top_row.get(x_key))
+            if len(rows) > 1 and x_key in rows[1] and y_key in rows[1]:
+                runner_up = str(rows[1].get(x_key))
+                return (
+                    f"Лидеры уже видны в preview: **{top_name}** впереди, "
+                    f"следом **{runner_up}**."
+                )
+            return (
+                f"Сейчас в лидерах **{top_name}** со значением "
+                f"**{self._normalize_metric_value(top_row.get(y_key))}**."
+            )
+        if y_key and y_key in top_row:
+            return (
+                f"Текущее агрегированное значение: "
+                f"**{self._normalize_metric_value(top_row.get(y_key))}**."
+            )
+        return f"Получено **{row_count}** строк(и) результата, этого уже хватает для первой оценки."
+
+    def _build_business_interpretation(
+        self,
+        *,
+        plan: Dict[str, Any],
+        row_count: int,
+    ) -> str:
+        if plan.get("time_column"):
+            return (
+                "Результат уже подходит для первичной оценки динамики: видно, как показатель меняется по времени."
+            )
+        if plan.get("dimension_column"):
+            return (
+                f"Результат подходит для сравнения срезов: по {row_count} строкам preview уже видно лидеров и слабые точки."
+            )
+        return "Результат даёт рабочую первую оценку и позволяет быстро понять общий уровень показателя."
+
+    def _build_business_key_facts(
+        self,
+        *,
+        rows: List[Dict[str, Any]],
+        x_key: str,
+        y_key: str,
+    ) -> List[str]:
+        facts: List[str] = []
+        if not rows or not y_key:
+            return facts
+        if x_key:
+            for row in rows[:3]:
+                if x_key in row and y_key in row:
+                    facts.append(
+                        f"- {row.get(x_key)} — {self._normalize_metric_value(row.get(y_key))}"
+                    )
+        elif y_key in rows[0]:
+            facts.append(
+                f"- Итог: {self._normalize_metric_value(rows[0].get(y_key))}"
+            )
+        numeric_values = [
+            self._safe_float(row.get(y_key))
+            for row in rows[:2]
+            if isinstance(row, dict)
+        ]
+        numeric_values = [value for value in numeric_values if value is not None]
+        if len(numeric_values) >= 2:
+            facts.append(
+                "- Разница между первым и вторым результатом: "
+                + self._normalize_metric_value(numeric_values[0] - numeric_values[1])
+            )
+        return facts[:3]
+
+    def _build_preview_summary(
+        self,
+        *,
+        rows: List[Dict[str, Any]],
+        x_key: str,
+        y_key: str,
+    ) -> str:
+        if not rows:
+            return "Preview пустой."
+        if x_key and y_key and x_key in rows[0] and y_key in rows[0]:
+            parts = [
+                f"{row.get(x_key)} — {self._normalize_metric_value(row.get(y_key))}"
+                for row in rows[:3]
+                if isinstance(row, dict) and x_key in row and y_key in row
+            ]
+            if parts:
+                return "Первые значения: " + "; ".join(parts) + "."
+        return f"Получено {len(rows)} строк(и) preview."
 
     def _build_business_structured_response(
         self,
@@ -920,94 +1078,101 @@ class SupersetAIAgent:
         plan: Dict[str, Any],
         preview: Dict[str, Any],
         detail_level: Optional[str],
+        chart_link: str = "",
     ) -> str:
         rows = preview.get("rows", []) if isinstance(preview, dict) else []
         row_count = int(preview.get("rows_count", 0) or 0) if isinstance(preview, dict) else 0
         detail = self._normalize_detail_level(detail_level)
         dataset_label = str(plan.get("table_name") or "").strip()
         assumption_line = (
-            f"В качестве рабочего допущения использован dataset `{dataset_label}`."
+            f"В качестве рабочего допущения выбран dataset `{dataset_label}`."
             if dataset_label
-            else "Использован наиболее правдоподобный dataset для этого вопроса."
+            else "В качестве рабочего допущения выбран наиболее подходящий dataset."
         )
-        if not rows:
-            return (
-                "## Краткий вывод\n"
-                "По выбранному предположению данных для ответа не нашлось.\n\n"
-                "## Что было использовано\n"
-                f"{assumption_line}\n\n"
-                "## Что это значит для бизнеса\n"
-                "Нужно уточнить период, фильтры или источник данных, иначе вывод будет пустым.\n\n"
-                "## Следующий шаг\n"
-                "Уточните период или попросите меня показать структуру выбранного dataset."
-            )
-
-        top_row = rows[0]
+        metric_desc = str(plan.get("metric_description", plan.get("metric_label", "")) or "").strip()
+        group_hint = str(plan.get("group_hint") or "").strip()
         x_key = str(plan.get("x_key") or "").strip()
         y_key = str(plan.get("y_key") or "").strip()
-        highlight = ""
-        if x_key and y_key and x_key in top_row and y_key in top_row:
-            highlight = (
-                f"Сейчас на первом месте {top_row[x_key]} со значением "
-                f"{self._normalize_metric_value(top_row[y_key])}."
+        chart_link_md = self._build_markdown_link("Открыть график", chart_link)
+
+        if not rows:
+            return (
+                "**Краткий вывод**\n"
+                "По выбранному источнику данных сейчас нет данных для уверенного вывода.\n\n"
+                "**Что использовано**\n"
+                f"{assumption_line}\n"
+                f"Метрика: {metric_desc or 'рабочая агрегация по запросу'}.\n\n"
+                "**Следующий шаг**\n"
+                "Уточните период, фильтр или источник данных."
             )
-        elif y_key and y_key in top_row:
-            highlight = (
-                f"Текущее агрегированное значение: "
-                f"{self._normalize_metric_value(top_row[y_key])}."
-            )
+        highlight = self._build_business_highlight(
+            rows=rows,
+            x_key=x_key,
+            y_key=y_key,
+            row_count=row_count,
+        )
+        what_used_lines = [
+            assumption_line,
+            f"Метрика: {metric_desc or 'рабочая агрегация'}.",
+        ]
+        if group_hint:
+            what_used_lines.append(f"Группировка: {group_hint}.")
+        if plan.get("assumptions"):
+            what_used_lines.append("Допущения: " + "; ".join(plan["assumptions"]) + ".")
+
+        if detail == "concise":
+            lines = [
+                "**Краткий вывод**",
+                highlight,
+                "",
+                "**Что использовано**",
+                *what_used_lines[:3],
+                "",
+                "**Следующий шаг**",
+                "Могу сразу добавить период, сегмент или соседнюю метрику для сравнения."
+                + (f" {chart_link_md}" if chart_link_md else ""),
+            ]
+            return "\n".join(lines)
 
         lines = [
-            "## Краткий вывод",
-            highlight or "Собрал первую полезную сводку по наиболее правдоподобному источнику данных.",
+            "**Краткий вывод**",
+            highlight,
             "",
-            "## Что было использовано",
-            assumption_line,
-            f"Агрегация: {plan.get('metric_description', plan.get('metric_label', 'metric'))}.",
+            "**Что использовано**",
+            *what_used_lines,
+            "",
+            "**Что это значит**",
+            self._build_business_interpretation(
+                plan=plan,
+                row_count=row_count,
+            ),
         ]
-        if detail == "concise":
-            return "\n".join(
-                [
-                    "## Краткий вывод",
-                    highlight or "Собрал первую полезную сводку по выбранному dataset.",
-                    "",
-                    "## Что было использовано",
-                    assumption_line,
-                    "",
-                    "## Следующий шаг",
-                    "Если нужно, уточню период, сегмент или подготовлю следующий график.",
-                ]
+        if detail == "detailed":
+            key_facts = self._build_business_key_facts(
+                rows=rows,
+                x_key=x_key,
+                y_key=y_key,
             )
-        if plan.get("group_hint"):
-            lines.append(f"Группировка: {plan['group_hint']}.")
-        if plan.get("assumptions"):
-            lines.append("Допущения: " + "; ".join(plan["assumptions"]))
+            if key_facts:
+                lines.extend(
+                    [
+                        "",
+                        "**Ключевые факты**",
+                        *key_facts,
+                    ]
+                )
+        next_step = (
+            "Могу сразу показать динамику по времени, выделить top-5 или подготовить следующий график."
+            if plan.get("dimension_column")
+            else "Могу сразу добавить дополнительный срез, фильтр или следующий график."
+        )
         lines.extend(
             [
                 "",
-                "## Что это значит для бизнеса",
-                (
-                    f"Сводка уже пригодна для первичного сравнения: показано {row_count} строк(и) результата, "
-                    "по которым можно увидеть лидеров и распределение."
-                ),
-                "",
-                "## Следующий шаг",
-                "Если нужно, могу сразу уточнить период, детализировать по сегменту или подготовить следующий график.",
+                "**Следующий шаг**",
+                next_step + (f" {chart_link_md}" if chart_link_md else ""),
             ]
         )
-        if detail == "detailed" and len(rows) > 1 and x_key and y_key:
-            lines.insert(
-                lines.index("## Что это значит для бизнеса") + 1,
-                "Топ значений: "
-                + "; ".join(
-                    f"{row.get(x_key)} — {self._normalize_metric_value(row.get(y_key))}"
-                    for row in rows[:3]
-                ),
-            )
-            lines[-1] = (
-                "Если нужно, могу сразу перейти к сравнению top-n, фильтру по периоду "
-                "или подготовить виджет для дашборда."
-            )
         return "\n".join(lines)
 
     def _build_technical_structured_response(
@@ -1017,64 +1182,139 @@ class SupersetAIAgent:
         preview: Dict[str, Any],
         detail_level: Optional[str],
         recommendation: Dict[str, Any],
+        chart_link: str = "",
+        sql_lab_link: str = "",
     ) -> str:
         rows = preview.get("rows", []) if isinstance(preview, dict) else []
+        row_count = int(preview.get("rows_count", 0) or 0) if isinstance(preview, dict) else 0
         detail = self._normalize_detail_level(detail_level)
         schema_name = str(plan.get("schema") or "").strip()
         table_name = str(plan.get("table_name") or "-").strip() or "-"
         table_ref = f"{schema_name}.{table_name}" if schema_name else table_name
-        lines = [
-            "## Что найдено",
-            f"Построен preview на dataset `{table_name}`; получено {preview.get('rows_count', 0)} строк(и).",
-            "",
-            "## Источник данных",
-            f"- database: {plan.get('database_name', '-')}",
-            f"- schema.table: {table_ref}",
+        sql_executed = str(preview.get("sql_executed") or plan.get("sql") or "-").strip()
+        rec_viz = recommendation.get("recommended", "-") if isinstance(recommendation, dict) else "-"
+        metric_desc = str(plan.get("metric_description", plan.get("metric_label", "-")) or "-").strip()
+        dim_col = str(plan.get("dimension_column") or "").strip() or "-"
+        time_col = str(plan.get("time_column") or "").strip() or "-"
+        group_hint = str(plan.get("group_hint") or "").strip()
+        requested_year = plan.get("requested_year")
+        filter_line = (
+            f"YEAR({time_col}) = {requested_year}"
+            if requested_year is not None and time_col and time_col != "-"
+            else "—"
+        )
+        assumptions = list(plan.get("assumptions") or [])
+        if not assumptions:
+            assumptions = ["Dataset выбран эвристически как лучший кандидат под запрос."]
+        fields_lines = [
+            f"- metric: {metric_desc}",
+            f"- dimension: {dim_col}",
+            f"- time: {time_col}",
         ]
-        if detail != "concise":
-            lines.append(f"- dataset_id: {plan.get('dataset_id', 0)}")
+        if group_hint:
+            fields_lines.append(f"- grain: {group_hint}")
+        if filter_line != "—":
+            fields_lines.append(f"- filters: {filter_line}")
+        actions = self._join_markdown_links(
+            [
+                ("Открыть график", chart_link),
+                ("Открыть SQL Lab", sql_lab_link),
+            ]
+        )
+
+        if detail == "concise":
+            lines = [
+                "**Источник**",
+                f"Dataset `{table_name}`; источник `{table_ref}` в базе `{plan.get('database_name', '-')}`.",
+                "",
+                "**Поля**",
+                ", ".join(
+                    token
+                    for token in [
+                        metric_desc,
+                        dim_col if dim_col != "-" else "",
+                        time_col if time_col != "-" else "",
+                    ]
+                    if token
+                ) or "Ключевые поля не определены.",
+                (f"Grain: {group_hint}." if group_hint else ""),
+                "",
+                "**SQL / агрегация**",
+                f"```sql\n{sql_executed}\n```",
+            ]
+            if actions:
+                lines.extend(["", actions])
+            return "\n".join(line for line in lines if line != "")
+
+        if detail == "standard":
+            lines = [
+                "**Источник**",
+                f"`{table_ref}` в базе `{plan.get('database_name', '-')}`.",
+                "",
+                "**Dataset / datasource**",
+                f"Dataset `{table_name}`, dataset_id={plan.get('dataset_id', 0)}.",
+                "",
+                "**Поля**",
+                *fields_lines,
+                "",
+                "**Предположения**",
+                *(f"- {item}" for item in assumptions),
+                "",
+                "**SQL**",
+                f"```sql\n{sql_executed}\n```",
+                "",
+                "**Что можно сделать дальше**",
+                f"- Результат: {row_count} строк(и) preview.",
+                f"- Рекомендуемая визуализация: {rec_viz}.",
+            ]
+            if actions:
+                lines.append(f"- {actions}")
+            return "\n".join(lines)
+
+        lines = [
+            "**Источник**",
+            f"`{table_ref}` в базе `{plan.get('database_name', '-')}`; dataset `{table_name}` (dataset_id={plan.get('dataset_id', 0)}).",
+            "",
+            "**Поля**",
+            *fields_lines,
+            "",
+            "**Предположения**",
+            *(f"- {item}" for item in assumptions),
+            "",
+            "**SQL**",
+            f"```sql\n{sql_executed}\n```",
+            "",
+            "**Preview summary**",
+            self._build_preview_summary(
+                rows=rows,
+                x_key=str(plan.get("x_key") or "").strip(),
+                y_key=str(plan.get("y_key") or "").strip(),
+            ),
+            "",
+            "**Viz recommendation**",
+            f"Рекомендуемый тип: `{rec_viz}`.",
+        ]
+        rec_candidates = recommendation.get("candidates", []) if isinstance(recommendation, dict) else []
+        if rec_candidates:
+            for cand in rec_candidates[:2]:
+                if isinstance(cand, dict):
+                    lines.append(
+                        f"- {cand.get('viz_type', '-')}: {cand.get('reason', '')}".rstrip()
+                    )
         lines.extend(
             [
                 "",
-                "## Использованные поля",
-                f"- metric: {plan.get('metric_description', plan.get('metric_label', '-'))}",
-                f"- dimension: {plan.get('dimension_column') or '-'}",
-                f"- time: {plan.get('time_column') or '-'}",
+                "**Ограничения**",
+                "- Preview ограничен первыми строками; полный набор может отличаться.",
+                "- Dataset выбран автоматически; если нужен другой источник, укажите его явно.",
+                "- Текущая агрегация основана на рабочем допущении и может потребовать уточнения grain или filters.",
                 "",
-                "## Предположения и ограничения",
+                "**Что можно сделать дальше**",
+                "- Сохранить текущую визуализацию или уточнить фильтры.",
             ]
         )
-        assumptions = plan.get("assumptions") or []
-        if assumptions:
-            lines.extend(f"- {item}" for item in assumptions)
-        else:
-            lines.append("- Использован лучший dataset-кандидат по эвристикам запроса.")
-        lines.extend(
-            [
-                "",
-                "## Техническая конфигурация",
-                f"- chart preview: {plan.get('chart_type', '-')}",
-                f"- recommended viz: {recommendation.get('recommended', '-') if isinstance(recommendation, dict) else '-'}",
-            ]
-        )
-        if detail in {"standard", "detailed"}:
-            lines.append(f"- sql: {preview.get('sql_executed', '')}")
-        if detail == "detailed" and rows:
-            lines.append(
-                "- first rows: "
-                + "; ".join(
-                    ", ".join(f"{key}={value}" for key, value in row.items())
-                    for row in rows[:3]
-                )
-            )
-        lines.extend(
-            [
-                "",
-                "## Следующие действия",
-                "- Можно уточнить фильтры, период или уровень агрегации.",
-                "- При необходимости следующий шаг — recommendation/share для виджета или дашборда.",
-            ]
-        )
+        if actions:
+            lines.append(f"- {actions}")
         return "\n".join(lines)
 
     def _build_structured_analytics_reply_sync(
@@ -1108,6 +1348,24 @@ class SupersetAIAgent:
                 "month",
                 "год",
                 "year",
+                "клиент",
+                "customer",
+                "client",
+                "количеств",
+                "count",
+                "сколько",
+                "средн",
+                "avg",
+                "average",
+                "топ",
+                "top",
+                "рейтинг",
+                "rating",
+                "аренд",
+                "rental",
+                "фильм",
+                "film",
+                "movie",
             ],
         ):
             return None
@@ -1185,45 +1443,84 @@ class SupersetAIAgent:
             return None
 
         table_name = str(best_plan.get("table_name") or best_metadata.get("table_name") or "").strip()
+        recommended_viz = str(
+            best_recommendation.get("recommended")
+            or best_plan.get("chart_type")
+            or "table"
+        ).strip() or "table"
+        chart_link = ""
+        sql_lab_link = ""
+        try:
+            chart_link = svc.generate_explore_link(
+                dataset_id=int(best_plan.get("dataset_id") or 0),
+                viz_type=recommended_viz,
+                metric_column=str(best_plan.get("metric_column") or ""),
+                dimension_column=str(best_plan.get("dimension_column") or ""),
+                time_column=str(best_plan.get("time_column") or ""),
+            )
+        except Exception as exc:
+            backend_logger.warning(
+                f"Session {self.session_id}: failed to generate explore link: {exc}"
+            )
+        try:
+            sql_lab_link = svc.open_sql_lab_link(
+                database_id=int(best_plan.get("database_id") or 0),
+                schema_name=str(best_plan.get("schema") or ""),
+                dataset_in_context=table_name,
+                title=f"AI SQL Preview · {table_name or 'dataset'}",
+            )
+        except Exception as exc:
+            backend_logger.warning(
+                f"Session {self.session_id}: failed to generate SQL Lab link: {exc}"
+            )
+
         if self._normalize_response_style(response_style) == "technical":
             content = self._build_technical_structured_response(
                 plan=best_plan,
                 preview=best_preview,
                 detail_level=detail_level,
                 recommendation=best_recommendation,
+                chart_link=chart_link,
+                sql_lab_link=sql_lab_link,
             )
         else:
             content = self._build_business_structured_response(
                 plan=best_plan,
                 preview=best_preview,
                 detail_level=detail_level,
+                chart_link=chart_link,
             )
 
         table_artifact = self._build_table_artifact(
-            title=f"Табличный preview: {table_name or 'dataset'}",
+            title="Preview таблицы",
             description=(
-                f"Источник: {best_plan.get('database_name', '-')}, "
-                f"dataset `{table_name or '-'}`"
+                f"Источник: `{table_name or '-'}` в `{best_plan.get('database_name', '-')}`"
             ),
             rows=best_preview.get("rows", []),
+            href=sql_lab_link or chart_link,
+            link_label="Открыть SQL Lab" if sql_lab_link else "Открыть результат в Superset",
         )
         chart_artifact = self._build_chart_artifact(
-            title=f"График: {table_name or 'dataset'}",
+            title="Preview графика",
             description=(
                 f"{best_plan.get('metric_description', best_plan.get('metric_label', 'metric'))}; "
                 f"{best_plan.get('group_hint', 'preview')}"
             ),
-            chart_type=str(best_plan.get("chart_type") or ""),
+            chart_type=str(best_plan.get("chart_type") or recommended_viz),
             rows=best_preview.get("rows", []),
             x_key=str(best_plan.get("x_key") or ""),
             y_key=str(best_plan.get("y_key") or ""),
+            href=chart_link,
+            link_label="Открыть график",
         )
         artifacts = [table_artifact]
         if chart_artifact is not None:
             artifacts.insert(0, chart_artifact)
 
         return {
-            "content": self._apply_style_response_envelope(content, response_style),
+            "content": self._strip_raw_urls_from_text(
+                self._apply_style_response_envelope(content, response_style)
+            ),
             "role": "assistant",
             "finish_reason": "stop",
             "model": self.model_name,
@@ -1239,33 +1536,31 @@ class SupersetAIAgent:
             return (
                 "RESPONSE STYLE CONTRACT: ТЕХНИЧЕСКИЙ.\n"
                 "Обязательная структура ответа:\n"
-                "## Что найдено\n"
-                "## Источник данных\n"
-                "## Использованные поля\n"
-                "## Предположения и ограничения\n"
-                "## Техническая конфигурация\n"
-                "## Следующие действия\n"
+                "**Источник**\n"
+                "**Поля**\n"
+                "**Предположения**\n"
+                "**SQL**\n"
+                "**Что можно сделать дальше**\n"
                 "Правила:\n"
-                "- Давай детальный технический разбор, когда он релевантен задаче.\n"
-                "- Явно указывай dataset/table, поля, типы данных, grain, фильтры, ограничения и допущения.\n"
-                "- Для SQL, датасетов, графиков и метрик поясняй техническую структуру, логику и связи.\n"
-                "- Не упрощай формулировки до бизнес-уровня, если техническая детализация полезна.\n"
+                "- Пиши короткими блоками, без длинных рыхлых абзацев.\n"
+                "- Явно указывай источник данных, grain, metric, dimension, filters, допущения и ограничения.\n"
+                "- Если есть SQL, показывай его только в fenced code block ```sql.\n"
+                "- Не вставляй raw URL; используй только markdown links с label.\n"
                 "- Не раскрывай скрытые reasoning traces; показывай только полезный технический итог.\n"
             )
         return (
             "RESPONSE STYLE CONTRACT: БИЗНЕС.\n"
             "Обязательная структура ответа:\n"
-            "## Краткий вывод\n"
-            "## Что было использовано\n"
-            "## Что это значит для бизнеса\n"
-            "## Следующий шаг\n"
+            "**Краткий вывод**\n"
+            "**Что использовано**\n"
+            "**Что это значит**\n"
+            "**Следующий шаг**\n"
             "Правила:\n"
-            "- Объясняй результат простым бизнес-языком.\n"
-            "- Сокращай объём технических деталей, типов полей, schema/dataset id и внутренних реализаций.\n"
-            "- Делай акцент на смысле показателей, интерпретации данных и практических выводах.\n"
-            "- Если есть правдоподобный dataset-кандидат, выбери его и явно назови допущение вместо ранней просьбы назвать таблицу.\n"
-            "- Технические детали добавляй только если без них нельзя корректно ответить.\n"
-            "- Не превращай ответ в технический разбор, если пользователь этого явно не просил.\n"
+            "- Пиши короткими блоками и человеческим деловым языком.\n"
+            "- Давай полезную первую попытку и явно фиксируй рабочее допущение по dataset.\n"
+            "- Не перегружай ответ schema, dataset id, типами полей и внутренними деталями.\n"
+            "- Делай акцент на выводе, интерпретации и следующем шаге.\n"
+            "- Не вставляй raw URL; используй только markdown links с label.\n"
         )
 
     def _build_detail_level_guidance(
@@ -1276,18 +1571,18 @@ class SupersetAIAgent:
         if normalized == "concise":
             return (
                 "DETAIL LEVEL: CONCISE.\n"
-                "- Держи ответ коротким: 3-5 содержательных предложений или короткие секции.\n"
-                "- Избегай длинных перечислений и второстепенных деталей.\n"
+                "- Держи ответ коротким: 3-4 коротких блока, без длинных перечислений.\n"
+                "- Один смысловой блок на абзац, без воды и повторов.\n"
             )
         if normalized == "detailed":
             return (
                 "DETAIL LEVEL: DETAILED.\n"
-                "- Дай развёрнутый ответ со всеми релевантными допущениями, ограничениями и следующими шагами.\n"
-                "- Если есть полезные поля, candidate datasets или конфигурация графика, перечисли их структурированно.\n"
+                "- Дай расширенный ответ, но не превращай его в простыню текста.\n"
+                "- Добавь полезные факты из preview, ограничения и следующий шаг структурированными блоками.\n"
             )
         return (
             "DETAIL LEVEL: STANDARD.\n"
-            "- Дай сбалансированный ответ: достаточно деталей для действия, но без избыточного шума.\n"
+            "- Дай сбалансированный ответ: 4-6 коротких блоков, достаточно деталей для действия, без избыточного шума.\n"
         )
 
     def _build_mode_execution_guidance(
@@ -1349,6 +1644,10 @@ class SupersetAIAgent:
             "- Не добавляй вымышленные детали.\n"
             "- Не вызывай инструменты и не выполняй новые действия; только перепиши готовый текст.\n"
             "- Сохрани язык ответа пользователя.\n"
+            "- Используй короткие markdown-секции с заголовками вида **Заголовок**.\n"
+            "- Один смысловой блок на абзац.\n"
+            "- Не вставляй raw URL; оставляй только markdown links с понятным label.\n"
+            "- Если есть SQL, показывай его только в fenced code block ```sql.\n"
             "- Если в черновике не хватает деталей для выбранного стиля, явно отметь это, но не придумывай их.\n\n"
             "Исходный запрос пользователя:\n"
             f"{self._truncate_text(str(user_message), 500)}\n\n"
@@ -1364,6 +1663,8 @@ class SupersetAIAgent:
         content = str(text or "").strip()
         if not content:
             return ""
+        if content.startswith("**") or content.startswith("##"):
+            return content
         normalized = self._normalize_response_style(response_style)
         if normalized == "technical":
             header = "Технический разбор:"
@@ -1374,6 +1675,36 @@ class SupersetAIAgent:
         if "\n" in content:
             return f"{header}\n{content}"
         return f"{header} {content}"
+
+    _RAW_URL_RE = re.compile(
+        r'(?<!\[)\b(https?://[^\s<>)\]"]+)',
+    )
+    _MD_LINK_RE = re.compile(r'\[([^\]]*)\]\((https?://[^\s)]+)\)')
+
+    @classmethod
+    def _strip_raw_urls_from_text(cls, text: str) -> str:
+        """Replace raw URLs (not inside markdown links) with labeled markdown links."""
+        md_ranges: list[tuple[int, int]] = []
+        for m in cls._MD_LINK_RE.finditer(text):
+            md_ranges.append((m.start(), m.end()))
+
+        def _replace(m: re.Match) -> str:
+            pos = m.start()
+            if any(start <= pos < end for start, end in md_ranges):
+                return m.group(0)
+            url = m.group(1)
+            if "/explore/" in url:
+                label = "Открыть график"
+            elif "/dashboard/" in url:
+                label = "Открыть дашборд"
+            elif "/sqllab" in url:
+                label = "Открыть SQL Lab"
+            else:
+                label = "Открыть в Superset"
+            return f"[{label}]({url})"
+
+        result = cls._RAW_URL_RE.sub(_replace, text)
+        return re.sub(r'\n{3,}', '\n\n', result).strip()
 
     async def _rewrite_response_for_style(
         self,
@@ -1388,7 +1719,9 @@ class SupersetAIAgent:
             return ""
         normalized = self._normalize_response_style(response_style)
         if len(content) < 80:
-            return self._apply_style_response_envelope(content, normalized)
+            return self._apply_style_response_envelope(
+                self._strip_raw_urls_from_text(content), normalized,
+            )
 
         rewrite_prompt = self._build_style_rewrite_prompt(
             draft_response=content,
@@ -1404,6 +1737,7 @@ class SupersetAIAgent:
             )
             rewritten = content
         final = str(rewritten or "").strip() or content
+        final = self._strip_raw_urls_from_text(final)
         return self._apply_style_response_envelope(final, normalized)
 
     @staticmethod

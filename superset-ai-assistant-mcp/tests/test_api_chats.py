@@ -652,6 +652,8 @@ class TestSendMessage(unittest.TestCase):
                     "title": "Preview",
                     "description": "Rows",
                     "payload": {
+                        "href": "http://host/sqllab?dbid=7",
+                        "link_label": "Открыть SQL Lab",
                         "columns": [{"key": "store", "label": "store"}],
                         "rows": [{"store": "Store 1"}],
                     },
@@ -797,6 +799,250 @@ class TestSendMessage(unittest.TestCase):
             json={"content": "Hello"},
         )
         self.assertEqual(resp.status_code, 401)
+
+    # ------------------------------------------------------------------
+    # Regression: artifacts survive reload (list_messages returns them)
+    # ------------------------------------------------------------------
+    def test_artifacts_persist_through_reload(self):
+        """Artifacts stored via send_message must be returned by list_messages."""
+        artifacts = [
+            {
+                    "artifact_type": "table_preview",
+                    "title": "Revenue by store",
+                    "description": "Top 10 stores",
+                    "payload": {
+                        "href": "http://host/sqllab?dbid=7",
+                        "link_label": "Открыть SQL Lab",
+                        "columns": [
+                            {"key": "store", "label": "Store"},
+                            {"key": "revenue", "label": "Revenue"},
+                        ],
+                        "rows": [
+                        {"store": "Store A", "revenue": 1500},
+                        {"store": "Store B", "revenue": 1200},
+                    ],
+                },
+            },
+            {
+                    "artifact_type": "chart_preview",
+                    "title": "Revenue chart",
+                    "description": "Bar chart",
+                    "payload": {
+                        "chart_type": "bar",
+                        "href": "http://host/explore/?slice_id=22",
+                        "link_label": "Открыть график",
+                        "rows": [
+                            {"store": "Store A", "revenue": 1500},
+                            {"store": "Store B", "revenue": 1200},
+                        ],
+                        "x_key": "store",
+                    "y_key": "revenue",
+                },
+            },
+        ]
+        self._install_mock_agent({
+            "content": "Here is the data.",
+            "role": "assistant",
+            "finish_reason": "stop",
+            "model": "m",
+            "session_id": self.session_id,
+            "response_style": "business",
+            "detail_level": "standard",
+            "artifacts": artifacts,
+        })
+
+        self.client.post(
+            f"/api/chats/{self.session_id}/messages",
+            json={"content": "Покажи выручку по магазинам"},
+            cookies=self._auth_cookies(),
+        )
+
+        # Simulate reload: fresh list_messages call
+        msg_resp = self.client.get(
+            f"/api/chats/{self.session_id}/messages",
+            cookies=self._auth_cookies(),
+        )
+        messages = msg_resp.json()["messages"]
+        assistant_msg = messages[-1]
+        self.assertEqual(assistant_msg["role"], "assistant")
+        self.assertEqual(len(assistant_msg["artifacts"]), 2)
+        self.assertEqual(assistant_msg["artifacts"][0]["artifact_type"], "table_preview")
+        self.assertEqual(assistant_msg["artifacts"][0]["title"], "Revenue by store")
+        self.assertEqual(
+            assistant_msg["artifacts"][0]["payload"]["link_label"],
+            "Открыть SQL Lab",
+        )
+        self.assertEqual(
+            len(assistant_msg["artifacts"][0]["payload"]["rows"]), 2,
+        )
+        self.assertEqual(assistant_msg["artifacts"][1]["artifact_type"], "chart_preview")
+        self.assertEqual(assistant_msg["artifacts"][1]["payload"]["chart_type"], "bar")
+        self.assertEqual(
+            assistant_msg["artifacts"][1]["payload"]["link_label"],
+            "Открыть график",
+        )
+
+    # ------------------------------------------------------------------
+    # Regression: detail_level concise passes through API correctly
+    # ------------------------------------------------------------------
+    def test_send_message_passes_concise_detail_level(self):
+        mock_agent = self._install_mock_agent({
+            "content": "Short answer.",
+            "role": "assistant",
+            "finish_reason": "stop",
+            "model": "test-model",
+            "session_id": self.session_id,
+            "response_style": "business",
+            "detail_level": "concise",
+            "artifacts": [],
+        })
+
+        resp = self.client.post(
+            f"/api/chats/{self.session_id}/messages",
+            json={
+                "content": "Краткая сводка",
+                "response_style": "business",
+                "detail_level": "concise",
+            },
+            cookies=self._auth_cookies(),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["detail_level"], "concise")
+        mock_agent.chat.assert_awaited_once_with(
+            [{"role": "user", "content": "Краткая сводка"}],
+            response_style="business",
+            detail_level="concise",
+        )
+
+    # ------------------------------------------------------------------
+    # Regression: per-message metadata preserved after multiple sends
+    # ------------------------------------------------------------------
+    def test_multiple_messages_preserve_per_message_settings(self):
+        """Each message should keep its own response_style/detail_level."""
+        # First message: business/standard
+        self._install_mock_agent({
+            "content": "Business answer.",
+            "role": "assistant",
+            "finish_reason": "stop",
+            "model": "m",
+            "session_id": self.session_id,
+            "response_style": "business",
+            "detail_level": "standard",
+            "artifacts": [],
+        })
+        self.client.post(
+            f"/api/chats/{self.session_id}/messages",
+            json={
+                "content": "Business question",
+                "response_style": "business",
+                "detail_level": "standard",
+            },
+            cookies=self._auth_cookies(),
+        )
+
+        # Second message: technical/detailed
+        self._install_mock_agent({
+            "content": "Technical answer.",
+            "role": "assistant",
+            "finish_reason": "stop",
+            "model": "m",
+            "session_id": self.session_id,
+            "response_style": "technical",
+            "detail_level": "detailed",
+            "artifacts": [],
+        })
+        self.client.post(
+            f"/api/chats/{self.session_id}/messages",
+            json={
+                "content": "Technical question",
+                "response_style": "technical",
+                "detail_level": "detailed",
+            },
+            cookies=self._auth_cookies(),
+        )
+
+        # Reload messages
+        msg_resp = self.client.get(
+            f"/api/chats/{self.session_id}/messages",
+            cookies=self._auth_cookies(),
+        )
+        messages = msg_resp.json()["messages"]
+        # 4 messages: user1, assistant1, user2, assistant2
+        self.assertEqual(len(messages), 4)
+        self.assertEqual(messages[1]["response_style"], "business")
+        self.assertEqual(messages[1]["detail_level"], "standard")
+        self.assertEqual(messages[3]["response_style"], "technical")
+        self.assertEqual(messages[3]["detail_level"], "detailed")
+
+    # ------------------------------------------------------------------
+    # Regression: partial settings update preserves other field
+    # ------------------------------------------------------------------
+    def test_settings_partial_update_preserves_other_field(self):
+        """Updating only response_style must not reset detail_level."""
+        # Set both fields
+        self.client.patch(
+            f"/api/chats/{self.session_id}/settings",
+            json={"response_style": "technical", "detail_level": "detailed"},
+            cookies=self._auth_cookies(),
+        )
+
+        # Update only response_style
+        resp = self.client.patch(
+            f"/api/chats/{self.session_id}/settings",
+            json={"response_style": "business"},
+            cookies=self._auth_cookies(),
+        )
+        self.assertEqual(resp.status_code, 200)
+        settings = resp.json()["settings"]
+        self.assertEqual(settings["response_style"], "business")
+        self.assertEqual(settings["detail_level"], "detailed")
+
+    # ------------------------------------------------------------------
+    # Regression: first send in new chat with non-default settings
+    # ------------------------------------------------------------------
+    def test_first_message_in_new_chat_with_custom_settings(self):
+        """Settings sent in the body of the first message must be used."""
+        # Create a new chat
+        create_resp = self.client.post(
+            "/api/chats",
+            json={"title": "Technical chat"},
+            cookies=self._auth_cookies(),
+        )
+        new_session_id = create_resp.json()["session_id"]
+        self.assertEqual(
+            create_resp.json()["settings"],
+            {"response_style": "business", "detail_level": "standard"},
+        )
+
+        mock_agent = self._install_mock_agent({
+            "content": "Technical first reply.",
+            "role": "assistant",
+            "finish_reason": "stop",
+            "model": "m",
+            "session_id": new_session_id,
+            "response_style": "technical",
+            "detail_level": "concise",
+            "artifacts": [],
+        })
+
+        resp = self.client.post(
+            f"/api/chats/{new_session_id}/messages",
+            json={
+                "content": "First message",
+                "response_style": "technical",
+                "detail_level": "concise",
+            },
+            cookies=self._auth_cookies(),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["response_style"], "technical")
+        self.assertEqual(resp.json()["detail_level"], "concise")
+        # Agent must receive the body-specified settings, not the chat defaults
+        mock_agent.chat.assert_awaited_once_with(
+            [{"role": "user", "content": "First message"}],
+            response_style="technical",
+            detail_level="concise",
+        )
 
 
 if __name__ == "__main__":
