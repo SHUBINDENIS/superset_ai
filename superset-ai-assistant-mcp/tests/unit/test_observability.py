@@ -16,6 +16,9 @@ class _FakeGuardrailsService:
     def evaluate_user_input(self, *args, **kwargs):
         return dict(self._decision)
 
+    def build_policy_context(self, **kwargs):
+        return "US10-US12 guardrails: test context"
+
 
 class _FakeGlossaryService:
     def build_agent_context(self, **kwargs):
@@ -134,6 +137,43 @@ class TestObservability(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(turn_end.get("finish_reason"), "stop")
         self.assertEqual(turn_end.get("trace_id"), "trace-ok")
         self.assertEqual(turn_end.get("request_id"), "request-ok")
+
+    async def test_agent_logs_turn_start_with_response_style_and_rewritten_content(self):
+        agent = self._make_agent()
+        agent._safe_agent_run = AsyncMock(
+            side_effect=[
+                (
+                    "Dataset sales_by_store содержит поле total_sales и поле store. "
+                    "Ответ описывает метрику, группировку и ограничения по данным."
+                ),
+                "Что найдено\nПоле total_sales используется как метрика.",
+            ]
+        )
+
+        with patch("backend.ai_agent.get_us10_12_guardrails_service", return_value=_FakeGuardrailsService({"allowed": True, "warnings": []})), \
+             patch("backend.ai_agent.get_glossary_service", return_value=_FakeGlossaryService()), \
+             patch("backend.ai_agent.get_us3_mapping_rules_service", return_value=_FakeMappingRulesService()), \
+             patch("backend.ai_agent.get_us4_query_assistant_service", return_value=_FakeQueryAssistantService()), \
+             patch("backend.ai_agent.get_us5_query_builder_service", return_value=_FakeQueryBuilderService()):
+            with bind_log_context(
+                trace_id="trace-style",
+                request_id="request-style",
+                session_id="session-alice",
+                chat_id="session-alice",
+                user_hash=hash_user("alice"),
+            ):
+                reply = await agent.chat(
+                    [{"role": "user", "content": "Покажи выручку"}],
+                    response_style="technical",
+                    detail_level="detailed",
+                )
+
+        self.assertTrue(reply["content"].startswith("Технический разбор:"))
+        self.assertEqual(agent._safe_agent_run.await_count, 2)
+        events = self._read_log_events("agent.log")
+        turn_start = next(item for item in events if item.get("event") == "turn_start")
+        self.assertEqual(turn_start.get("response_style"), "technical")
+        self.assertEqual(turn_start.get("detail_level"), "detailed")
 
     async def test_agent_logs_blocked_response(self):
         agent = self._make_agent()

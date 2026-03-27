@@ -79,9 +79,13 @@ function normalizeAssistantMarkdown(content: string) {
 
 interface Props {
   message: ChatMessageType;
+  responseStyle?: "business" | "technical";
 }
 
-export function ChatMessage({ message }: Props) {
+export function ChatMessage({
+  message,
+  responseStyle = "business",
+}: Props) {
   const isUser = message.role === "user";
   const kind = classify(message);
   const content =
@@ -92,6 +96,8 @@ export function ChatMessage({ message }: Props) {
         : message.content;
   const normalizedContent = normalizeAssistantMarkdown(content);
   const links = extractLinks(normalizedContent);
+  const isTechnicalMessage =
+    !isUser && normalizedContent.trimStart().startsWith("Технический разбор:");
 
   return (
     <div
@@ -149,7 +155,15 @@ export function ChatMessage({ message }: Props) {
         )}
 
         {/* Body */}
-        <div className="prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-li:my-0.5">
+        <div
+          className={cn(
+            "prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-li:my-0.5 prose-headings:mb-1 prose-headings:mt-3 prose-headings:text-sm",
+            !isUser &&
+              kind === "normal" &&
+              (isTechnicalMessage || responseStyle === "technical") &&
+              "prose-code:text-[0.85em] prose-pre:border prose-pre:bg-muted/40",
+          )}
+        >
           <ReactMarkdown remarkPlugins={[remarkGfm]}>
             {normalizedContent}
           </ReactMarkdown>

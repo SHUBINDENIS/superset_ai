@@ -18,6 +18,7 @@ export interface ChatSession {
   updated_at: string;
   last_message_at: string;
   is_archived: boolean;
+  settings: ChatSettings;
 }
 
 export interface ChatSessionList {
@@ -45,6 +46,12 @@ export interface SendMessageResponse {
 }
 
 export type ResponseStyle = "business" | "technical";
+export type DetailLevel = "concise" | "standard" | "detailed";
+
+export interface ChatSettings {
+  response_style: ResponseStyle;
+  detail_level: DetailLevel;
+}
 
 export interface DeleteChatResponse {
   deleted_session_id: string;
@@ -117,16 +124,33 @@ export const chatsApi = {
       traceContext,
     }),
 
+  /** Update per-chat settings. */
+  updateSettings: (
+    sessionId: string,
+    settings: Partial<ChatSettings>,
+    traceContext?: Partial<FrontendTraceContext>,
+  ) =>
+    apiFetch<ChatSession>(`/chats/${sessionId}/settings`, {
+      method: "PATCH",
+      traceContext,
+      body: JSON.stringify(settings),
+    }),
+
   /** Send a user message and receive the assistant reply. */
   sendMessage: (
     sessionId: string,
     content: string,
     responseStyle: ResponseStyle,
+    detailLevel: DetailLevel,
     traceContext?: Partial<FrontendTraceContext>,
   ) =>
     apiFetch<SendMessageResponse>(`/chats/${sessionId}/messages`, {
       method: "POST",
       traceContext,
-      body: JSON.stringify({ content, response_style: responseStyle }),
+      body: JSON.stringify({
+        content,
+        response_style: responseStyle,
+        detail_level: detailLevel,
+      }),
     }),
 };

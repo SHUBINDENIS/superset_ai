@@ -110,6 +110,10 @@ class TestChatSessionCRUD(unittest.TestCase):
         self.assertEqual(data["title"], "My first chat")
         self.assertTrue(data["session_id"])
         self.assertIn("created_at", data)
+        self.assertEqual(
+            data["settings"],
+            {"response_style": "business", "detail_level": "standard"},
+        )
 
     def test_create_chat_session_default_title(self):
         resp = self.client.post(
@@ -152,6 +156,36 @@ class TestChatSessionCRUD(unittest.TestCase):
             cookies=self._auth_cookies(),
         )
         self.assertEqual(resp.status_code, 404)
+
+    def test_update_chat_settings(self):
+        create_resp = self.client.post(
+            "/api/chats",
+            json={"title": "Settings chat"},
+            cookies=self._auth_cookies(),
+        )
+        session_id = create_resp.json()["session_id"]
+
+        resp = self.client.patch(
+            f"/api/chats/{session_id}/settings",
+            json={"response_style": "technical", "detail_level": "detailed"},
+            cookies=self._auth_cookies(),
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(
+            resp.json()["settings"],
+            {"response_style": "technical", "detail_level": "detailed"},
+        )
+
+        list_resp = self.client.get("/api/chats", cookies=self._auth_cookies())
+        target = next(
+            item for item in list_resp.json()["sessions"]
+            if item["session_id"] == session_id
+        )
+        self.assertEqual(
+            target["settings"],
+            {"response_style": "technical", "detail_level": "detailed"},
+        )
 
     def test_rename_empty_title_returns_422(self):
         create_resp = self.client.post(
@@ -533,6 +567,7 @@ class TestSendMessage(unittest.TestCase):
         mock_agent.chat.assert_awaited_once_with(
             [{"role": "user", "content": "What tables are available?"}],
             response_style="business",
+            detail_level="standard",
         )
 
     def test_send_message_passes_technical_response_style(self):
@@ -549,6 +584,7 @@ class TestSendMessage(unittest.TestCase):
             json={
                 "content": "Опиши поля датасета",
                 "response_style": "technical",
+                "detail_level": "detailed",
             },
             cookies=self._auth_cookies(),
         )
@@ -556,6 +592,7 @@ class TestSendMessage(unittest.TestCase):
         mock_agent.chat.assert_awaited_once_with(
             [{"role": "user", "content": "Опиши поля датасета"}],
             response_style="technical",
+            detail_level="detailed",
         )
 
     def test_send_message_persists_both_messages(self):

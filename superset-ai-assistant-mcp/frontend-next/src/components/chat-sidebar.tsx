@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, Pencil, Check, X, Trash2 } from "lucide-react";
+import { Plus, Pencil, Check, Loader2, X, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -21,7 +21,7 @@ interface ChatSidebarProps {
 }
 
 export function ChatSidebar({ sessions }: ChatSidebarProps) {
-  const { activeSessionId } = useChatUI();
+  const { activeSessionId, isSessionPending } = useChatUI();
   const activateChat = useActivateChat();
   const createChat = useCreateChat();
   const renameChat = useRenameChat();
@@ -122,6 +122,7 @@ export function ChatSidebar({ sessions }: ChatSidebarProps) {
           const isRenaming = renamingId === s.session_id;
           const isActivating =
             activateChat.isPending && activateChat.variables?.sessionId === s.session_id;
+          const isPending = isSessionPending(s.session_id);
 
           return (
             <div
@@ -184,9 +185,12 @@ export function ChatSidebar({ sessions }: ChatSidebarProps) {
                 </div>
               ) : (
                 <div className="flex items-center justify-between gap-1">
-                  <span className="truncate text-xs font-medium">
-                    {s.title}
-                  </span>
+                  <div className="flex min-w-0 items-center gap-2">
+                    {isPending && <Loader2 className="h-3 w-3 shrink-0 animate-spin text-primary" />}
+                    <span className="truncate text-xs font-medium">
+                      {s.title}
+                    </span>
+                  </div>
                   <div className="flex items-center gap-0.5">
                     <Button
                       variant="ghost"
@@ -209,7 +213,7 @@ export function ChatSidebar({ sessions }: ChatSidebarProps) {
                         handleDelete(s);
                       }}
                       title="Удалить чат"
-                      disabled={deleteChat.isPending}
+                      disabled={deleteChat.isPending || isPending}
                     >
                       <Trash2 className="h-3 w-3" />
                     </Button>
@@ -218,7 +222,11 @@ export function ChatSidebar({ sessions }: ChatSidebarProps) {
               )}
               {!isRenaming && s.last_message_at && (
                 <span className="text-[10px] text-muted-foreground/70 truncate">
-                  {isActivating ? "Открытие..." : formatTime(s.last_message_at)}
+                  {isActivating
+                    ? "Открытие..."
+                    : isPending
+                      ? "Ассистент отвечает..."
+                      : formatTime(s.last_message_at)}
                 </span>
               )}
             </div>
@@ -241,7 +249,7 @@ export function ChatSidebar({ sessions }: ChatSidebarProps) {
               }),
             })
           }
-          disabled={clearMessages.isPending}
+          disabled={clearMessages.isPending || isSessionPending(activeSessionId)}
         >
           <Trash2 className="h-3.5 w-3.5" />
           {clearMessages.isPending ? "Очистка..." : "Очистить чат"}

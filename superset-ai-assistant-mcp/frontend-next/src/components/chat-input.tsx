@@ -47,7 +47,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
             autoResize();
           }}
           onKeyDown={handleKeyDown}
-          placeholder="Например: Покажи выручку по месяцам или сравни регионы по заказам…"
+          placeholder="Опишите задачу или вопрос по данным…"
           disabled={disabled}
           rows={1}
           className="flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
@@ -61,7 +61,7 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
           <SendHorizontal className="h-4 w-4" />
         </Button>
       </div>
-      <p className="mx-auto mt-1.5 max-w-3xl text-[11px] text-muted-foreground">
+      <p className="mx-auto mt-2 max-w-3xl text-[11px] text-muted-foreground">
         Безопасный режим: задавайте бизнес-вопросы и read-only запросы.
       </p>
     </div>

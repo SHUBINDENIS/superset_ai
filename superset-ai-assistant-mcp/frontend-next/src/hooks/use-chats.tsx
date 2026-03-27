@@ -16,7 +16,9 @@ import {
   chatsApi,
   type ChatSession,
   type ChatMessage,
+  type ChatSettings,
   type ChatSessionList,
+  type DetailLevel,
   type MessageList,
   type ResponseStyle,
   type SendMessageResponse,
@@ -31,18 +33,82 @@ import {
 interface ChatUIContextValue {
   activeSessionId: string | null;
   setActiveSessionId: (id: string | null) => void;
+  pendingBySessionId: Record<string, number>;
+  isSessionPending: (id: string | null) => boolean;
+  startSessionPending: (id: string) => void;
+  finishSessionPending: (id: string) => void;
+  clearSessionPending: (id: string) => void;
 }
 
 const ChatUIContext = createContext<ChatUIContextValue>({
   activeSessionId: null,
   setActiveSessionId: () => {},
+  pendingBySessionId: {},
+  isSessionPending: () => false,
+  startSessionPending: () => {},
+  finishSessionPending: () => {},
+  clearSessionPending: () => {},
 });
 
 export function ChatUIProvider({ children }: { children: ReactNode }) {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
+  const [pendingBySessionId, setPendingBySessionId] = useState<Record<string, number>>({});
+
+  function startSessionPending(id: string) {
+    const key = String(id || "").trim();
+    if (!key) return;
+    setPendingBySessionId((current) => ({
+      ...current,
+      [key]: (current[key] ?? 0) + 1,
+    }));
+  }
+
+  function finishSessionPending(id: string) {
+    const key = String(id || "").trim();
+    if (!key) return;
+    setPendingBySessionId((current) => {
+      const nextCount = Math.max(0, (current[key] ?? 0) - 1);
+      if (nextCount <= 0) {
+        const { [key]: _removed, ...rest } = current;
+        return rest;
+      }
+      return {
+        ...current,
+        [key]: nextCount,
+      };
+    });
+  }
+
+  function clearSessionPending(id: string) {
+    const key = String(id || "").trim();
+    if (!key) return;
+    setPendingBySessionId((current) => {
+      if (!(key in current)) {
+        return current;
+      }
+      const { [key]: _removed, ...rest } = current;
+      return rest;
+    });
+  }
+
+  function isSessionPending(id: string | null) {
+    const key = String(id || "").trim();
+    if (!key) return false;
+    return (pendingBySessionId[key] ?? 0) > 0;
+  }
 
   return (
-    <ChatUIContext.Provider value={{ activeSessionId, setActiveSessionId }}>
+    <ChatUIContext.Provider
+      value={{
+        activeSessionId,
+        setActiveSessionId,
+        pendingBySessionId,
+        isSessionPending,
+        startSessionPending,
+        finishSessionPending,
+        clearSessionPending,
+      }}
+    >
       {children}
     </ChatUIContext.Provider>
   );
@@ -69,6 +135,24 @@ function upsertChatSession(
       session,
       ...sessions.filter((item) => item.session_id !== session.session_id),
     ],
+  };
+}
+
+function replaceChatSession(
+  current: ChatSessionList | undefined,
+  session: ChatSession,
+): ChatSessionList {
+  const sessions = current?.sessions ?? [];
+  let replaced = false;
+  const nextSessions = sessions.map((item) => {
+    if (item.session_id !== session.session_id) {
+      return item;
+    }
+    replaced = true;
+    return session;
+  });
+  return {
+    sessions: replaced ? nextSessions : [session, ...nextSessions],
   };
 }
 
@@ -148,7 +232,10 @@ export function useRenameChat() {
       title: string;
       traceContext?: Partial<FrontendTraceContext>;
     }) => chatsApi.rename(sessionId, title, traceContext),
-    onSuccess: (_updated, variables) => {
+    onSuccess: (updated, variables) => {
+      qc.setQueryData<ChatSessionList>(CHATS_KEY, (current) =>
+        replaceChatSession(current, updated),
+      );
       logFrontendEvent(
         "chat_rename",
         { title_chars: variables.title.trim().length },
@@ -179,6 +266,9 @@ export function useActivateChat() {
     },
     onSuccess: (session, variables) => {
       setActiveSessionId(session.session_id);
+      qc.setQueryData<ChatSessionList>(CHATS_KEY, (current) =>
+        replaceChatSession(current, session),
+      );
       logFrontendEvent(
         "chat_switch",
         { target_session_id: session.session_id },
@@ -223,7 +313,7 @@ export function useClearMessages() {
 
 export function useDeleteChat() {
   const qc = useQueryClient();
-  const { setActiveSessionId } = useChatUI();
+  const { clearSessionPending, setActiveSessionId } = useChatUI();
 
   return useMutation({
     mutationFn: (variables: {
@@ -245,6 +335,12 @@ export function useDeleteChat() {
     },
     onSuccess: (data, variables) => {
       qc.removeQueries({ queryKey: messagesKey(variables.sessionId) });
+      qc.setQueryData<ChatSessionList>(CHATS_KEY, (current) => ({
+        sessions: (current?.sessions ?? []).filter(
+          (item) => item.session_id !== variables.sessionId,
+        ),
+      }));
+      clearSessionPending(variables.sessionId);
       if (data.was_active) {
         setActiveSessionId(data.next_active_session_id || null);
       }
@@ -289,6 +385,7 @@ type SendMessageVariables = {
   sessionId: string;
   content: string;
   responseStyle: ResponseStyle;
+  detailLevel: DetailLevel;
   traceContext?: Partial<FrontendTraceContext>;
 };
 
@@ -297,8 +394,19 @@ type SendMessageContext = {
   optimisticUserMessage: ChatMessage;
 };
 
+type UpdateChatSettingsVariables = {
+  sessionId: string;
+  settings: Partial<ChatSettings>;
+  traceContext?: Partial<FrontendTraceContext>;
+};
+
+type UpdateChatSettingsContext = {
+  previous?: ChatSessionList;
+};
+
 export function useSendMessage() {
   const qc = useQueryClient();
+  const { finishSessionPending, startSessionPending } = useChatUI();
 
   return useMutation<
     SendMessageResponse,
@@ -306,12 +414,19 @@ export function useSendMessage() {
     SendMessageVariables,
     SendMessageContext
   >({
-    mutationFn: ({ sessionId, content, responseStyle, traceContext }) =>
-      chatsApi.sendMessage(sessionId, content, responseStyle, traceContext),
+    mutationFn: ({ sessionId, content, responseStyle, detailLevel, traceContext }) =>
+      chatsApi.sendMessage(
+        sessionId,
+        content,
+        responseStyle,
+        detailLevel,
+        traceContext,
+      ),
 
     onMutate: async ({ sessionId, content }) => {
       const key = messagesKey(sessionId);
       await qc.cancelQueries({ queryKey: key });
+      startSessionPending(sessionId);
       const previous = qc.getQueryData<MessageList>(key);
       const optimisticUserMessage: ChatMessage = {
         role: "user",
@@ -392,9 +507,74 @@ export function useSendMessage() {
     },
 
     onSettled: (_data, error, variables) => {
+      finishSessionPending(variables.sessionId);
       if (!error) {
         qc.invalidateQueries({ queryKey: messagesKey(variables.sessionId) });
       }
+      qc.invalidateQueries({ queryKey: CHATS_KEY });
+    },
+  });
+}
+
+export function useUpdateChatSettings() {
+  const qc = useQueryClient();
+
+  return useMutation<
+    ChatSession,
+    ApiError,
+    UpdateChatSettingsVariables,
+    UpdateChatSettingsContext
+  >({
+    mutationFn: (variables) =>
+      chatsApi.updateSettings(
+        variables.sessionId,
+        variables.settings,
+        variables.traceContext,
+      ),
+    onMutate: async (variables) => {
+      await qc.cancelQueries({ queryKey: CHATS_KEY });
+      const previous = qc.getQueryData<ChatSessionList>(CHATS_KEY);
+      if (previous) {
+        const current = previous.sessions.find(
+          (item) => item.session_id === variables.sessionId,
+        );
+        if (current) {
+          qc.setQueryData<ChatSessionList>(CHATS_KEY, replaceChatSession(previous, {
+            ...current,
+            settings: {
+              ...current.settings,
+              ...variables.settings,
+            },
+          }));
+        }
+      }
+      return { previous };
+    },
+    onSuccess: (updated, variables) => {
+      qc.setQueryData<ChatSessionList>(CHATS_KEY, (current) =>
+        replaceChatSession(current, updated),
+      );
+      logFrontendEvent(
+        "chat_settings_update",
+        {
+          response_style: updated.settings.response_style,
+          detail_level: updated.settings.detail_level,
+        },
+        {
+          traceContext: extendTraceContext(variables.traceContext, {
+            sessionId: variables.sessionId,
+            chatId: variables.sessionId,
+            route: "/app/chat",
+          }),
+        },
+      );
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) {
+        qc.setQueryData(CHATS_KEY, context.previous);
+      }
+    },
+    onSettled: () => {
       qc.invalidateQueries({ queryKey: CHATS_KEY });
     },
   });

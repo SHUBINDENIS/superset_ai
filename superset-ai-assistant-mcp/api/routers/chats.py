@@ -35,6 +35,7 @@ from api.schemas import (
     RenameChatRequest,
     SendMessageRequest,
     SendMessageResponse,
+    UpdateChatSettingsRequest,
 )
 
 router = APIRouter(prefix="/api/chats", tags=["chats"])
@@ -99,6 +100,28 @@ def rename_chat(
             username=current_user["username"],
             session_id=session_id,
             title=body.title,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+    return ChatSessionResponse(**updated)
+
+
+@router.patch("/{session_id}/settings", response_model=ChatSessionResponse)
+def update_chat_settings(
+    session_id: str,
+    body: UpdateChatSettingsRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    auth_service=Depends(get_auth_service),
+) -> ChatSessionResponse:
+    """Update per-chat settings such as response style and detail level."""
+    try:
+        updated = auth_service.update_chat_session_settings(
+            username=current_user["username"],
+            session_id=session_id,
+            settings=body.model_dump(exclude_none=True),
         )
     except ValueError as exc:
         raise HTTPException(
@@ -262,6 +285,7 @@ async def send_message(
             reply = await agent.chat(
                 messages,
                 response_style=body.response_style,
+                detail_level=body.detail_level,
             )
         except Exception as exc:
             raise HTTPException(

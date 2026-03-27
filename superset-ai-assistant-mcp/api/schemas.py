@@ -78,6 +78,11 @@ class HealthResponse(BaseModel):
 # Chat sessions
 # ---------------------------------------------------------------------------
 
+class ChatSettingsResponse(BaseModel):
+    response_style: Literal["business", "technical"] = "business"
+    detail_level: Literal["concise", "standard", "detailed"] = "standard"
+
+
 class ChatSessionResponse(BaseModel):
     """Single chat session metadata."""
 
@@ -87,6 +92,7 @@ class ChatSessionResponse(BaseModel):
     updated_at: str
     last_message_at: str
     is_archived: bool = False
+    settings: ChatSettingsResponse = Field(default_factory=ChatSettingsResponse)
 
 
 class ChatSessionListResponse(BaseModel):
@@ -99,6 +105,11 @@ class CreateChatRequest(BaseModel):
 
 class RenameChatRequest(BaseModel):
     title: str = Field(..., min_length=1, max_length=120)
+
+
+class UpdateChatSettingsRequest(BaseModel):
+    response_style: Literal["business", "technical"] | None = None
+    detail_level: Literal["concise", "standard", "detailed"] | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +132,7 @@ class MessageListResponse(BaseModel):
 class SendMessageRequest(BaseModel):
     content: str = Field(..., min_length=1)
     response_style: Literal["business", "technical"] = "business"
+    detail_level: Literal["concise", "standard", "detailed"] = "standard"
 
 
 class SendMessageResponse(BaseModel):

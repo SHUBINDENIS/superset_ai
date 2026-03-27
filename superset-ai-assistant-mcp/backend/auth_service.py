@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import json
 import os
 import re
 import secrets
@@ -22,6 +23,10 @@ _DEFAULT_JWT_SECRET = "change_me_in_env"
 _USERNAME_PATTERN = re.compile(r"^\S{3,64}$")
 _DEFAULT_CHAT_TITLE = "Новый чат"
 _MAX_CHAT_TITLE_LENGTH = 120
+_DEFAULT_RESPONSE_STYLE = "business"
+_DEFAULT_DETAIL_LEVEL = "standard"
+_ALLOWED_RESPONSE_STYLES = {"business", "technical"}
+_ALLOWED_DETAIL_LEVELS = {"concise", "standard", "detailed"}
 
 
 class AuthService:
@@ -79,6 +84,7 @@ class AuthService:
                     updated_at TEXT NOT NULL,
                     last_message_at TEXT NOT NULL,
                     is_archived INTEGER NOT NULL DEFAULT 0,
+                    settings_json TEXT NOT NULL DEFAULT '{}',
                     PRIMARY KEY (username, session_id),
                     FOREIGN KEY (username) REFERENCES auth_users(username) ON DELETE CASCADE
                 );
@@ -96,7 +102,21 @@ class AuthService:
                     ON auth_chat_sessions(username, is_archived, last_message_at, updated_at, created_at);
                 """
             )
+            self._ensure_chat_session_settings_column(conn)
             self._backfill_chat_sessions(conn)
+
+    def _ensure_chat_session_settings_column(self, conn: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"]).strip().casefold()
+            for row in conn.execute("PRAGMA table_info(auth_chat_sessions)").fetchall()
+        }
+        if "settings_json" not in columns:
+            conn.execute(
+                """
+                ALTER TABLE auth_chat_sessions
+                ADD COLUMN settings_json TEXT NOT NULL DEFAULT '{}'
+                """
+            )
 
     @staticmethod
     def _utc_now() -> str:
@@ -125,6 +145,75 @@ class AuthService:
 
     def _synthesize_chat_title(self, content: str | None) -> str:
         return self._normalize_chat_title(content, fallback=_DEFAULT_CHAT_TITLE)
+
+    @staticmethod
+    def _normalize_response_style(value: Any) -> str:
+        token = str(value or "").strip().lower()
+        if token in _ALLOWED_RESPONSE_STYLES:
+            return token
+        return _DEFAULT_RESPONSE_STYLE
+
+    @staticmethod
+    def _normalize_detail_level(value: Any) -> str:
+        token = str(value or "").strip().lower()
+        if token in _ALLOWED_DETAIL_LEVELS:
+            return token
+        return _DEFAULT_DETAIL_LEVEL
+
+    def _deserialize_chat_settings(self, raw: Any) -> Dict[str, str]:
+        payload: Dict[str, Any] = {}
+        if isinstance(raw, dict):
+            payload = raw
+        else:
+            text = str(raw or "").strip()
+            if text:
+                try:
+                    parsed = json.loads(text)
+                    if isinstance(parsed, dict):
+                        payload = parsed
+                except Exception:
+                    payload = {}
+        return self._normalize_chat_settings(payload)
+
+    def _normalize_chat_settings(
+        self,
+        settings: Optional[Dict[str, Any]] = None,
+        *,
+        existing: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, str]:
+        merged: Dict[str, Any] = {
+            "response_style": _DEFAULT_RESPONSE_STYLE,
+            "detail_level": _DEFAULT_DETAIL_LEVEL,
+        }
+        if isinstance(existing, dict):
+            merged["response_style"] = self._normalize_response_style(
+                existing.get("response_style")
+            )
+            merged["detail_level"] = self._normalize_detail_level(
+                existing.get("detail_level")
+            )
+        if isinstance(settings, dict):
+            if "response_style" in settings:
+                merged["response_style"] = self._normalize_response_style(
+                    settings.get("response_style")
+                )
+            if "detail_level" in settings:
+                merged["detail_level"] = self._normalize_detail_level(
+                    settings.get("detail_level")
+                )
+        return {
+            "response_style": str(merged["response_style"]),
+            "detail_level": str(merged["detail_level"]),
+        }
+
+    def _serialize_chat_settings(
+        self,
+        settings: Optional[Dict[str, Any]] = None,
+        *,
+        existing: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        payload = self._normalize_chat_settings(settings, existing=existing)
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True)
 
     def _load_history_session_metadata(
         self,
@@ -192,6 +281,7 @@ class AuthService:
         updated_at: str | None = None,
         last_message_at: str | None = None,
         is_archived: bool = False,
+        settings: Optional[Dict[str, Any]] = None,
     ) -> None:
         clean_username = self._normalize_username(username)
         clean_session_id = str(session_id or "").strip()
@@ -203,10 +293,11 @@ class AuthService:
         safe_last_message_at = str(last_message_at or updated_at or safe_created_at).strip() or safe_created_at
         safe_updated_at = str(updated_at or safe_last_message_at or safe_created_at).strip() or safe_last_message_at
         safe_title = self._normalize_chat_title(title)
+        safe_settings_json = self._serialize_chat_settings(settings)
 
         row = conn.execute(
             """
-            SELECT title, created_at, updated_at, last_message_at, is_archived
+            SELECT title, created_at, updated_at, last_message_at, is_archived, settings_json
             FROM auth_chat_sessions
             WHERE username = ? COLLATE NOCASE AND session_id = ?
             LIMIT 1
@@ -217,8 +308,8 @@ class AuthService:
             conn.execute(
                 """
                 INSERT INTO auth_chat_sessions(
-                    username, session_id, title, created_at, updated_at, last_message_at, is_archived
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    username, session_id, title, created_at, updated_at, last_message_at, is_archived, settings_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     clean_username,
@@ -228,6 +319,7 @@ class AuthService:
                     safe_updated_at,
                     safe_last_message_at,
                     1 if is_archived else 0,
+                    safe_settings_json,
                 ),
             )
             return
@@ -241,6 +333,12 @@ class AuthService:
         )
         archived_flag = int(row["is_archived"] or 0)
         desired_archived = 1 if is_archived else archived_flag
+        current_settings = self._deserialize_chat_settings(row["settings_json"])
+        merged_settings_json = (
+            self._serialize_chat_settings(settings, existing=current_settings)
+            if settings is not None
+            else self._serialize_chat_settings(existing=current_settings)
+        )
 
         if (
             merged_title == str(row["title"])
@@ -248,13 +346,14 @@ class AuthService:
             and merged_updated_at == str(row["updated_at"])
             and merged_last_message_at == str(row["last_message_at"])
             and desired_archived == int(row["is_archived"] or 0)
+            and merged_settings_json == str(row["settings_json"] or "")
         ):
             return
 
         conn.execute(
             """
             UPDATE auth_chat_sessions
-            SET title = ?, created_at = ?, updated_at = ?, last_message_at = ?, is_archived = ?
+            SET title = ?, created_at = ?, updated_at = ?, last_message_at = ?, is_archived = ?, settings_json = ?
             WHERE username = ? COLLATE NOCASE AND session_id = ?
             """,
             (
@@ -263,6 +362,7 @@ class AuthService:
                 merged_updated_at,
                 merged_last_message_at,
                 desired_archived,
+                merged_settings_json,
                 clean_username,
                 clean_session_id,
             ),
@@ -753,7 +853,7 @@ class AuthService:
                 where_clause += " AND is_archived = 0"
             rows = conn.execute(
                 f"""
-                SELECT username, session_id, title, created_at, updated_at, last_message_at, is_archived
+                SELECT username, session_id, title, created_at, updated_at, last_message_at, is_archived, settings_json
                 FROM auth_chat_sessions
                 {where_clause}
                 ORDER BY last_message_at DESC, updated_at DESC, created_at DESC, session_id DESC
@@ -773,6 +873,7 @@ class AuthService:
                     "updated_at": str(item["updated_at"]),
                     "last_message_at": str(item["last_message_at"]),
                     "is_archived": bool(int(item["is_archived"] or 0)),
+                    "settings": self._deserialize_chat_settings(item["settings_json"]),
                 }
             )
         return sessions
@@ -781,6 +882,7 @@ class AuthService:
         self,
         username: str,
         title: Optional[str] = None,
+        settings: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         clean_username = self._normalize_username(username)
         if not clean_username:
@@ -803,6 +905,7 @@ class AuthService:
                         created_at=now,
                         updated_at=now,
                         last_message_at=now,
+                        settings=settings,
                     )
                     self._set_active_session(
                         conn,
@@ -842,7 +945,7 @@ class AuthService:
                 where_clause += " AND is_archived = 0"
             row = conn.execute(
                 """
-                SELECT username, session_id, title, created_at, updated_at, last_message_at, is_archived
+                SELECT username, session_id, title, created_at, updated_at, last_message_at, is_archived, settings_json
                 FROM auth_chat_sessions
                 """
                 + where_clause
@@ -861,7 +964,58 @@ class AuthService:
             "updated_at": str(row["updated_at"]),
             "last_message_at": str(row["last_message_at"]),
             "is_archived": bool(int(row["is_archived"] or 0)),
+            "settings": self._deserialize_chat_settings(row["settings_json"]),
         }
+
+    def update_chat_session_settings(
+        self,
+        *,
+        username: str,
+        session_id: str,
+        settings: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        clean_username = self._normalize_username(username)
+        clean_session_id = str(session_id or "").strip()
+        if not clean_username or not clean_session_id:
+            raise ValueError("username and session_id are required")
+
+        now = self._utc_now()
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT settings_json
+                FROM auth_chat_sessions
+                WHERE username = ? COLLATE NOCASE AND session_id = ? AND is_archived = 0
+                LIMIT 1
+                """,
+                (clean_username, clean_session_id),
+            ).fetchone()
+            if row is None:
+                raise ValueError("Chat session не найдена.")
+
+            current_settings = self._deserialize_chat_settings(row["settings_json"])
+            next_settings_json = self._serialize_chat_settings(
+                settings,
+                existing=current_settings,
+            )
+            conn.execute(
+                """
+                UPDATE auth_chat_sessions
+                SET settings_json = ?, updated_at = ?
+                WHERE username = ? COLLATE NOCASE AND session_id = ?
+                """,
+                (
+                    next_settings_json,
+                    now,
+                    clean_username,
+                    clean_session_id,
+                ),
+            )
+
+        session = self.get_chat_session(username=clean_username, session_id=clean_session_id)
+        if session is None:
+            raise RuntimeError("Failed to load updated chat settings.")
+        return session
 
     def rename_chat_session(
         self,

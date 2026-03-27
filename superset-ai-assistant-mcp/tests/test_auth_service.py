@@ -107,6 +107,10 @@ class TestAuthService(unittest.TestCase):
         sessions = self.service.list_chat_sessions(username="alice")
         self.assertEqual(len(sessions), 1)
         self.assertEqual(sessions[0]["session_id"], created["assistant_session_id"])
+        self.assertEqual(
+            sessions[0]["settings"],
+            {"response_style": "business", "detail_level": "standard"},
+        )
 
         with self.assertRaises(ValueError):
             self.service.register_user("Alice", "anotherpass")
@@ -196,6 +200,32 @@ class TestAuthService(unittest.TestCase):
         self.assertEqual(removed, 2)
         self.assertEqual(self.service.list_chat_history(username="eva"), [])
         self.assertEqual(len(self.service.list_chat_sessions(username="eva")), 1)
+
+    def test_update_chat_session_settings_persists_per_chat(self):
+        self.service.register_user("frank", "superpass")
+        first_session_id = self.service.get_or_create_user_session("frank")
+        second_session_id = self.service.create_chat_session("frank", title="Тех чат")["session_id"]
+
+        updated = self.service.update_chat_session_settings(
+            username="frank",
+            session_id=second_session_id,
+            settings={"response_style": "technical", "detail_level": "detailed"},
+        )
+
+        self.assertEqual(
+            updated["settings"],
+            {"response_style": "technical", "detail_level": "detailed"},
+        )
+        first = self.service.get_chat_session(username="frank", session_id=first_session_id)
+        second = self.service.get_chat_session(username="frank", session_id=second_session_id)
+        self.assertEqual(
+            first["settings"],
+            {"response_style": "business", "detail_level": "standard"},
+        )
+        self.assertEqual(
+            second["settings"],
+            {"response_style": "technical", "detail_level": "detailed"},
+        )
 
     def test_multi_session_history_is_separated_and_clearable_per_session(self):
         self.service.register_user("gina", "superpass")

@@ -1,10 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, Eye, MessageSquare, Plus, ShieldCheck } from "lucide-react";
+import { BookOpenText, Bot, MessageSquare, Plus, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ChatControlsBar } from "@/components/chat-controls-bar";
 import { ChatEmpty } from "@/components/chat-empty";
+import { ChatHelpDrawer } from "@/components/chat-help-drawer";
 import { ChatInput } from "@/components/chat-input";
 import { ChatMessage, ChatThinking } from "@/components/chat-message";
 import { useAuth } from "@/hooks/use-auth";
@@ -15,49 +16,30 @@ import {
   useCreateChat,
   useMessages,
   useSendMessage,
+  useUpdateChatSettings,
 } from "@/hooks/use-chats";
-import type { ResponseStyle } from "@/lib/chats";
+import type { ChatSettings, DetailLevel, ResponseStyle } from "@/lib/chats";
 
-const RESPONSE_STYLE_STORAGE_KEY = "superset-ai-chat-response-style-v1";
-const DEFAULT_RESPONSE_STYLE: ResponseStyle = "business";
-
-function readStoredResponseStyles() {
-  if (typeof window === "undefined") {
-    return {} as Record<string, ResponseStyle>;
-  }
-
-  try {
-    const raw = window.sessionStorage.getItem(RESPONSE_STYLE_STORAGE_KEY);
-    if (!raw) {
-      return {} as Record<string, ResponseStyle>;
-    }
-
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") {
-      return {} as Record<string, ResponseStyle>;
-    }
-
-    return Object.fromEntries(
-      Object.entries(parsed).filter(
-        (entry): entry is [string, ResponseStyle] =>
-          entry[1] === "business" || entry[1] === "technical",
-      ),
-    );
-  } catch {
-    return {} as Record<string, ResponseStyle>;
-  }
-}
+const DEFAULT_CHAT_SETTINGS: ChatSettings = {
+  response_style: "business",
+  detail_level: "standard",
+};
 
 export default function ChatPage() {
   const { user } = useAuth();
-  const { activeSessionId, setActiveSessionId } = useChatUI();
+  const {
+    activeSessionId,
+    isSessionPending,
+    pendingBySessionId,
+    setActiveSessionId,
+  } = useChatUI();
   const chatsQuery = useChats();
   const createChat = useCreateChat();
   const sendMessage = useSendMessage();
+  const updateChatSettings = useUpdateChatSettings();
   const messagesQuery = useMessages(activeSessionId);
   const bottomRef = useRef<HTMLDivElement | null>(null);
-  const [responseStyle, setResponseStyle] =
-    useState<ResponseStyle>(DEFAULT_RESPONSE_STYLE);
+  const [helpOpen, setHelpOpen] = useState(false);
 
   const sessions = chatsQuery.data?.sessions ?? [];
   const activeSession = useMemo(
@@ -65,8 +47,14 @@ export default function ChatPage() {
     [activeSessionId, sessions],
   );
   const messages = messagesQuery.data?.messages ?? [];
-  const responseStyleSessionKey = activeSessionId || user?.session_id || "draft";
   const hasLoadedSessions = chatsQuery.data !== undefined;
+  const activeSettings = activeSession?.settings ?? DEFAULT_CHAT_SETTINGS;
+  const activeResponseStyle = activeSettings.response_style;
+  const activeDetailLevel = activeSettings.detail_level;
+  const activeSessionPending = isSessionPending(activeSessionId);
+  const otherPendingCount = Object.entries(pendingBySessionId).filter(
+    ([sessionId, count]) => sessionId !== activeSessionId && count > 0,
+  ).length;
 
   useEffect(() => {
     if (!hasLoadedSessions) {
@@ -92,34 +80,30 @@ export default function ChatPage() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, sendMessage.isPending]);
+  }, [messages.length, activeSessionPending]);
 
-  useEffect(() => {
-    const stored = readStoredResponseStyles();
-    const fallbackKeys = [
-      responseStyleSessionKey,
-      user?.session_id || "",
-      "draft",
-    ].filter(Boolean);
-    const nextStyle =
-      fallbackKeys
-        .map((key) => stored[key])
-        .find((value): value is ResponseStyle => !!value) ||
-      DEFAULT_RESPONSE_STYLE;
-    setResponseStyle(nextStyle);
-  }, [responseStyleSessionKey, user?.session_id]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") {
+  function handleSettingsPatch(patch: Partial<ChatSettings>) {
+    if (!activeSessionId) {
       return;
     }
-    const stored = readStoredResponseStyles();
-    stored[responseStyleSessionKey] = responseStyle;
-    window.sessionStorage.setItem(
-      RESPONSE_STYLE_STORAGE_KEY,
-      JSON.stringify(stored),
-    );
-  }, [responseStyle, responseStyleSessionKey]);
+    updateChatSettings.mutate({
+      sessionId: activeSessionId,
+      settings: patch,
+      traceContext: createTraceContext({
+        sessionId: activeSessionId,
+        chatId: activeSessionId,
+        route: "/app/chat",
+      }),
+    });
+  }
+
+  function handleResponseStyleChange(nextStyle: ResponseStyle) {
+    handleSettingsPatch({ response_style: nextStyle });
+  }
+
+  function handleDetailLevelChange(nextLevel: DetailLevel) {
+    handleSettingsPatch({ detail_level: nextLevel });
+  }
 
   function handleSend(content: string) {
     const baseTrace = createTraceContext({
@@ -148,7 +132,8 @@ export default function ChatPage() {
             sendMessage.mutate({
               sessionId: created.session_id,
               content,
-              responseStyle,
+              responseStyle: DEFAULT_CHAT_SETTINGS.response_style,
+              detailLevel: DEFAULT_CHAT_SETTINGS.detail_level,
               traceContext: extendTraceContext(baseTrace, {
                 sessionId: created.session_id,
                 chatId: created.session_id,
@@ -163,13 +148,14 @@ export default function ChatPage() {
     sendMessage.mutate({
       sessionId: activeSessionId,
       content,
-      responseStyle,
+      responseStyle: activeResponseStyle,
+      detailLevel: activeDetailLevel,
       traceContext: baseTrace,
     });
   }
 
   const isBootstrappingChat = chatsQuery.isLoading && !activeSessionId;
-  const isChatBusy = sendMessage.isPending || createChat.isPending;
+  const isChatBusy = activeSessionPending || (!activeSessionId && createChat.isPending);
   const isLoadingMessages = !!activeSessionId && messagesQuery.isLoading;
 
   return (
@@ -184,17 +170,19 @@ export default function ChatPage() {
               </h1>
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              Задавайте бизнес-вопрос напрямую или начните с предпросмотра,
-              если сначала нужно увидеть данные и поля.
+              Задавайте бизнес-вопрос напрямую. Если сначала нужно увидеть строки,
+              поля и структуру данных, откройте справку и перейдите в предпросмотр.
             </p>
           </div>
 
           <div className="flex shrink-0 flex-col items-stretch gap-3 sm:items-end">
-            <Button asChild variant="outline" size="sm">
-              <Link href="/app/preview">
-                <Eye className="mr-2 h-4 w-4" />
-                Открыть предпросмотр
-              </Link>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setHelpOpen((current) => !current)}
+            >
+              <BookOpenText className="mr-2 h-4 w-4" />
+              {helpOpen ? "Скрыть подсказки" : "Как начать"}
             </Button>
 
             {!sessions.length && (
@@ -221,16 +209,16 @@ export default function ChatPage() {
           </div>
         </div>
 
-        <div className="mt-3 grid gap-3 md:grid-cols-2">
-          <div className="rounded-lg border bg-card p-3">
-            <p className="text-sm font-medium">Как начать</p>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Если вопрос уже понятен в бизнес-терминах, задайте его прямо
-              здесь. Если сначала нужно понять структуру данных, откройте
-              кнопку «Открыть предпросмотр» справа сверху или перейдите в
-              «Сканер схем».
-            </p>
-          </div>
+        <div className="mt-3 space-y-3">
+          {helpOpen && <ChatHelpDrawer open={helpOpen} onClose={() => setHelpOpen(false)} />}
+
+          {otherPendingCount > 0 && (
+            <div className="rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">
+              В других чатах сейчас выполняется {otherPendingCount === 1 ? "1 запрос" : `${otherPendingCount} запроса`}.
+              Вы можете продолжить работу в текущем чате независимо от них.
+            </div>
+          )}
+
           <div className="rounded-lg border bg-card p-3">
             <div className="flex items-center gap-2">
               <ShieldCheck className="h-4 w-4 text-primary" />
@@ -266,10 +254,10 @@ export default function ChatPage() {
               <ChatMessage
                 key={`${message.created_at}-${message.role}-${index}`}
                 message={message}
-                responseStyle={responseStyle}
+                responseStyle={activeResponseStyle}
               />
             ))}
-            {sendMessage.isPending && <ChatThinking />}
+            {activeSessionPending && <ChatThinking />}
             <div ref={bottomRef} />
           </div>
         )}
@@ -281,12 +269,17 @@ export default function ChatPage() {
         </div>
       )}
 
-      <ChatInput
-        onSend={handleSend}
-        disabled={isChatBusy}
-        responseStyle={responseStyle}
-        onResponseStyleChange={setResponseStyle}
+      <ChatControlsBar
+        chatTitle={activeSession?.title ?? "новый чат"}
+        responseStyle={activeResponseStyle}
+        detailLevel={activeDetailLevel}
+        disabled={!activeSessionId || isChatBusy}
+        saving={updateChatSettings.isPending}
+        onResponseStyleChange={handleResponseStyleChange}
+        onDetailLevelChange={handleDetailLevelChange}
       />
+
+      <ChatInput onSend={handleSend} disabled={isChatBusy} />
     </div>
   );
 }
