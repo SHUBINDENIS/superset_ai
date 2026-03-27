@@ -7,10 +7,10 @@ import {
   useState,
   type SelectHTMLAttributes,
 } from "react";
-import { Eye, RefreshCw } from "lucide-react";
+import { ArrowRight, Eye, RefreshCw, Share2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { VizFlowGuide } from "@/components/viz-flow-guide";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { ResultTable } from "@/components/result-table";
 import {
   buildPreviewTemplateSql,
@@ -48,14 +48,12 @@ export default function PreviewPage() {
   const databasesQuery = useVizDatabases();
   const datasetsQuery = useVizDatasets(300);
   const previewMutation = usePreviewMutation();
-  const { previewState } = useVizFlow();
+  const { previewState, recommendation } = useVizFlow();
 
   const [databaseId, setDatabaseId] = useState<number | null>(null);
   const [datasetId, setDatasetId] = useState<number | null>(null);
-  const [schema, setSchema] = useState("");
   const [previewLimit, setPreviewLimit] = useState<number>(20);
   const [template, setTemplate] = useState<PreviewTemplate>("table_preview");
-  const [sql, setSql] = useState("");
   const [columnTypeFilter, setColumnTypeFilter] = useState("all");
   const [columnFocus, setColumnFocus] = useState("");
   const [feedback, setFeedback] = useState<string>("");
@@ -63,16 +61,29 @@ export default function PreviewPage() {
 
   const databases = databasesQuery.data?.databases ?? [];
   const allDatasets = datasetsQuery.data?.datasets ?? [];
+  const selectedDatabase = useMemo(
+    () => databases.find((item) => item.id === databaseId) ?? null,
+    [databaseId, databases],
+  );
 
   const datasetCandidates = useMemo(() => {
     if (!databaseId) {
-      return allDatasets;
+      return [];
     }
-    const filtered = allDatasets.filter(
-      (item) => item.database_id === null || item.database_id === databaseId,
-    );
-    return filtered.length ? filtered : allDatasets;
-  }, [allDatasets, databaseId]);
+    const selectedDatabaseName = String(selectedDatabase?.name || "").trim();
+    return allDatasets.filter((item) => {
+      if (item.database_id === databaseId) {
+        return true;
+      }
+      if (item.database_id !== null) {
+        return false;
+      }
+      return (
+        selectedDatabaseName.length > 0 &&
+        String(item.database_name || "").trim() === selectedDatabaseName
+      );
+    });
+  }, [allDatasets, databaseId, selectedDatabase?.name]);
 
   const selectedDataset = useMemo(
     () => datasetCandidates.find((item) => item.id === datasetId) ?? null,
@@ -81,6 +92,11 @@ export default function PreviewPage() {
   const metadataQuery = useDatasetMetadata(datasetId);
   const metadata = metadataQuery.data ?? null;
   const preview = previewState?.preview ?? null;
+  const previewContextLabel =
+    previewState?.datasetLabel ||
+    selectedDataset?.table_name ||
+    "выбранный датасет";
+  const previewHasRows = Boolean(preview && preview.rows.length > 0);
 
   useEffect(() => {
     if (!databases.length) return;
@@ -107,18 +123,6 @@ export default function PreviewPage() {
     setDatasetId(nextId);
   }, [datasetCandidates, datasetId, previewState?.datasetId]);
 
-  useEffect(() => {
-    if (selectedDataset?.schema && !schema) {
-      setSchema(selectedDataset.schema);
-    }
-  }, [schema, selectedDataset?.schema]);
-
-  useEffect(() => {
-    if (previewState?.sql && !sql) {
-      setSql(previewState.sql);
-    }
-  }, [previewState?.sql, sql]);
-
   const previewColumns = preview?.columns ?? [];
   const filteredPreviewColumns = previewColumns.filter((column) => {
     if (columnTypeFilter === "all") return true;
@@ -138,36 +142,28 @@ export default function PreviewPage() {
     setFeedback("Источники обновлены.");
   }
 
-  function handleApplyTemplate() {
-    clearMessages();
-    if (!selectedDataset) {
-      setLocalError("Выберите таблицу/датасет, чтобы подготовить быстрый просмотр.");
-      return;
-    }
-    try {
-      const nextSql = buildPreviewTemplateSql({
-        dataset: selectedDataset,
-        metadata,
-        template,
-        previewLimit,
-      });
-      setSql(nextSql);
-      setFeedback("Основа для быстрого просмотра подготовлена.");
-    } catch (error) {
-      setLocalError(
-        error instanceof Error ? error.message : "Не удалось подготовить шаблон.",
-      );
-    }
-  }
-
   function handleRunPreview() {
     clearMessages();
     if (!databaseId) {
       setLocalError("Выберите базу данных для предпросмотра.");
       return;
     }
-    if (!sql.trim()) {
-      setLocalError("Подготовьте основу для просмотра или вставьте SQL.");
+    if (!selectedDataset) {
+      setLocalError("Выберите таблицу/датасет для быстрого просмотра.");
+      return;
+    }
+    let sql = "";
+    try {
+      sql = buildPreviewTemplateSql({
+        dataset: selectedDataset,
+        metadata,
+        template,
+        previewLimit,
+      });
+    } catch (error) {
+      setLocalError(
+        error instanceof Error ? error.message : "Не удалось подготовить быстрый просмотр.",
+      );
       return;
     }
     const traceContext = createTraceContext({ route: "/app/preview" });
@@ -177,7 +173,6 @@ export default function PreviewPage() {
         database_id: databaseId,
         dataset_id: datasetId ?? "",
         preview_limit: previewLimit,
-        has_schema: Boolean(schema.trim()),
         sql_chars: sql.trim().length,
         source_window: "preview",
       },
@@ -186,9 +181,12 @@ export default function PreviewPage() {
     previewMutation.mutate({
       database_id: databaseId,
       dataset_id: datasetId,
-      schema,
+      schema: selectedDataset.schema || "",
       sql,
       preview_limit: previewLimit,
+      datasetLabel: selectedDataset.table_name,
+      databaseName: selectedDatabase?.name || "",
+      previewTemplate: template,
       traceContext,
     });
   }
@@ -219,35 +217,11 @@ export default function PreviewPage() {
           </Button>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-3">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">1. Быстрый взгляд</CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm text-muted-foreground">
-              Посмотрите несколько строк, чтобы понять, что источник выбран
-              правильно.
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">2. Понять поля</CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm text-muted-foreground">
-              Посмотрите объяснения колонок, чтобы выбрать метрику, дату и
-              категорию без ручного SQL-анализа.
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">3. Можно пропустить</CardTitle>
-            </CardHeader>
-            <CardContent className="text-sm text-muted-foreground">
-              Если вопрос уже понятен, можно сразу идти в чат или в создание
-              графика.
-            </CardContent>
-          </Card>
-        </div>
+        <VizFlowGuide
+          currentStep="preview"
+          hasPreview={!!preview}
+          hasRecommendation={!!recommendation}
+        />
 
         {(feedback || localError || previewMutation.isError) && (
           <div
@@ -279,7 +253,7 @@ export default function PreviewPage() {
                 >
                   {databases.map((item) => (
                     <option key={item.id} value={item.id}>
-                      {item.id}: {item.name} ({item.backend})
+                      {item.name} ({item.backend})
                     </option>
                   ))}
                 </SelectField>
@@ -293,23 +267,21 @@ export default function PreviewPage() {
                   onChange={(event) =>
                     setDatasetId(Number(event.target.value) || null)
                   }
+                  disabled={!databaseId || datasetCandidates.length === 0}
                 >
+                  {datasetCandidates.length === 0 && (
+                    <option value="">
+                      {databaseId
+                        ? "Для выбранной базы таблицы не найдены"
+                        : "Сначала выберите базу данных"}
+                    </option>
+                  )}
                   {datasetCandidates.map((item) => (
                     <option key={item.id} value={item.id}>
-                      {item.id}: {item.schema ? `${item.schema}.` : ""}
                       {item.table_name}
-                      {item.database_name ? ` (${item.database_name})` : ""}
                     </option>
                   ))}
                 </SelectField>
-              </div>
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Schema</label>
-                <Input
-                  value={schema}
-                  onChange={(event) => setSchema(event.target.value)}
-                  placeholder="public"
-                />
               </div>
             </div>
 
@@ -358,9 +330,9 @@ export default function PreviewPage() {
             </div>
 
             <div className="rounded-lg border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-              Не хотите думать про SQL? Выберите таблицу/датасет и нажмите
-              «Подготовить быстрый просмотр». Если dataset metadata уже
-              загрузилась, шаблон возьмёт подходящие поля автоматически.
+              Выберите таблицу/датасет и нажмите «Быстро посмотреть данные».
+              Шаблон запроса будет собран автоматически на основе выбранного
+              сценария и доступной metadata.
             </div>
 
             {metadata && (
@@ -370,32 +342,35 @@ export default function PreviewPage() {
                 объяснить поля после preview.
               </div>
             )}
+
+            {previewState && (
+              <div className="rounded-lg border bg-primary/5 px-4 py-3 text-sm text-muted-foreground">
+                Текущий контекст шага:{" "}
+                <span className="font-medium text-foreground">
+                  {previewContextLabel}
+                </span>
+                {previewState.databaseName ? ` из базы ${previewState.databaseName}` : ""}.
+                Если обновите preview, этот же контекст автоматически перейдёт
+                в рекомендации и затем в создание виджета.
+              </div>
+            )}
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base">Запрос и запуск</CardTitle>
+            <CardTitle className="text-base">Запуск просмотра</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <textarea
-              value={sql}
-              onChange={(event) => setSql(event.target.value)}
-              rows={8}
-              className="min-h-[180px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              placeholder="Выберите таблицу выше и подготовьте быстрый просмотр или вставьте свой SQL."
-            />
+            <div className="rounded-lg border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+              Кнопка ниже сразу выполняет запрос на основе выбранных базы,
+              датасета, шаблона и лимита строк. Дополнительная ручная настройка
+              SQL на этом шаге больше не требуется.
+            </div>
             <div className="flex flex-wrap gap-3">
               <Button
-                variant="outline"
-                onClick={handleApplyTemplate}
-                disabled={!selectedDataset || metadataQuery.isLoading}
-              >
-                Подготовить быстрый просмотр
-              </Button>
-              <Button
                 onClick={handleRunPreview}
-                disabled={previewMutation.isPending}
+                disabled={previewMutation.isPending || !selectedDataset || !databaseId}
               >
                 {previewMutation.isPending
                   ? "Готовим просмотр..."
@@ -416,26 +391,52 @@ export default function PreviewPage() {
               хотите проверить поля и примеры значений. Если это не нужно,
               можно пропустить шаг и вернуться в чат с бизнес-вопросом.
             </p>
+            <div className="mt-4 flex flex-wrap justify-center gap-3">
+              <Button asChild variant="outline">
+                <Link href="/app/recommend">Перейти к рекомендациям без preview</Link>
+              </Button>
+              <Button asChild variant="ghost">
+                <Link href="/app/share">Сразу к созданию графика</Link>
+              </Button>
+            </div>
           </div>
         ) : (
           <>
-            <div className="grid gap-4 md:grid-cols-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-sm">Database ID</CardTitle>
-                </CardHeader>
-                <CardContent className="text-2xl font-semibold">
-                  {preview.database_id}
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-sm">Schema</CardTitle>
-                </CardHeader>
-                <CardContent className="text-2xl font-semibold">
-                  {preview.schema || "—"}
-                </CardContent>
-              </Card>
+            <Card className="border-primary/20 bg-primary/5">
+              <CardHeader>
+                <CardTitle className="text-base">Следующий логичный шаг</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Preview по <span className="font-medium text-foreground">{previewContextLabel}</span>{" "}
+                  выполнен: видно {preview.rows_count} строк и {preview.columns.length} полей.
+                  Дальше можно либо подобрать тип графика автоматически, либо сразу
+                  создать виджет вручную на том же контексте.
+                </p>
+                <div className="flex flex-wrap gap-3">
+                  <Button asChild>
+                    <Link href="/app/recommend">
+                      <Sparkles className="mr-2 h-4 w-4" />
+                      Подобрать тип графика
+                    </Link>
+                  </Button>
+                  <Button asChild variant="outline">
+                    <Link href="/app/share">
+                      <Share2 className="mr-2 h-4 w-4" />
+                      Сразу создать виджет
+                    </Link>
+                  </Button>
+                </div>
+                {!previewHasRows && (
+                  <p className="text-sm text-muted-foreground">
+                    Preview выполнился без строк. В этом случае сначала стоит
+                    проверить источник или шаблон, а затем переходить к следующему шагу.
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            <div className="grid gap-4 md:grid-cols-2">
               <Card>
                 <CardHeader>
                   <CardTitle className="text-sm">Строк в выборке</CardTitle>
@@ -555,6 +556,18 @@ export default function PreviewPage() {
                     </p>
                   </div>
                 )}
+
+                <div className="flex flex-wrap gap-3 pt-2">
+                  <Button asChild>
+                    <Link href="/app/recommend">
+                      Продолжить к рекомендациям
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Link>
+                  </Button>
+                  <Button asChild variant="outline">
+                    <Link href="/app/share">Открыть создание графика</Link>
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           </>

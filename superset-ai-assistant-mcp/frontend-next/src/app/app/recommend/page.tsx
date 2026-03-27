@@ -7,8 +7,9 @@ import {
   useState,
   type SelectHTMLAttributes,
 } from "react";
-import { Sparkles } from "lucide-react";
+import { ArrowRight, Share2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { VizFlowGuide } from "@/components/viz-flow-guide";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ResultTable } from "@/components/result-table";
 import { useRecommendMutation, useVizFlow } from "@/hooks/use-viz";
@@ -28,6 +29,7 @@ export default function RecommendPage() {
   const { previewState, recommendation, setRecommendation } = useVizFlow();
   const preview = previewState?.preview ?? null;
   const previewColumns = preview?.columns ?? [];
+  const previewContextLabel = previewState?.datasetLabel || "предпросмотренный датасет";
 
   const numericColumns = useMemo(
     () =>
@@ -140,40 +142,11 @@ export default function RecommendPage() {
           </Button>
         </div>
 
-        <div className="grid gap-4 md:grid-cols-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Строк</CardTitle>
-            </CardHeader>
-            <CardContent className="text-2xl font-semibold">
-              {preview?.rows.length ?? 0}
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Числовых полей</CardTitle>
-            </CardHeader>
-            <CardContent className="text-2xl font-semibold">
-              {numericColumns.length}
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Временных полей</CardTitle>
-            </CardHeader>
-            <CardContent className="text-2xl font-semibold">
-              {temporalColumns.length}
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm">Категориальных полей</CardTitle>
-            </CardHeader>
-            <CardContent className="text-2xl font-semibold">
-              {categoricalColumns.length}
-            </CardContent>
-          </Card>
-        </div>
+        <VizFlowGuide
+          currentStep="recommend"
+          hasPreview={!!preview}
+          hasRecommendation={!!recommendation}
+        />
 
         {(feedback || localError || recommendMutation.isError) && (
           <div
@@ -191,18 +164,39 @@ export default function RecommendPage() {
           <div className="rounded-lg border bg-card px-4 py-8 text-center">
             <p className="text-base font-medium">Нет данных для рекомендации</p>
             <p className="mt-2 text-sm text-muted-foreground">
-              В новом frontend этот шаг опирается на preview context. Сначала
-              выполните предпросмотр, если хотите проверить поля и значения
-              перед выбором графика.
+              Этот шаг использует результат предпросмотра: строки, типы полей и
+              краткие объяснения колонок. Сначала откройте предпросмотр, чтобы
+              сервису было на что опереться при подборе графика.
             </p>
-            <div className="mt-4">
+            <div className="mt-4 flex flex-wrap justify-center gap-3">
               <Button asChild>
                 <Link href="/app/preview">Открыть предпросмотр</Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link href="/app/share">Перейти к созданию вручную</Link>
               </Button>
             </div>
           </div>
         ) : (
           <>
+            <Card className="border-primary/20 bg-primary/5">
+              <CardHeader>
+                <CardTitle className="text-base">Что уже перенесено из preview</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm text-muted-foreground">
+                <p>
+                  Контекст по <span className="font-medium text-foreground">{previewContextLabel}</span>
+                  {previewState?.databaseName ? ` из базы ${previewState.databaseName}` : ""} уже загружен.
+                  В рекомендации автоматически используются {preview.rows.length} строк,
+                  {preview.columns.length} профилей полей и выбранный ранее датасет.
+                </p>
+                <p>
+                  После этого шага на странице создания виджета автоматически
+                  предзаполнятся тип графика и выбранные поля.
+                </p>
+              </CardContent>
+            </Card>
+
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Параметры рекомендации</CardTitle>
@@ -282,11 +276,44 @@ export default function RecommendPage() {
                 </p>
                 <p className="mt-2 text-sm text-muted-foreground">
                   Нажмите «Подобрать тип графика», чтобы получить быстрый
-                  ориентир перед созданием виджета.
+                  ориентир перед созданием виджета. Если тип уже понятен,
+                  можно пропустить этот шаг и продолжить вручную.
                 </p>
+                <div className="mt-4 flex flex-wrap justify-center gap-3">
+                  <Button asChild variant="outline">
+                    <Link href="/app/share">Открыть создание вручную</Link>
+                  </Button>
+                </div>
               </div>
             ) : (
               <>
+                <Card className="border-primary/20 bg-primary/5">
+                  <CardHeader>
+                    <CardTitle className="text-base">Можно продолжать</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <p className="text-sm text-muted-foreground">
+                      Рекомендация готова: следующий шаг — создать виджет.
+                      Страница «Шеринг» уже получит рекомендованный тип графика
+                      и выбранные поля.
+                    </p>
+                    <div className="flex flex-wrap gap-3">
+                      <Button asChild>
+                        <Link href="/app/share">
+                          <Share2 className="mr-2 h-4 w-4" />
+                          Продолжить к созданию виджета
+                        </Link>
+                      </Button>
+                      <Button asChild variant="outline">
+                        <Link href="/app/preview">
+                          Вернуться к данным
+                          <ArrowRight className="ml-2 h-4 w-4" />
+                        </Link>
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+
                 <div className="grid gap-4 md:grid-cols-4">
                   <Card>
                     <CardHeader>
@@ -339,6 +366,14 @@ export default function RecommendPage() {
                         reason: item.reason,
                       }))}
                     />
+                    <div className="mt-4 flex flex-wrap gap-3">
+                      <Button asChild>
+                        <Link href="/app/share">Создать график по рекомендации</Link>
+                      </Button>
+                      <Button asChild variant="outline">
+                        <Link href="/app/preview">Проверить данные ещё раз</Link>
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
               </>

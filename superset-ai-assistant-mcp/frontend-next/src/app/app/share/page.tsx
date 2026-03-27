@@ -6,8 +6,9 @@ import {
   useState,
   type SelectHTMLAttributes,
 } from "react";
-import { Share2 } from "lucide-react";
+import { ArrowRight, Share2, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { VizFlowGuide } from "@/components/viz-flow-guide";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { LinkResultCard } from "@/components/link-result-card";
@@ -26,6 +27,31 @@ import {
 
 const ROW_LIMITS = [100, 500, 1000, 5000, 10000] as const;
 
+function compactLabel(value: string, fallback: string) {
+  const clean = String(value || "").trim();
+  return clean || fallback;
+}
+
+function buildDashboardTitle(sourceLabel: string) {
+  return compactLabel(`Дашборд: ${sourceLabel}`, "AI Dashboard");
+}
+
+function buildSliceTitle(params: {
+  vizType: string;
+  metricColumn: string;
+  dimensionColumn: string;
+  sourceLabel: string;
+}) {
+  const { vizType, metricColumn, dimensionColumn, sourceLabel } = params;
+  if (metricColumn && dimensionColumn) {
+    return compactLabel(`${vizType}: ${metricColumn} по ${dimensionColumn}`, "AI Widget");
+  }
+  if (metricColumn) {
+    return compactLabel(`${vizType}: ${metricColumn}`, "AI Widget");
+  }
+  return compactLabel(`${vizType}: ${sourceLabel}`, "AI Widget");
+}
+
 function SelectField(props: SelectHTMLAttributes<HTMLSelectElement>) {
   return (
     <select
@@ -40,6 +66,9 @@ export default function SharePage() {
   const shareMutation = useShareWidgetMutation();
   const { previewState, recommendation } = useVizFlow();
   const previewColumns = previewState?.preview?.columns ?? [];
+  const sourceLabel = previewState?.datasetLabel || "выбранный датасет";
+  const hasPreviewContext = !!previewState?.preview;
+  const hasRecommendation = !!recommendation;
 
   const [datasetId, setDatasetId] = useState<number | null>(null);
   const [dashboardTitle, setDashboardTitle] = useState("AI Dashboard");
@@ -53,6 +82,9 @@ export default function SharePage() {
   const [feedback, setFeedback] = useState("");
   const [localError, setLocalError] = useState("");
   const [result, setResult] = useState<ShareWidgetResult | null>(null);
+  const [dashboardTitleTouched, setDashboardTitleTouched] = useState(false);
+  const [sliceNameTouched, setSliceNameTouched] = useState(false);
+  const [descriptionTouched, setDescriptionTouched] = useState(false);
 
   const datasets = datasetsQuery.data?.datasets ?? [];
   const metadataQuery = useDatasetMetadata(datasetId);
@@ -88,6 +120,59 @@ export default function SharePage() {
       setTimeColumn(recommendation.selected_columns.time);
     }
   }, [recommendation]);
+
+  useEffect(() => {
+    if (!dashboardTitleTouched && hasPreviewContext) {
+      setDashboardTitle(buildDashboardTitle(sourceLabel));
+    }
+  }, [dashboardTitleTouched, hasPreviewContext, sourceLabel]);
+
+  useEffect(() => {
+    if (!sliceNameTouched) {
+      setSliceName(
+        buildSliceTitle({
+          vizType: recommendation?.recommended || vizType,
+          metricColumn: recommendation?.selected_columns.metric || metricColumn,
+          dimensionColumn:
+            recommendation?.selected_columns.dimension || dimensionColumn,
+          sourceLabel,
+        }),
+      );
+    }
+  }, [
+    dimensionColumn,
+    metricColumn,
+    recommendation?.recommended,
+    recommendation?.selected_columns.dimension,
+    recommendation?.selected_columns.metric,
+    sliceNameTouched,
+    sourceLabel,
+    vizType,
+  ]);
+
+  useEffect(() => {
+    if (!descriptionTouched && !description) {
+      if (hasRecommendation) {
+        setDescription(
+          `Виджет создан по данным ${sourceLabel}. Рекомендованный тип: ${recommendation?.recommended || vizType}.`,
+        );
+        return;
+      }
+      if (hasPreviewContext) {
+        setDescription(
+          `Виджет создан по данным ${sourceLabel} на основе предпросмотра и выбранных полей.`,
+        );
+      }
+    }
+  }, [
+    description,
+    descriptionTouched,
+    hasPreviewContext,
+    hasRecommendation,
+    recommendation?.recommended,
+    sourceLabel,
+    vizType,
+  ]);
 
   const groupedColumns = collectColumnOptions(previewColumns, metadata?.columns ?? []);
 
@@ -162,6 +247,70 @@ export default function SharePage() {
             <Link href="/app/recommend">Вернуться к рекомендациям</Link>
           </Button>
         </div>
+
+        <VizFlowGuide
+          currentStep="share"
+          hasPreview={hasPreviewContext}
+          hasRecommendation={hasRecommendation}
+        />
+
+        <Card className="border-primary/20 bg-primary/5">
+          <CardHeader>
+            <CardTitle className="text-base">Контекст текущего шага</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm text-muted-foreground">
+            {hasRecommendation ? (
+              <>
+                <p>
+                  Контекст из preview и рекомендаций уже перенесён. Датасет,
+                  тип графика и ключевые поля предзаполнены настолько, насколько
+                  это безопасно по текущему flow state.
+                </p>
+                <div className="flex flex-wrap gap-3">
+                  <Button asChild variant="outline" size="sm">
+                    <Link href="/app/recommend">
+                      <Sparkles className="mr-2 h-4 w-4" />
+                      Вернуться к рекомендации
+                    </Link>
+                  </Button>
+                </div>
+              </>
+            ) : hasPreviewContext ? (
+              <>
+                <p>
+                  Preview по <span className="font-medium text-foreground">{sourceLabel}</span>{" "}
+                  уже есть, поэтому датасет и список полей можно взять из текущего контекста.
+                  Если хотите, чтобы тип графика тоже был предложен автоматически,
+                  сначала откройте рекомендации.
+                </p>
+                <div className="flex flex-wrap gap-3">
+                  <Button asChild variant="outline" size="sm">
+                    <Link href="/app/recommend">
+                      <Sparkles className="mr-2 h-4 w-4" />
+                      Сначала подобрать тип графика
+                    </Link>
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p>
+                  Эту страницу можно использовать и вручную, но сейчас у неё нет
+                  контекста из preview или рекомендаций. Поэтому поля и тип графика
+                  не предзаполнены.
+                </p>
+                <div className="flex flex-wrap gap-3">
+                  <Button asChild variant="outline" size="sm">
+                    <Link href="/app/preview">Сначала посмотреть данные</Link>
+                  </Button>
+                  <Button asChild variant="ghost" size="sm">
+                    <Link href="/app/recommend">Или сразу к рекомендациям</Link>
+                  </Button>
+                </div>
+              </>
+            )}
+          </CardContent>
+        </Card>
 
         <div className="grid gap-4 md:grid-cols-4">
           <Card>
@@ -287,14 +436,20 @@ export default function SharePage() {
                     <label className="text-sm font-medium">Название дашборда</label>
                     <Input
                       value={dashboardTitle}
-                      onChange={(event) => setDashboardTitle(event.target.value)}
+                      onChange={(event) => {
+                        setDashboardTitleTouched(true);
+                        setDashboardTitle(event.target.value);
+                      }}
                     />
                   </div>
                   <div className="space-y-2">
                     <label className="text-sm font-medium">Название виджета</label>
                     <Input
                       value={sliceName}
-                      onChange={(event) => setSliceName(event.target.value)}
+                      onChange={(event) => {
+                        setSliceNameTouched(true);
+                        setSliceName(event.target.value);
+                      }}
                     />
                   </div>
                 </div>
@@ -363,7 +518,10 @@ export default function SharePage() {
                   </label>
                   <textarea
                     value={description}
-                    onChange={(event) => setDescription(event.target.value)}
+                    onChange={(event) => {
+                      setDescriptionTouched(true);
+                      setDescription(event.target.value);
+                    }}
                     rows={4}
                     className="min-h-[96px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                   />
@@ -385,6 +543,14 @@ export default function SharePage() {
                   пока непонятно, какой график нужен, вернитесь в
                   «Рекомендации».
                 </p>
+                <div className="mt-4 flex flex-wrap justify-center gap-3">
+                  <Button asChild variant="outline">
+                    <Link href="/app/recommend">
+                      Вернуться к рекомендации
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Link>
+                  </Button>
+                </div>
               </div>
             ) : (
               <>
@@ -434,6 +600,18 @@ export default function SharePage() {
                     <pre className="overflow-x-auto rounded-md bg-muted p-4 text-xs">
                       {JSON.stringify(result.params, null, 2)}
                     </pre>
+                    <div className="mt-4 flex flex-wrap gap-3">
+                      <Button asChild>
+                        <Link href={result.dashboard_link} target="_blank">
+                          Открыть дашборд
+                        </Link>
+                      </Button>
+                      <Button asChild variant="outline">
+                        <Link href={result.chart_link} target="_blank">
+                          Открыть график
+                        </Link>
+                      </Button>
+                    </div>
                   </CardContent>
                 </Card>
               </>
