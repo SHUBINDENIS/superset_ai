@@ -62,6 +62,13 @@ class TestChatSessionCRUD(unittest.TestCase):
         )
         self.token = login_resp.cookies.get("ai_assistant_auth_token")
 
+        mock_manager = MagicMock()
+        mock_manager.close_session = AsyncMock(return_value=None)
+        from api.deps import get_agent_session_manager
+
+        self.app.dependency_overrides[get_agent_session_manager] = lambda: mock_manager
+        self.mock_agent_manager = mock_manager
+
     def tearDown(self):
         self.app.dependency_overrides.clear()
         self.deps_mod._auth_service_instance = None
@@ -245,6 +252,143 @@ class TestChatSessionCRUD(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 404)
 
+    def test_delete_chat_archives_session_and_removes_from_list(self):
+        first = self.client.post(
+            "/api/chats",
+            json={"title": "First"},
+            cookies=self._auth_cookies(),
+        ).json()["session_id"]
+        second = self.client.post(
+            "/api/chats",
+            json={"title": "Second"},
+            cookies=self._auth_cookies(),
+        ).json()["session_id"]
+
+        resp = self.client.delete(
+            f"/api/chats/{first}",
+            cookies=self._auth_cookies(),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["deleted_session_id"], first)
+        self.assertFalse(resp.json()["was_active"])
+        self.assertEqual(resp.json()["next_active_session_id"], second)
+        self.mock_agent_manager.close_session.assert_awaited_with(first)
+
+        list_resp = self.client.get("/api/chats", cookies=self._auth_cookies())
+        ids = [s["session_id"] for s in list_resp.json()["sessions"]]
+        self.assertNotIn(first, ids)
+        self.assertIn(second, ids)
+
+        for method, path, payload in (
+            ("get", f"/api/chats/{first}/messages", None),
+            ("delete", f"/api/chats/{first}/messages", None),
+            ("post", f"/api/chats/{first}/activate", None),
+            ("patch", f"/api/chats/{first}", {"title": "Renamed"}),
+            ("post", f"/api/chats/{first}/messages", {"content": "hi"}),
+        ):
+            kwargs = {"cookies": self._auth_cookies()}
+            if payload is not None:
+                kwargs["json"] = payload
+            response = getattr(self.client, method)(path, **kwargs)
+            self.assertEqual(response.status_code, 404)
+
+    def test_delete_last_chat_clears_active_session_pointer(self):
+        created = self.client.post(
+            "/api/chats",
+            json={"title": "Only"},
+            cookies=self._auth_cookies(),
+        ).json()["session_id"]
+
+        sessions = self.client.get("/api/chats", cookies=self._auth_cookies()).json()["sessions"]
+        for session in sessions:
+            if session["session_id"] != created:
+                self.client.delete(
+                    f"/api/chats/{session['session_id']}",
+                    cookies=self._auth_cookies(),
+                )
+
+        resp = self.client.delete(
+            f"/api/chats/{created}",
+            cookies=self._auth_cookies(),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["deleted_session_id"], created)
+        self.assertTrue(resp.json()["was_active"])
+        self.assertIsNone(resp.json()["next_active_session_id"])
+
+        me_resp = self.client.get("/api/auth/me", cookies=self._auth_cookies())
+        self.assertEqual(me_resp.status_code, 200)
+        self.assertEqual(me_resp.json()["session_id"], "")
+
+    def test_delete_active_chat_reassigns_active_pointer(self):
+        first = self.client.post(
+            "/api/chats",
+            json={"title": "First"},
+            cookies=self._auth_cookies(),
+        ).json()["session_id"]
+        second = self.client.post(
+            "/api/chats",
+            json={"title": "Second"},
+            cookies=self._auth_cookies(),
+        ).json()["session_id"]
+        self.client.post(f"/api/chats/{first}/activate", cookies=self._auth_cookies())
+
+        resp = self.client.delete(
+            f"/api/chats/{first}",
+            cookies=self._auth_cookies(),
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["was_active"])
+        self.assertEqual(resp.json()["next_active_session_id"], second)
+
+        me_resp = self.client.get("/api/auth/me", cookies=self._auth_cookies())
+        self.assertEqual(me_resp.status_code, 200)
+        self.assertEqual(me_resp.json()["session_id"], second)
+
+    def test_delete_chat_unauthenticated_returns_401(self):
+        anon = TestClient(self.app)
+        resp = anon.delete("/api/chats/00000000")
+        self.assertEqual(resp.status_code, 401)
+
+    def test_delete_other_users_chat_returns_404(self):
+        other_client = TestClient(self.app)
+        other_client.post(
+            "/api/auth/register",
+            json={"username": "otheruser", "password": "strongpass"},
+        )
+        other_login = other_client.post(
+            "/api/auth/login",
+            json={"username": "otheruser", "password": "strongpass"},
+        )
+        other_cookies = {
+            "ai_assistant_auth_token": other_login.cookies.get("ai_assistant_auth_token"),
+        }
+
+        foreign_session = self.client.post(
+            "/api/chats",
+            json={"title": "Foreign"},
+            cookies=self._auth_cookies(),
+        ).json()["session_id"]
+
+        resp = other_client.delete(f"/api/chats/{foreign_session}", cookies=other_cookies)
+        self.assertEqual(resp.status_code, 404)
+
+    def test_delete_chat_still_succeeds_when_in_memory_cleanup_fails(self):
+        session_id = self.client.post(
+            "/api/chats",
+            json={"title": "Cleanup failure"},
+            cookies=self._auth_cookies(),
+        ).json()["session_id"]
+        self.mock_agent_manager.close_session = AsyncMock(side_effect=RuntimeError("close failed"))
+
+        resp = self.client.delete(
+            f"/api/chats/{session_id}",
+            cookies=self._auth_cookies(),
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["deleted_session_id"], session_id)
+
     # ------------------------------------------------------------------
     # Full CRUD flow
     # ------------------------------------------------------------------
@@ -366,7 +510,7 @@ class TestSendMessage(unittest.TestCase):
     # Successful message send
     # ------------------------------------------------------------------
     def test_send_message_success(self):
-        self._install_mock_agent({
+        mock_agent = self._install_mock_agent({
             "content": "Hello! I can help with that.",
             "role": "assistant",
             "finish_reason": "stop",
@@ -386,6 +530,33 @@ class TestSendMessage(unittest.TestCase):
         self.assertEqual(data["role"], "assistant")
         self.assertEqual(data["model"], "test-model")
         self.assertEqual(data["session_id"], self.session_id)
+        mock_agent.chat.assert_awaited_once_with(
+            [{"role": "user", "content": "What tables are available?"}],
+            response_style="business",
+        )
+
+    def test_send_message_passes_technical_response_style(self):
+        mock_agent = self._install_mock_agent({
+            "content": "Technical answer",
+            "role": "assistant",
+            "finish_reason": "stop",
+            "model": "test-model",
+            "session_id": self.session_id,
+        })
+
+        resp = self.client.post(
+            f"/api/chats/{self.session_id}/messages",
+            json={
+                "content": "Опиши поля датасета",
+                "response_style": "technical",
+            },
+            cookies=self._auth_cookies(),
+        )
+        self.assertEqual(resp.status_code, 200)
+        mock_agent.chat.assert_awaited_once_with(
+            [{"role": "user", "content": "Опиши поля датасета"}],
+            response_style="technical",
+        )
 
     def test_send_message_persists_both_messages(self):
         """User message AND assistant reply should be in the DB afterward."""

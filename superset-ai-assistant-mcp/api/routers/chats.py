@@ -13,6 +13,7 @@ Endpoints:
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -28,6 +29,7 @@ from api.schemas import (
     ChatSessionListResponse,
     ChatSessionResponse,
     ClearMessagesResponse,
+    DeleteChatResponse,
     CreateChatRequest,
     MessageListResponse,
     RenameChatRequest,
@@ -36,6 +38,7 @@ from api.schemas import (
 )
 
 router = APIRouter(prefix="/api/chats", tags=["chats"])
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -123,6 +126,44 @@ def activate_chat(
             detail=str(exc),
         ) from exc
     return ChatSessionResponse(**updated)
+
+
+@router.delete("/{session_id}", response_model=DeleteChatResponse)
+async def delete_chat(
+    session_id: str,
+    request: Request,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    auth_service=Depends(get_auth_service),
+    agent_manager=Depends(get_agent_session_manager),
+) -> DeleteChatResponse:
+    """Archive a chat session and remove it from the active list."""
+    with bind_request_log_context(
+        request,
+        current_user,
+        session_id=session_id,
+        chat_id=session_id,
+    ):
+        try:
+            deleted = auth_service.archive_chat_session(
+                username=current_user["username"],
+                session_id=session_id,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=str(exc),
+            ) from exc
+
+        try:
+            await agent_manager.close_session(session_id)
+        except Exception as exc:
+            logger.warning(
+                "Failed to close in-memory chat session after archive: session_id=%s error=%r",
+                session_id,
+                exc,
+            )
+
+        return DeleteChatResponse(**deleted)
 
 
 # ---------------------------------------------------------------------------
@@ -218,7 +259,10 @@ async def send_message(
 
         # 5. Run agent
         try:
-            reply = await agent.chat(messages)
+            reply = await agent.chat(
+                messages,
+                response_style=body.response_style,
+            )
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

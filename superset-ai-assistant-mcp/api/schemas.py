@@ -8,7 +8,7 @@ backend.auth_service.AuthService.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -120,6 +120,7 @@ class MessageListResponse(BaseModel):
 
 class SendMessageRequest(BaseModel):
     content: str = Field(..., min_length=1)
+    response_style: Literal["business", "technical"] = "business"
 
 
 class SendMessageResponse(BaseModel):
@@ -134,6 +135,12 @@ class SendMessageResponse(BaseModel):
 
 class ClearMessagesResponse(BaseModel):
     deleted_count: int
+
+
+class DeleteChatResponse(BaseModel):
+    deleted_session_id: str
+    was_active: bool = False
+    next_active_session_id: str | None = None
 
 
 # ---------------------------------------------------------------------------

@@ -293,6 +293,28 @@ class AuthService:
             ),
         )
 
+    def _clear_active_session(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        username: str,
+        updated_at: str | None = None,
+    ) -> None:
+        clean_username = self._normalize_username(username)
+        if not clean_username:
+            return
+        conn.execute(
+            """
+            UPDATE auth_users
+            SET assistant_session_id = NULL, updated_at = ?
+            WHERE username = ? COLLATE NOCASE
+            """,
+            (
+                str(updated_at or self._utc_now()).strip() or self._utc_now(),
+                clean_username,
+            ),
+        )
+
     def _sync_chat_session_activity(
         self,
         conn: sqlite3.Connection,
@@ -506,8 +528,12 @@ class AuthService:
         clean_username = str(row["username"]).strip()
         role = str(row["role"]).strip() or "analyst"
         session_id = str(row["assistant_session_id"] or "").strip()
-        if not session_id:
-            session_id = self.rotate_user_session(clean_username)
+        active_session = self.get_chat_session(
+            username=clean_username,
+            session_id=session_id,
+        )
+        if not session_id or active_session is None:
+            session_id = self.get_or_create_user_session(clean_username)
         else:
             with self._connect() as conn:
                 metadata = self._load_history_session_metadata(
@@ -606,7 +632,11 @@ class AuthService:
             raise ValueError("Пользователь не найден.")
 
         session_id = str(row["assistant_session_id"] or "").strip()
-        if session_id:
+        active_session = self.get_chat_session(
+            username=clean_username,
+            session_id=session_id,
+        )
+        if session_id and active_session is not None:
             with self._connect() as conn:
                 metadata = self._load_history_session_metadata(
                     conn,
@@ -624,7 +654,7 @@ class AuthService:
                 )
             return session_id
 
-        sessions = self.list_chat_sessions(username=clean_username, include_archived=True)
+        sessions = self.list_chat_sessions(username=clean_username)
         if sessions:
             latest = sessions[0]
             session_id = str(latest["session_id"]).strip()
@@ -660,7 +690,7 @@ class AuthService:
                 """
                 SELECT session_id, last_message_at, updated_at
                 FROM auth_chat_sessions
-                WHERE username = ? COLLATE NOCASE AND session_id = ?
+                WHERE username = ? COLLATE NOCASE AND session_id = ? AND is_archived = 0
                 LIMIT 1
                 """,
                 (clean_username, clean_session_id),
@@ -796,6 +826,7 @@ class AuthService:
         *,
         username: str,
         session_id: str,
+        include_archived: bool = False,
     ) -> Optional[Dict[str, Any]]:
         clean_username = self._normalize_username(username)
         clean_session_id = str(session_id or "").strip()
@@ -803,14 +834,22 @@ class AuthService:
             return None
 
         with self._connect() as conn:
+            where_clause = """
+                WHERE username = ? COLLATE NOCASE AND session_id = ?
+            """
+            params: list[Any] = [clean_username, clean_session_id]
+            if not include_archived:
+                where_clause += " AND is_archived = 0"
             row = conn.execute(
                 """
                 SELECT username, session_id, title, created_at, updated_at, last_message_at, is_archived
                 FROM auth_chat_sessions
-                WHERE username = ? COLLATE NOCASE AND session_id = ?
+                """
+                + where_clause
+                + """
                 LIMIT 1
                 """,
-                (clean_username, clean_session_id),
+                tuple(params),
             ).fetchone()
         if row is None:
             return None
@@ -846,7 +885,7 @@ class AuthService:
                 """
                 UPDATE auth_chat_sessions
                 SET title = ?, updated_at = ?
-                WHERE username = ? COLLATE NOCASE AND session_id = ?
+                WHERE username = ? COLLATE NOCASE AND session_id = ? AND is_archived = 0
                 """,
                 (safe_title, now, clean_username, clean_session_id),
             )
@@ -857,6 +896,89 @@ class AuthService:
         if session is None:
             raise RuntimeError("Failed to load renamed chat session.")
         return session
+
+    def archive_chat_session(
+        self,
+        *,
+        username: str,
+        session_id: str,
+    ) -> Dict[str, Any]:
+        clean_username = self._normalize_username(username)
+        clean_session_id = str(session_id or "").strip()
+        if not clean_username or not clean_session_id:
+            raise ValueError("username and session_id are required")
+
+        now = self._utc_now()
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT session_id, is_archived
+                FROM auth_chat_sessions
+                WHERE username = ? COLLATE NOCASE AND session_id = ?
+                LIMIT 1
+                """,
+                (clean_username, clean_session_id),
+            ).fetchone()
+            if row is None or bool(int(row["is_archived"] or 0)):
+                raise ValueError("Chat session не найдена.")
+
+            conn.execute(
+                """
+                UPDATE auth_chat_sessions
+                SET is_archived = 1, updated_at = ?
+                WHERE username = ? COLLATE NOCASE AND session_id = ?
+                """,
+                (now, clean_username, clean_session_id),
+            )
+
+            user_row = conn.execute(
+                """
+                SELECT assistant_session_id
+                FROM auth_users
+                WHERE username = ? COLLATE NOCASE
+                LIMIT 1
+                """,
+                (clean_username,),
+            ).fetchone()
+            active_session_id = str(user_row["assistant_session_id"] or "").strip() if user_row else ""
+
+            next_session_row = conn.execute(
+                """
+                SELECT session_id, last_message_at, updated_at
+                FROM auth_chat_sessions
+                WHERE username = ? COLLATE NOCASE AND is_archived = 0
+                ORDER BY last_message_at DESC, updated_at DESC, created_at DESC, session_id DESC
+                LIMIT 1
+                """,
+                (clean_username,),
+            ).fetchone()
+
+            next_active_session_id = ""
+            if active_session_id == clean_session_id:
+                if next_session_row is not None:
+                    next_active_session_id = str(next_session_row["session_id"] or "").strip()
+                    self._set_active_session(
+                        conn,
+                        username=clean_username,
+                        session_id=next_active_session_id,
+                        updated_at=str(
+                            next_session_row["last_message_at"] or next_session_row["updated_at"] or now
+                        ).strip() or now,
+                    )
+                else:
+                    self._clear_active_session(
+                        conn,
+                        username=clean_username,
+                        updated_at=now,
+                    )
+            else:
+                next_active_session_id = active_session_id
+
+        return {
+            "deleted_session_id": clean_session_id,
+            "was_active": active_session_id == clean_session_id,
+            "next_active_session_id": next_active_session_id or None,
+        }
 
     def get_session_owner(self, session_id: str) -> Optional[str]:
         clean_session_id = str(session_id or "").strip()

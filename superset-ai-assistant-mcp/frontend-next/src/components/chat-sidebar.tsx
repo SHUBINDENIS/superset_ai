@@ -12,6 +12,7 @@ import {
   useChatUI,
   useCreateChat,
   useClearMessages,
+  useDeleteChat,
   useRenameChat,
 } from "@/hooks/use-chats";
 
@@ -25,6 +26,7 @@ export function ChatSidebar({ sessions }: ChatSidebarProps) {
   const createChat = useCreateChat();
   const renameChat = useRenameChat();
   const clearMessages = useClearMessages();
+  const deleteChat = useDeleteChat();
 
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -54,6 +56,20 @@ export function ChatSidebar({ sessions }: ChatSidebarProps) {
   function cancelRename() {
     setRenamingId(null);
     setRenameValue("");
+  }
+
+  function handleDelete(session: ChatSession) {
+    if (!window.confirm(`Удалить чат "${session.title}"?`)) {
+      return;
+    }
+    deleteChat.mutate({
+      sessionId: session.session_id,
+      traceContext: createTraceContext({
+        sessionId: session.session_id,
+        chatId: session.session_id,
+        route: "/app/chat",
+      }),
+    });
   }
 
   function formatTime(iso: string) {
@@ -171,18 +187,33 @@ export function ChatSidebar({ sessions }: ChatSidebarProps) {
                   <span className="truncate text-xs font-medium">
                     {s.title}
                   </span>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-5 w-5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      startRename(s);
-                    }}
-                    title="Переименовать"
-                  >
-                    <Pencil className="h-3 w-3" />
-                  </Button>
+                  <div className="flex items-center gap-0.5">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        startRename(s);
+                      }}
+                      title="Переименовать"
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5 shrink-0 opacity-0 transition-opacity group-hover:opacity-100"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(s);
+                      }}
+                      title="Удалить чат"
+                      disabled={deleteChat.isPending}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                  </div>
                 </div>
               )}
               {!isRenaming && s.last_message_at && (

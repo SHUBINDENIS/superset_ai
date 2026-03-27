@@ -44,6 +44,14 @@ export interface SendMessageResponse {
   session_id: string;
 }
 
+export type ResponseStyle = "business" | "technical";
+
+export interface DeleteChatResponse {
+  deleted_session_id: string;
+  was_active: boolean;
+  next_active_session_id: string | null;
+}
+
 /* ------------------------------------------------------------------ */
 /* API calls                                                          */
 /* ------------------------------------------------------------------ */
@@ -99,15 +107,26 @@ export const chatsApi = {
       traceContext,
     }),
 
+  /** Archive a chat session and remove it from the visible list. */
+  deleteChat: (
+    sessionId: string,
+    traceContext?: Partial<FrontendTraceContext>,
+  ) =>
+    apiFetch<DeleteChatResponse>(`/chats/${sessionId}`, {
+      method: "DELETE",
+      traceContext,
+    }),
+
   /** Send a user message and receive the assistant reply. */
   sendMessage: (
     sessionId: string,
     content: string,
+    responseStyle: ResponseStyle,
     traceContext?: Partial<FrontendTraceContext>,
   ) =>
     apiFetch<SendMessageResponse>(`/chats/${sessionId}/messages`, {
       method: "POST",
       traceContext,
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, response_style: responseStyle }),
     }),
 };

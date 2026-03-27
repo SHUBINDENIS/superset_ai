@@ -259,6 +259,69 @@ class TestAuthService(unittest.TestCase):
             [],
         )
 
+    def test_archive_non_active_chat_hides_it_from_default_list(self):
+        self.service.register_user("helen", "superpass")
+        first_session_id = self.service.get_or_create_user_session("helen")
+        second_session = self.service.create_chat_session("helen", title="Второй чат")
+
+        deleted = self.service.archive_chat_session(
+            username="helen",
+            session_id=first_session_id,
+        )
+
+        self.assertFalse(deleted["was_active"])
+        self.assertEqual(deleted["deleted_session_id"], first_session_id)
+        self.assertEqual(deleted["next_active_session_id"], second_session["session_id"])
+
+        visible_ids = {
+            item["session_id"] for item in self.service.list_chat_sessions(username="helen")
+        }
+        all_sessions = self.service.list_chat_sessions(username="helen", include_archived=True)
+
+        self.assertNotIn(first_session_id, visible_ids)
+        self.assertIn(second_session["session_id"], visible_ids)
+        archived = next(item for item in all_sessions if item["session_id"] == first_session_id)
+        self.assertTrue(archived["is_archived"])
+
+    def test_archive_active_chat_reassigns_active_pointer(self):
+        self.service.register_user("irene", "superpass")
+        first_session_id = self.service.get_or_create_user_session("irene")
+        second_session = self.service.create_chat_session("irene", title="Второй чат")
+
+        self.service.set_active_chat_session(
+            username="irene",
+            session_id=first_session_id,
+        )
+
+        deleted = self.service.archive_chat_session(
+            username="irene",
+            session_id=first_session_id,
+        )
+
+        self.assertTrue(deleted["was_active"])
+        self.assertEqual(deleted["next_active_session_id"], second_session["session_id"])
+        self.assertEqual(
+            self.service.get_user("irene")["assistant_session_id"],
+            second_session["session_id"],
+        )
+        self.assertIsNone(
+            self.service.get_chat_session(username="irene", session_id=first_session_id)
+        )
+
+    def test_archive_last_chat_clears_active_pointer(self):
+        self.service.register_user("julia", "superpass")
+        only_session_id = self.service.get_or_create_user_session("julia")
+
+        deleted = self.service.archive_chat_session(
+            username="julia",
+            session_id=only_session_id,
+        )
+
+        self.assertTrue(deleted["was_active"])
+        self.assertIsNone(deleted["next_active_session_id"])
+        self.assertEqual(self.service.get_user("julia")["assistant_session_id"], "")
+        self.assertEqual(self.service.list_chat_sessions(username="julia"), [])
+
     def test_backfill_creates_chat_sessions_from_legacy_history(self):
         service = self._create_legacy_service(
             users=[

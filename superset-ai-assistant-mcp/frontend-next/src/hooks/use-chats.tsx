@@ -17,6 +17,7 @@ import {
   type ChatMessage,
   type ChatSessionList,
   type MessageList,
+  type ResponseStyle,
   type SendMessageResponse,
 } from "@/lib/chats";
 import {
@@ -51,6 +52,7 @@ export function useChatUI() {
 }
 
 const CHATS_KEY = ["chats"] as const;
+const AUTH_KEY = ["auth", "me"] as const;
 
 function messagesKey(sessionId: string | null) {
   return ["chats", sessionId, "messages"] as const;
@@ -198,9 +200,74 @@ export function useClearMessages() {
   });
 }
 
+export function useDeleteChat() {
+  const qc = useQueryClient();
+  const { setActiveSessionId } = useChatUI();
+
+  return useMutation({
+    mutationFn: (variables: {
+      sessionId: string;
+      traceContext?: Partial<FrontendTraceContext>;
+    }) => chatsApi.deleteChat(variables.sessionId, variables.traceContext),
+    onMutate: async (variables) => {
+      logFrontendEvent(
+        "chat_delete_requested",
+        { deleted_session_id: variables.sessionId },
+        {
+          traceContext: extendTraceContext(variables.traceContext, {
+            sessionId: variables.sessionId,
+            chatId: variables.sessionId,
+            route: "/app/chat",
+          }),
+        },
+      );
+    },
+    onSuccess: (data, variables) => {
+      qc.removeQueries({ queryKey: messagesKey(variables.sessionId) });
+      if (data.was_active) {
+        setActiveSessionId(data.next_active_session_id || null);
+      }
+      logFrontendEvent(
+        "chat_delete_success",
+        {
+          deleted_session_id: variables.sessionId,
+          was_active: data.was_active,
+          next_active_session_id: data.next_active_session_id || "",
+        },
+        {
+          traceContext: extendTraceContext(variables.traceContext, {
+            sessionId: variables.sessionId,
+            chatId: variables.sessionId,
+            route: "/app/chat",
+          }),
+        },
+      );
+      qc.invalidateQueries({ queryKey: CHATS_KEY });
+      qc.invalidateQueries({ queryKey: AUTH_KEY });
+    },
+    onError: (error, variables) => {
+      logFrontendEvent(
+        "chat_delete_failed",
+        {
+          deleted_session_id: variables.sessionId,
+          error_message: error.message,
+        },
+        {
+          traceContext: extendTraceContext(variables.traceContext, {
+            sessionId: variables.sessionId,
+            chatId: variables.sessionId,
+            route: "/app/chat",
+          }),
+        },
+      );
+    },
+  });
+}
+
 type SendMessageVariables = {
   sessionId: string;
   content: string;
+  responseStyle: ResponseStyle;
   traceContext?: Partial<FrontendTraceContext>;
 };
 
@@ -218,8 +285,8 @@ export function useSendMessage() {
     SendMessageVariables,
     SendMessageContext
   >({
-    mutationFn: ({ sessionId, content, traceContext }) =>
-      chatsApi.sendMessage(sessionId, content, traceContext),
+    mutationFn: ({ sessionId, content, responseStyle, traceContext }) =>
+      chatsApi.sendMessage(sessionId, content, responseStyle, traceContext),
 
     onMutate: async ({ sessionId, content }) => {
       const key = messagesKey(sessionId);
