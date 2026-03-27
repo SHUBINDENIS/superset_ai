@@ -937,7 +937,23 @@ class SupersetAIAgent:
         if customer_column and self._contains_any_pattern(query, ["клиент", "customer", "client"]):
             score += 50
         if time_column and (
-            self._contains_any_pattern(query, ["график", "chart", "trend", "динам", "месяц", "month", "год", "year"])
+            self._contains_any_pattern(
+                query,
+                [
+                    "график",
+                    "chart",
+                    "trend",
+                    "динам",
+                    "месяц",
+                    "month",
+                    "год",
+                    "year",
+                    "дат",
+                    "date",
+                    "времен",
+                    "time",
+                ],
+            )
             or self._extract_requested_year(query) is not None
         ):
             score += 65
@@ -968,6 +984,25 @@ class SupersetAIAgent:
         wants_customer = self._contains_any_pattern(query, ["клиент", "customer", "client"])
         wants_count = self._contains_any_pattern(query, ["сколько", "количеств", "count"])
         wants_average = self._contains_any_pattern(query, ["средн", "avg", "average"])
+        wants_temporal_breakdown = self._contains_any_pattern(
+            query,
+            [
+                "дат",
+                "date",
+                "времен",
+                "time",
+                "месяц",
+                "month",
+                "недел",
+                "week",
+                "день",
+                "day",
+                "год",
+                "year",
+                "динам",
+                "trend",
+            ],
+        )
         requested_year = self._extract_requested_year(query)
 
         time_column = self._pick_temporal_column(
@@ -981,7 +1016,9 @@ class SupersetAIAgent:
         numeric_year_column = self._pick_ordered_numeric_column(columns, patterns=["year"])
         if requested_year is not None and not time_column and not numeric_year_column:
             return None
-        if wants_store:
+        if wants_temporal_breakdown and time_column:
+            dimension_column = ""
+        elif wants_store:
             dimension_column = self._pick_first_matching_column(columns, patterns=["store", "shop"])
         elif wants_category:
             dimension_column = self._pick_first_matching_column(columns, patterns=["category"])
@@ -1058,7 +1095,7 @@ class SupersetAIAgent:
         x_key = ""
         y_key = metric_label
         group_hint = ""
-        if time_column and (requested_year is not None or wants_chart):
+        if time_column and (requested_year is not None or wants_chart or wants_temporal_breakdown):
             x_key = "period"
             chart_type = "line"
             group_hint = f"по месяцам ({time_column})"
@@ -1170,6 +1207,1076 @@ class SupersetAIAgent:
                 "link_label": str(link_label or "").strip(),
             },
         }
+
+    @staticmethod
+    def _build_link_artifact(
+        *,
+        title: str,
+        href: str,
+        description: str = "",
+        link_label: str = "",
+        link_kind: str = "",
+        artifact_id: Optional[int] = None,
+        table_name: str = "",
+        database_name: str = "",
+    ) -> Optional[Dict[str, Any]]:
+        clean_href = str(href or "").strip()
+        if not clean_href:
+            return None
+        payload: Dict[str, Any] = {
+            "href": clean_href,
+            "link_label": str(link_label or "").strip(),
+            "link_kind": str(link_kind or "").strip(),
+            "table_name": str(table_name or "").strip(),
+            "database_name": str(database_name or "").strip(),
+        }
+        if isinstance(artifact_id, int) and artifact_id > 0:
+            payload["artifact_id"] = artifact_id
+        return {
+            "artifact_type": "link",
+            "title": str(title or "").strip() or "Полезная ссылка",
+            "description": str(description or "").strip(),
+            "payload": payload,
+        }
+
+    @staticmethod
+    def _normalize_lookup_text(text: str) -> str:
+        return re.sub(r"\s+", " ", re.sub(r"[^0-9a-zA-Zа-яА-ЯёЁ]+", " ", str(text or "").casefold())).strip()
+
+    def _score_database_candidate_for_prompt(
+        self,
+        user_message: str,
+        database: Dict[str, Any],
+    ) -> int:
+        query = str(user_message or "").strip()
+        if not query or not isinstance(database, dict):
+            return 0
+        db_name = str(database.get("name") or "").strip()
+        if not db_name:
+            return 0
+        query_low = query.casefold()
+        query_norm = self._normalize_lookup_text(query)
+        db_norm = self._normalize_lookup_text(db_name)
+        db_simple = self._normalize_lookup_text(re.sub(r"\([^)]*\)", " ", db_name))
+        score = 0
+        if db_norm and db_norm in query_norm:
+            score += 240
+        if db_simple and db_simple in query_norm:
+            score += 180
+        if "pagila" in query_norm and "pagila" in db_norm:
+            score += 220
+        if "postgresql" in query_norm and "postgresql" in db_norm:
+            score += 35
+        tokens = [token for token in db_simple.split() if len(token) >= 4]
+        score += sum(25 for token in tokens if token in query_norm)
+        if self._contains_any_pattern(query_low, ["база", "database", "источник", "source", "schema"]):
+            score += 10
+        return score
+
+    def _resolve_database_candidate_sync(
+        self,
+        *,
+        svc: Any,
+        user_message: str,
+    ) -> Dict[str, Any]:
+        try:
+            databases = svc.list_databases()
+        except Exception as exc:
+            backend_logger.warning(
+                f"Session {self.session_id}: database listing failed during discovery: {exc}"
+            )
+            return {}
+        if not isinstance(databases, list):
+            return {}
+        scored: List[Dict[str, Any]] = []
+        for item in databases:
+            if not isinstance(item, dict):
+                continue
+            score = self._score_database_candidate_for_prompt(user_message, item)
+            if score <= 0:
+                continue
+            candidate = dict(item)
+            candidate["score"] = score
+            scored.append(candidate)
+        if not scored:
+            return {}
+        scored.sort(
+            key=lambda item: (int(item.get("score", 0)), int(item.get("id", 0) or 0)),
+            reverse=True,
+        )
+        return scored[0]
+
+    def _list_datasets_for_database_sync(
+        self,
+        *,
+        svc: Any,
+        database: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        db_id = int(database.get("id", 0) or 0)
+        db_name = str(database.get("name") or "").strip().casefold()
+        try:
+            datasets = svc.list_datasets(limit=300)
+        except Exception as exc:
+            backend_logger.warning(
+                f"Session {self.session_id}: dataset listing failed for database discovery: {exc}"
+            )
+            return []
+        if not isinstance(datasets, list):
+            return []
+
+        filtered: List[Dict[str, Any]] = []
+        for item in datasets:
+            if not isinstance(item, dict):
+                continue
+            item_db_name = str(item.get("database_name") or "").strip().casefold()
+            try:
+                item_db_id = int(item.get("database_id", 0) or 0)
+            except Exception:
+                item_db_id = 0
+            if db_id > 0 and item_db_id == db_id:
+                filtered.append(item)
+                continue
+            if db_name and item_db_name == db_name:
+                filtered.append(item)
+        return filtered
+
+    @staticmethod
+    def _database_dataset_priority(table_name: str) -> int:
+        priorities = {
+            "sales_by_store": 100,
+            "sales_by_film_category": 95,
+            "payment": 90,
+            "rental": 85,
+            "customer": 60,
+            "film": 55,
+            "category": 50,
+            "inventory": 45,
+            "store": 40,
+        }
+        return priorities.get(str(table_name or "").strip().casefold(), 0)
+
+    def _rank_database_datasets_for_prompt(
+        self,
+        *,
+        user_message: str,
+        datasets: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        ranked: List[Dict[str, Any]] = []
+        for item in datasets:
+            if not isinstance(item, dict):
+                continue
+            score = self._score_dataset_candidate_for_prompt(user_message, item)
+            score += self._database_dataset_priority(item.get("table_name"))
+            candidate = dict(item)
+            candidate["score"] = score
+            ranked.append(candidate)
+        ranked.sort(
+            key=lambda item: (int(item.get("score", 0)), int(item.get("id", 0) or 0)),
+            reverse=True,
+        )
+        return ranked
+
+    @staticmethod
+    def _looks_like_database_info_request(text: str) -> bool:
+        low = str(text or "").casefold()
+        return any(
+            token in low
+            for token in [
+                "информац",
+                "что есть",
+                "какие таблиц",
+                "какие датасет",
+                "расскажи про",
+                "выведи мне информацию",
+                "покажи базу",
+                "database",
+                "source",
+            ]
+        )
+
+    @staticmethod
+    def _looks_like_dashboard_request(text: str) -> bool:
+        low = str(text or "").casefold()
+        return "дашборд" in low or "dashboard" in low
+
+    @staticmethod
+    def _looks_like_chart_request(text: str) -> bool:
+        low = str(text or "").casefold()
+        if any(token in low for token in ["график", "chart", "plot", "визуал", "visual"]):
+            return True
+        return any(token in low for token in ["построй", "сделай", "собери", "что-нибудь"])
+
+    @staticmethod
+    def _looks_like_dashboard_link_followup(text: str) -> bool:
+        low = str(text or "").casefold()
+        return any(
+            token in low
+            for token in [
+                "ссылка на дашборд",
+                "дай мне ссылку на дашборд",
+                "открой дашборд",
+                "открыть дашборд",
+                "dashboard link",
+            ]
+        )
+
+    @staticmethod
+    def _looks_like_chart_demo_followup(text: str) -> bool:
+        low = str(text or "").casefold()
+        return any(
+            token in low
+            for token in [
+                "демо этого графика",
+                "демо графика",
+                "предпросмотр графика",
+                "preview этого графика",
+                "выведи мне демо этого графика",
+                "покажи этот график",
+            ]
+        )
+
+    @staticmethod
+    def _looks_like_chart_link_followup(text: str) -> bool:
+        low = str(text or "").casefold()
+        return any(
+            token in low
+            for token in [
+                "ссылка на график",
+                "дай мне ссылку на график",
+                "открой график",
+                "открыть график",
+            ]
+        )
+
+    def _extract_recent_object_context(
+        self,
+        messages: List[Dict[str, Any]],
+    ) -> Dict[str, Optional[Dict[str, Any]]]:
+        context: Dict[str, Optional[Dict[str, Any]]] = {
+            "dashboard_link": None,
+            "chart_link": None,
+            "chart_preview": None,
+            "table_preview": None,
+        }
+        for message in reversed(messages):
+            if str(message.get("role") or "") != "assistant":
+                continue
+            artifacts = message.get("artifacts") or []
+            if not isinstance(artifacts, list):
+                continue
+            for artifact in artifacts:
+                if not isinstance(artifact, dict):
+                    continue
+                artifact_type = str(artifact.get("artifact_type") or "").strip().lower()
+                payload = artifact.get("payload") if isinstance(artifact.get("payload"), dict) else {}
+                href = str(payload.get("href") or "").strip()
+                link_kind = str(payload.get("link_kind") or "").strip().lower()
+                if artifact_type == "chart_preview" and context["chart_preview"] is None:
+                    context["chart_preview"] = artifact
+                elif artifact_type == "table_preview" and context["table_preview"] is None:
+                    context["table_preview"] = artifact
+                elif artifact_type == "link":
+                    if context["dashboard_link"] is None and (
+                        link_kind == "dashboard" or "/dashboard/" in href
+                    ):
+                        context["dashboard_link"] = artifact
+                    if context["chart_link"] is None and (
+                        link_kind == "chart" or "/explore/" in href
+                    ):
+                        context["chart_link"] = artifact
+        return context
+
+    def _build_recent_object_followup_response(
+        self,
+        *,
+        user_message: str,
+        response_style: Optional[str],
+        detail_level: Optional[str],
+        recent_objects: Dict[str, Optional[Dict[str, Any]]],
+    ) -> Optional[Dict[str, Any]]:
+        normalized_style = self._normalize_response_style(response_style)
+        normalized_detail = self._normalize_detail_level(detail_level)
+
+        if self._looks_like_dashboard_link_followup(user_message):
+            dashboard_link = recent_objects.get("dashboard_link")
+            if isinstance(dashboard_link, dict):
+                payload = dashboard_link.get("payload") if isinstance(dashboard_link.get("payload"), dict) else {}
+                href = str(payload.get("href") or "").strip()
+                md_link = self._build_markdown_link(
+                    str(payload.get("link_label") or "Открыть дашборд"),
+                    href,
+                )
+                if normalized_style == "technical":
+                    content = "\n".join(
+                        [
+                            "**Источник**",
+                            "Последний созданный dashboard сохранён в текущем чате.",
+                            "",
+                            "**Что можно сделать дальше**",
+                            md_link or "Открыть дашборд в Superset.",
+                        ]
+                    )
+                else:
+                    content = "\n".join(
+                        [
+                            "**Краткий вывод**",
+                            "Дашборд уже создан и доступен по рабочей ссылке.",
+                            "",
+                            "**Следующий шаг**",
+                            md_link or "Открыть дашборд в Superset.",
+                        ]
+                    )
+                return {
+                    "content": self._strip_raw_urls_from_text(content),
+                    "role": "assistant",
+                    "finish_reason": "stop",
+                    "model": self.model_name,
+                    "session_id": self.session_id,
+                    "response_style": normalized_style,
+                    "detail_level": normalized_detail,
+                    "artifacts": [dashboard_link],
+                }
+
+        if self._looks_like_chart_link_followup(user_message):
+            chart_link = recent_objects.get("chart_link")
+            if isinstance(chart_link, dict):
+                payload = chart_link.get("payload") if isinstance(chart_link.get("payload"), dict) else {}
+                href = str(payload.get("href") or "").strip()
+                md_link = self._build_markdown_link(
+                    str(payload.get("link_label") or "Открыть график"),
+                    href,
+                )
+                content = (
+                    "**Источник**\nПоследний созданный chart уже сохранён.\n\n**Что можно сделать дальше**\n"
+                    if normalized_style == "technical"
+                    else "**Краткий вывод**\nГрафик уже создан и доступен по рабочей ссылке.\n\n**Следующий шаг**\n"
+                ) + (md_link or "Открыть график в Superset.")
+                return {
+                    "content": self._strip_raw_urls_from_text(content),
+                    "role": "assistant",
+                    "finish_reason": "stop",
+                    "model": self.model_name,
+                    "session_id": self.session_id,
+                    "response_style": normalized_style,
+                    "detail_level": normalized_detail,
+                    "artifacts": [chart_link],
+                }
+
+        if self._looks_like_chart_demo_followup(user_message):
+            chart_preview = recent_objects.get("chart_preview")
+            artifacts: List[Dict[str, Any]] = []
+            if isinstance(chart_preview, dict):
+                artifacts.append(chart_preview)
+            table_preview = recent_objects.get("table_preview")
+            if isinstance(table_preview, dict):
+                artifacts.append(table_preview)
+            chart_link = recent_objects.get("chart_link")
+            if isinstance(chart_link, dict):
+                artifacts.append(chart_link)
+            if artifacts:
+                content = (
+                    "**Источник**\nВот preview последнего созданного графика из текущего чата.\n\n"
+                    "**Что можно сделать дальше**\n"
+                    if normalized_style == "technical"
+                    else "**Краткий вывод**\nВот preview последнего созданного графика.\n\n**Следующий шаг**\n"
+                )
+                if isinstance(chart_link, dict):
+                    payload = chart_link.get("payload") if isinstance(chart_link.get("payload"), dict) else {}
+                    content += self._build_markdown_link(
+                        str(payload.get("link_label") or "Открыть график"),
+                        str(payload.get("href") or ""),
+                    ) or "Открыть график в Superset."
+                else:
+                    content += "Открыть график в Superset."
+                return {
+                    "content": self._strip_raw_urls_from_text(content),
+                    "role": "assistant",
+                    "finish_reason": "stop",
+                    "model": self.model_name,
+                    "session_id": self.session_id,
+                    "response_style": normalized_style,
+                    "detail_level": normalized_detail,
+                    "artifacts": artifacts[:3],
+                }
+        return None
+
+    def _build_database_info_response(
+        self,
+        *,
+        database: Dict[str, Any],
+        datasets: List[Dict[str, Any]],
+        response_style: Optional[str],
+        detail_level: Optional[str],
+    ) -> Dict[str, Any]:
+        db_name = str(database.get("name") or "").strip() or "Источник"
+        backend = str(database.get("backend") or "").strip() or "-"
+        normalized_style = self._normalize_response_style(response_style)
+        normalized_detail = self._normalize_detail_level(detail_level)
+        schemas = sorted(
+            {
+                str(item.get("schema") or "").strip() or "public"
+                for item in datasets
+                if isinstance(item, dict)
+            }
+        )
+        top_datasets = [
+            str(item.get("table_name") or "").strip()
+            for item in self._rank_database_datasets_for_prompt(
+                user_message=db_name,
+                datasets=datasets,
+            )[:8]
+            if str(item.get("table_name") or "").strip()
+        ]
+        dataset_rows = [
+            {
+                "dataset": str(item.get("table_name") or "").strip() or "-",
+                "schema": str(item.get("schema") or "").strip() or "public",
+                "database": str(item.get("database_name") or "").strip() or db_name,
+            }
+            for item in self._rank_database_datasets_for_prompt(
+                user_message=db_name,
+                datasets=datasets,
+            )[:8]
+        ]
+        dataset_list = ", ".join(f"`{name}`" for name in top_datasets[:6]) or "датасеты не найдены"
+        schema_list = ", ".join(f"`{name}`" for name in schemas[:4]) or "`public`"
+
+        if normalized_style == "technical":
+            lines = [
+                "**Источник**",
+                f"Database `{db_name}` подтверждён в Superset; backend `{backend}`; database_id={database.get('id', '-')}.",
+                "",
+                "**Dataset / datasource**",
+                f"Найдено {len(datasets)} dataset(s) в этой базе.",
+                "",
+                "**Поля**",
+                f"- schemas: {schema_list}",
+                f"- candidate datasets: {dataset_list}",
+                "",
+                "**Предположения**",
+                "- Для chat workflow эта база доступна и подходит для построения графиков и дашбордов.",
+                "",
+                "**Что можно сделать дальше**",
+                "- Сразу построить один график по Pagila.",
+                "- Сразу собрать multi-chart dashboard по Pagila.",
+            ]
+        else:
+            lines = [
+                "**Краткий вывод**",
+                f"Источник `{db_name}` уже подтверждён в Superset и готов к работе.",
+                "",
+                "**Что использовано**",
+                f"Database id: `{database.get('id', '-')}`.",
+                f"Backend: `{backend}`.",
+                f"Доступные dataset-кандидаты: {dataset_list}.",
+                "",
+                "**Что это значит**",
+                "По этой базе можно сразу строить графики и собирать дашборд без дополнительного поиска источника.",
+                "",
+                "**Следующий шаг**",
+                "Могу сразу построить график по Pagila или собрать дашборд из нескольких срезов.",
+            ]
+        artifacts: List[Dict[str, Any]] = []
+        if dataset_rows:
+            artifacts.append(
+                self._build_table_artifact(
+                    title="Pagila datasets",
+                    description=f"Кандидаты datasets внутри `{db_name}`.",
+                    rows=dataset_rows,
+                )
+            )
+        return {
+            "content": self._strip_raw_urls_from_text("\n".join(lines)),
+            "role": "assistant",
+            "finish_reason": "stop",
+            "model": self.model_name,
+            "session_id": self.session_id,
+            "response_style": normalized_style,
+            "detail_level": normalized_detail,
+            "artifacts": artifacts,
+        }
+
+    @staticmethod
+    def _database_chart_seed_prompts(table_name: str) -> List[str]:
+        mapping = {
+            "sales_by_store": ["Покажи выручку по магазинам"],
+            "sales_by_film_category": ["Какие категории товаров приносят больше всего продаж?"],
+            "payment": ["Покажи выручку по датам платежей"],
+            "rental": ["Покажи количество аренд по датам"],
+            "customer": ["Покажи клиентов по количеству записей"],
+            "film": ["Покажи фильмы по количеству записей"],
+        }
+        return mapping.get(str(table_name or "").strip().casefold(), [])
+
+    def _select_database_chart_candidate_sync(
+        self,
+        *,
+        svc: Any,
+        user_message: str,
+        database: Dict[str, Any],
+        datasets: List[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        best_payload: Optional[Dict[str, Any]] = None
+        best_score = -1
+        ranked = self._rank_database_datasets_for_prompt(user_message=user_message, datasets=datasets)
+        for candidate in ranked[:6]:
+            dataset_id = int(candidate.get("id", 0) or 0)
+            if dataset_id <= 0:
+                continue
+            try:
+                metadata = svc.get_dataset_metadata(dataset_id)
+            except Exception:
+                continue
+            candidate_queries = [str(user_message or "").strip()]
+            for seed in self._database_chart_seed_prompts(candidate.get("table_name")):
+                if seed not in candidate_queries:
+                    candidate_queries.append(seed)
+            for query_variant in candidate_queries:
+                plan = self._build_structured_query_plan(query_variant, metadata)
+                if plan is None:
+                    continue
+                try:
+                    preview = svc.preview_sql(
+                        database_id=int(plan["database_id"]),
+                        sql=str(plan["sql"]),
+                        schema=str(plan.get("schema") or ""),
+                        preview_limit=12,
+                    )
+                except Exception as exc:
+                    backend_logger.warning(
+                        f"Session {self.session_id}: database chart preview failed for dataset {dataset_id}: {exc}"
+                    )
+                    continue
+                row_count = int(preview.get("rows_count", 0) or 0)
+                recommendation = svc.recommend_viz_types(
+                    rows=preview.get("rows", []),
+                    columns=preview.get("columns", []),
+                    metric_column=str(plan.get("y_key") or ""),
+                    dimension_column=str(plan.get("dimension_column") or ""),
+                    time_column=str(plan.get("time_column") or ""),
+                )
+                score = int(candidate.get("score", 0)) + self._score_dataset_metadata_fit(query_variant, metadata)
+                if row_count > 0:
+                    score += 40
+                if score > best_score:
+                    best_score = score
+                    best_payload = {
+                        "candidate": candidate,
+                        "metadata": metadata,
+                        "plan": plan,
+                        "preview": preview,
+                        "recommendation": recommendation,
+                    }
+                    if row_count > 0 and query_variant != str(user_message or "").strip():
+                        break
+        return best_payload
+
+    def _build_created_chart_response(
+        self,
+        *,
+        database: Dict[str, Any],
+        plan: Dict[str, Any],
+        preview: Dict[str, Any],
+        recommendation: Dict[str, Any],
+        created_chart: Dict[str, Any],
+        sql_lab_link: str,
+        response_style: Optional[str],
+        detail_level: Optional[str],
+    ) -> Dict[str, Any]:
+        normalized_style = self._normalize_response_style(response_style)
+        normalized_detail = self._normalize_detail_level(detail_level)
+        chart_link = str(created_chart.get("chart_link") or "").strip()
+        dataset_label = str(plan.get("table_name") or "").strip() or "dataset"
+        chart_title = f"Pagila Demo · {dataset_label}"
+        if normalized_style == "technical":
+            lines = [
+                "**Источник**",
+                f"Database `{database.get('name', '-')}`; dataset `{dataset_label}`.",
+                "",
+                "**Поля**",
+                f"- metric: {plan.get('metric_description', plan.get('metric_label', '-'))}",
+                f"- dimension: {str(plan.get('dimension_column') or '-').strip() or '-'}",
+                f"- time: {str(plan.get('time_column') or '-').strip() or '-'}",
+            ]
+            if plan.get("assumptions"):
+                lines.extend(["", "**Предположения**", *(f"- {item}" for item in plan["assumptions"])])
+            lines.extend(
+                [
+                    "",
+                    "**SQL**",
+                    f"```sql\n{preview.get('sql_executed') or plan.get('sql') or '-'}\n```",
+                ]
+            )
+            if normalized_detail == "detailed":
+                lines.extend(
+                    [
+                        "",
+                        "**Preview summary**",
+                        self._build_preview_summary(
+                            rows=preview.get("rows", []),
+                            x_key=str(plan.get("x_key") or ""),
+                            y_key=str(plan.get("y_key") or ""),
+                        ),
+                        "",
+                        "**Viz recommendation**",
+                        f"Создан chart `{recommendation.get('recommended') or plan.get('chart_type') or 'table'}`.",
+                        "",
+                        "**Ограничения**",
+                        "- Preview ограничен первыми строками.",
+                    ]
+                )
+            lines.extend(
+                [
+                    "",
+                    "**Что можно сделать дальше**",
+                    self._join_markdown_links(
+                        [
+                            ("Открыть график", chart_link),
+                            ("Открыть SQL Lab", sql_lab_link),
+                        ]
+                    ) or "Открыть результат в Superset.",
+                ]
+            )
+        else:
+            lines = [
+                "**Краткий вывод**",
+                "График по Pagila создан и уже доступен в Superset.",
+                "",
+                "**Что использовано**",
+                f"Источник: `{database.get('name', '-')}`.",
+                f"Dataset: `{dataset_label}`.",
+                f"Метрика: {plan.get('metric_description', plan.get('metric_label', 'рабочая агрегация'))}.",
+            ]
+            if plan.get("group_hint"):
+                lines.append(f"Группировка: {plan.get('group_hint')}.")
+            if normalized_detail in {"standard", "detailed"}:
+                lines.extend(
+                    [
+                        "",
+                        "**Что это значит**",
+                        self._build_business_interpretation(
+                            plan=plan,
+                            row_count=int(preview.get("rows_count", 0) or 0),
+                        ),
+                    ]
+                )
+            if normalized_detail == "detailed":
+                facts = self._build_business_key_facts(
+                    rows=preview.get("rows", []),
+                    x_key=str(plan.get("x_key") or ""),
+                    y_key=str(plan.get("y_key") or ""),
+                )
+                if facts:
+                    lines.extend(["", "**Ключевые факты**", *facts])
+            lines.extend(
+                [
+                    "",
+                    "**Следующий шаг**",
+                    self._join_markdown_links(
+                        [
+                            ("Открыть график", chart_link),
+                            ("Открыть SQL Lab", sql_lab_link),
+                        ]
+                    ) or "Открыть результат в Superset.",
+                ]
+            )
+
+        chart_preview = self._build_chart_artifact(
+            title="Preview графика",
+            description=f"{plan.get('metric_description', plan.get('metric_label', 'metric'))}; {plan.get('group_hint', 'preview')}",
+            chart_type=str(recommendation.get("recommended") or plan.get("chart_type") or "bar"),
+            rows=preview.get("rows", []),
+            x_key=str(plan.get("x_key") or ""),
+            y_key=str(plan.get("y_key") or ""),
+            href=chart_link,
+            link_label="Открыть график",
+        )
+        table_preview = self._build_table_artifact(
+            title="Preview таблицы",
+            description=f"Источник `{dataset_label}` в `{database.get('name', '-')}`.",
+            rows=preview.get("rows", []),
+            href=sql_lab_link or chart_link,
+            link_label="Открыть SQL Lab" if sql_lab_link else "Открыть график",
+        )
+        artifacts: List[Dict[str, Any]] = []
+        if chart_preview is not None:
+            artifacts.append(chart_preview)
+        artifacts.append(table_preview)
+        chart_link_artifact = self._build_link_artifact(
+            title=chart_title,
+            description="Созданный chart в Superset.",
+            href=chart_link,
+            link_label="Открыть график",
+            link_kind="chart",
+            artifact_id=int(created_chart.get("chart_id") or 0),
+            table_name=dataset_label,
+            database_name=str(database.get("name") or ""),
+        )
+        if chart_link_artifact is not None:
+            artifacts.append(chart_link_artifact)
+        return {
+            "content": self._strip_raw_urls_from_text("\n".join(lines)),
+            "role": "assistant",
+            "finish_reason": "stop",
+            "model": self.model_name,
+            "session_id": self.session_id,
+            "response_style": normalized_style,
+            "detail_level": normalized_detail,
+            "artifacts": artifacts,
+        }
+
+    def _build_created_dashboard_response(
+        self,
+        *,
+        database: Dict[str, Any],
+        dashboard: Dict[str, Any],
+        created_charts: List[Dict[str, Any]],
+        response_style: Optional[str],
+        detail_level: Optional[str],
+    ) -> Dict[str, Any]:
+        normalized_style = self._normalize_response_style(response_style)
+        normalized_detail = self._normalize_detail_level(detail_level)
+        dashboard_link = str(dashboard.get("dashboard_link") or dashboard.get("dashboard_url") or "").strip()
+        rows = [
+            {
+                "chart": str(item.get("slice_name") or "").strip() or f"chart_{index+1}",
+                "dataset": str(item.get("table_name") or "").strip() or "-",
+                "viz_type": str(item.get("viz_type") or "").strip() or "-",
+            }
+            for index, item in enumerate(created_charts)
+        ]
+        if normalized_style == "technical":
+            lines = [
+                "**Источник**",
+                f"Database `{database.get('name', '-')}`.",
+                "",
+                "**Dataset / datasource**",
+                f"Создано {len(created_charts)} chart object(s) и 1 dashboard object.",
+                "",
+                "**Поля**",
+                *(f"- {row['chart']}: {row['dataset']} ({row['viz_type']})" for row in rows[:5]),
+                "",
+                "**Предположения**",
+                "- Использованы лучшие аналитические срезы по Pagila.",
+            ]
+            if normalized_detail == "detailed":
+                lines.extend(
+                    [
+                        "",
+                        "**Preview summary**",
+                        f"В дашборд вошли {len(created_charts)} графика по ключевым Pagila datasets.",
+                        "",
+                        "**Viz recommendation**",
+                        "Базовый набор покрывает динамику, выручку и top-категории.",
+                        "",
+                        "**Ограничения**",
+                        "- Набор срезов собран автоматически и может быть расширен под конкретную задачу.",
+                    ]
+                )
+            lines.extend(
+                [
+                    "",
+                    "**Что можно сделать дальше**",
+                    self._build_markdown_link("Открыть дашборд", dashboard_link)
+                    or "Открыть дашборд в Superset.",
+                ]
+            )
+        else:
+            lines = [
+                "**Краткий вывод**",
+                f"Дашборд по `{database.get('name', '-')}` собран и уже доступен в Superset.",
+                "",
+                "**Что использовано**",
+                f"Создано {len(created_charts)} графика по основным Pagila-срезам.",
+                "В дашборд включены динамика, выручка и top-категории/магазины.",
+                "",
+                "**Что это значит**",
+                "Это уже рабочая стартовая витрина по Pagila: можно открыть готовый dashboard и дальше уточнять нужные срезы.",
+            ]
+            if normalized_detail == "detailed":
+                lines.extend(
+                    [
+                        "",
+                        "**Ключевые факты**",
+                        *(f"- {row['chart']} — dataset `{row['dataset']}`" for row in rows[:4]),
+                    ]
+                )
+            lines.extend(
+                [
+                    "",
+                    "**Следующий шаг**",
+                    self._build_markdown_link("Открыть дашборд", dashboard_link)
+                    or "Открыть дашборд в Superset.",
+                ]
+            )
+
+        artifacts: List[Dict[str, Any]] = [
+            self._build_table_artifact(
+                title="Состав дашборда",
+                description="Созданные графики внутри dashboard.",
+                rows=rows,
+                href=dashboard_link,
+                link_label="Открыть дашборд",
+            )
+        ]
+        first_chart_preview = next(
+            (
+                item.get("chart_preview_artifact")
+                for item in created_charts
+                if isinstance(item, dict) and isinstance(item.get("chart_preview_artifact"), dict)
+            ),
+            None,
+        )
+        if isinstance(first_chart_preview, dict):
+            artifacts.insert(0, first_chart_preview)
+        dashboard_link_artifact = self._build_link_artifact(
+            title="Pagila dashboard",
+            description="Созданный дашборд в Superset.",
+            href=dashboard_link,
+            link_label="Открыть дашборд",
+            link_kind="dashboard",
+            artifact_id=int(dashboard.get("dashboard_id") or 0),
+            database_name=str(database.get("name") or ""),
+        )
+        if dashboard_link_artifact is not None:
+            artifacts.append(dashboard_link_artifact)
+        if created_charts:
+            first_chart = created_charts[0]
+            chart_link_artifact = self._build_link_artifact(
+                title=str(first_chart.get("slice_name") or "Pagila chart"),
+                description="Первый график из собранного дашборда.",
+                href=str(first_chart.get("chart_link") or ""),
+                link_label="Открыть график",
+                link_kind="chart",
+                artifact_id=int(first_chart.get("chart_id") or 0),
+                table_name=str(first_chart.get("table_name") or ""),
+                database_name=str(database.get("name") or ""),
+            )
+            if chart_link_artifact is not None:
+                artifacts.append(chart_link_artifact)
+
+        return {
+            "content": self._strip_raw_urls_from_text("\n".join(lines)),
+            "role": "assistant",
+            "finish_reason": "stop",
+            "model": self.model_name,
+            "session_id": self.session_id,
+            "response_style": normalized_style,
+            "detail_level": normalized_detail,
+            "artifacts": artifacts,
+        }
+
+    def _build_database_workflow_reply_sync(
+        self,
+        *,
+        user_message: str,
+        response_style: Optional[str],
+        detail_level: Optional[str],
+        messages: List[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        recent_objects = self._extract_recent_object_context(messages[:-1] if messages else [])
+        followup = self._build_recent_object_followup_response(
+            user_message=user_message,
+            response_style=response_style,
+            detail_level=detail_level,
+            recent_objects=recent_objects,
+        )
+        if followup is not None:
+            return followup
+
+        svc = self._get_viz_service_for_sync_work()
+        database = self._resolve_database_candidate_sync(
+            svc=svc,
+            user_message=user_message,
+        )
+        if not database:
+            return None
+        datasets = self._list_datasets_for_database_sync(svc=svc, database=database)
+        if not datasets:
+            return self._build_database_info_response(
+                database=database,
+                datasets=[],
+                response_style=response_style,
+                detail_level=detail_level,
+            )
+
+        if self._looks_like_database_info_request(user_message) and not self._looks_like_chart_request(user_message) and not self._looks_like_dashboard_request(user_message):
+            return self._build_database_info_response(
+                database=database,
+                datasets=datasets,
+                response_style=response_style,
+                detail_level=detail_level,
+            )
+
+        if self._looks_like_dashboard_request(user_message):
+            chart_specs = [
+                ("sales_by_store", "Покажи выручку по магазинам", "Pagila · Выручка по магазинам"),
+                ("sales_by_film_category", "Какие категории товаров приносят больше всего продаж?", "Pagila · Выручка по категориям"),
+                ("payment", "Покажи выручку по датам платежей", "Pagila · Выручка по датам платежей"),
+                ("rental", "Покажи количество аренд по датам", "Pagila · Динамика аренд"),
+            ]
+            datasets_by_name = {
+                str(item.get("table_name") or "").strip().casefold(): item
+                for item in datasets
+                if isinstance(item, dict)
+            }
+            created_charts: List[Dict[str, Any]] = []
+            for table_name, prompt, slice_name in chart_specs:
+                candidate = datasets_by_name.get(table_name.casefold())
+                if not isinstance(candidate, dict):
+                    continue
+                dataset_id = int(candidate.get("id", 0) or 0)
+                if dataset_id <= 0:
+                    continue
+                try:
+                    metadata = svc.get_dataset_metadata(dataset_id)
+                except Exception:
+                    continue
+                plan = self._build_structured_query_plan(prompt, metadata)
+                if plan is None:
+                    continue
+                try:
+                    preview = svc.preview_sql(
+                        database_id=int(plan["database_id"]),
+                        sql=str(plan["sql"]),
+                        schema=str(plan.get("schema") or ""),
+                        preview_limit=12,
+                    )
+                except Exception as exc:
+                    backend_logger.warning(
+                        f"Session {self.session_id}: Pagila dashboard preview failed for {table_name}: {exc}"
+                    )
+                    continue
+                recommendation = svc.recommend_viz_types(
+                    rows=preview.get("rows", []),
+                    columns=preview.get("columns", []),
+                    metric_column=str(plan.get("y_key") or ""),
+                    dimension_column=str(plan.get("dimension_column") or ""),
+                    time_column=str(plan.get("time_column") or ""),
+                )
+                recommended_viz = str(
+                    recommendation.get("recommended")
+                    or plan.get("chart_type")
+                    or "table"
+                ).strip() or "table"
+                try:
+                    created_chart = svc.create_chart_with_share(
+                        dataset_id=dataset_id,
+                        slice_name=slice_name,
+                        viz_type=recommended_viz,
+                        metric_column=str(plan.get("metric_column") or ""),
+                        dimension_column=str(plan.get("dimension_column") or ""),
+                        time_column=str(plan.get("time_column") or ""),
+                        description=f"Auto-created from chat session {self.session_id}",
+                    )
+                except Exception as exc:
+                    backend_logger.warning(
+                        f"Session {self.session_id}: Pagila dashboard chart creation failed for {table_name}: {exc}"
+                    )
+                    continue
+                chart_preview_artifact = self._build_chart_artifact(
+                    title=f"Preview · {slice_name}",
+                    description=f"{plan.get('metric_description', plan.get('metric_label', 'metric'))}; {plan.get('group_hint', 'preview')}",
+                    chart_type=str(recommended_viz),
+                    rows=preview.get("rows", []),
+                    x_key=str(plan.get("x_key") or ""),
+                    y_key=str(plan.get("y_key") or ""),
+                    href=str(created_chart.get("chart_link") or ""),
+                    link_label="Открыть график",
+                )
+                created_charts.append(
+                    {
+                        "chart_id": int(created_chart.get("chart_id") or 0),
+                        "chart_link": str(created_chart.get("chart_link") or ""),
+                        "chart_url": str(created_chart.get("chart_url") or ""),
+                        "slice_name": slice_name,
+                        "table_name": table_name,
+                        "viz_type": recommended_viz,
+                        "chart_preview_artifact": chart_preview_artifact,
+                    }
+                )
+            if not created_charts:
+                return self._build_database_info_response(
+                    database=database,
+                    datasets=datasets,
+                    response_style=response_style,
+                    detail_level=detail_level,
+                )
+            dashboard_title = f"Pagila Demo Dashboard · {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
+            dashboard = svc.generate_dashboard(
+                chart_ids=[int(item["chart_id"]) for item in created_charts if int(item.get("chart_id", 0) or 0) > 0],
+                dashboard_title=dashboard_title,
+                description=f"Auto-created from chat session {self.session_id}",
+            )
+            return self._build_created_dashboard_response(
+                database=database,
+                dashboard=dashboard,
+                created_charts=created_charts,
+                response_style=response_style,
+                detail_level=detail_level,
+            )
+
+        if self._looks_like_chart_request(user_message):
+            selected = self._select_database_chart_candidate_sync(
+                svc=svc,
+                user_message=user_message,
+                database=database,
+                datasets=datasets,
+            )
+            if selected is None:
+                return self._build_database_info_response(
+                    database=database,
+                    datasets=datasets,
+                    response_style=response_style,
+                    detail_level=detail_level,
+                )
+            plan = dict(selected["plan"])
+            preview = dict(selected["preview"])
+            recommendation = dict(selected["recommendation"])
+            recommended_viz = str(
+                recommendation.get("recommended")
+                or plan.get("chart_type")
+                or "table"
+            ).strip() or "table"
+            dataset_label = str(plan.get("table_name") or "").strip() or "dataset"
+            created_chart = svc.create_chart_with_share(
+                dataset_id=int(plan.get("dataset_id") or 0),
+                slice_name=f"Pagila · {dataset_label}",
+                viz_type=recommended_viz,
+                metric_column=str(plan.get("metric_column") or ""),
+                dimension_column=str(plan.get("dimension_column") or ""),
+                time_column=str(plan.get("time_column") or ""),
+                description=f"Auto-created from chat session {self.session_id}",
+            )
+            sql_lab_link = ""
+            try:
+                sql_lab_link = svc.open_sql_lab_link(
+                    database_id=int(plan.get("database_id") or 0),
+                    schema_name=str(plan.get("schema") or ""),
+                    dataset_in_context=dataset_label,
+                    title=f"AI SQL Preview · {dataset_label}",
+                )
+            except Exception as exc:
+                backend_logger.warning(
+                    f"Session {self.session_id}: SQL Lab link generation failed for Pagila chart flow: {exc}"
+                )
+            return self._build_created_chart_response(
+                database=database,
+                plan=plan,
+                preview=preview,
+                recommendation=recommendation,
+                created_chart=created_chart,
+                sql_lab_link=sql_lab_link,
+                response_style=response_style,
+                detail_level=detail_level,
+            )
+
+        return self._build_database_info_response(
+            database=database,
+            datasets=datasets,
+            response_style=response_style,
+            detail_level=detail_level,
+        )
 
     @staticmethod
     def _build_markdown_link(label: str, href: str) -> str:
@@ -2758,7 +3865,7 @@ class SupersetAIAgent:
 
     async def chat(
         self,
-        messages: List[Dict[str, str]],
+        messages: List[Dict[str, Any]],
         response_style: Optional[str] = None,
         detail_level: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -3016,6 +4123,32 @@ class SupersetAIAgent:
                 self._build_datasource_guardrail(table_hints),
             )
             superset_public_url = self._get_superset_public_url()
+
+            try:
+                database_workflow_reply = await asyncio.to_thread(
+                    self._build_database_workflow_reply_sync,
+                    user_message=last_user_message,
+                    response_style=response_style,
+                    detail_level=detail_level,
+                    messages=messages,
+                )
+            except Exception as exc:
+                backend_logger.warning(
+                    f"Session {self.session_id}: database workflow fast path failed: {exc}"
+                )
+                database_workflow_reply = None
+            if database_workflow_reply is not None:
+                self._emit_agent_event(
+                    "database_workflow_reply",
+                    artifact_count=len(database_workflow_reply.get("artifacts") or []),
+                )
+                self._emit_agent_event(
+                    "turn_end",
+                    status="ok",
+                    finish_reason="stop",
+                    latency_ms=int((time.monotonic() - started_at) * 1000),
+                )
+                return database_workflow_reply
 
             try:
                 structured_reply = await asyncio.to_thread(

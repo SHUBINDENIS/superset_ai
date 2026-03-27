@@ -291,7 +291,7 @@ async def send_message(
         username=username,
         session_id=session_id,
     )
-    messages = [{"role": m["role"], "content": m["content"]} for m in history]
+    messages = [dict(item) for item in history]
 
     with bind_request_log_context(
         request,

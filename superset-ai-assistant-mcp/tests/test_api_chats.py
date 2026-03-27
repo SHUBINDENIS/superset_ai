@@ -570,11 +570,14 @@ class TestSendMessage(unittest.TestCase):
         self.assertEqual(data["response_style"], "business")
         self.assertEqual(data["detail_level"], "standard")
         self.assertEqual(data["artifacts"], [])
-        mock_agent.chat.assert_awaited_once_with(
-            [{"role": "user", "content": "What tables are available?"}],
-            response_style="business",
-            detail_level="standard",
+        mock_agent.chat.assert_awaited_once()
+        called_messages = mock_agent.chat.await_args.args[0]
+        self.assertEqual(
+            [(item["role"], item["content"]) for item in called_messages],
+            [("user", "What tables are available?")],
         )
+        self.assertEqual(mock_agent.chat.await_args.kwargs["response_style"], "business")
+        self.assertEqual(mock_agent.chat.await_args.kwargs["detail_level"], "standard")
 
     def test_send_message_passes_technical_response_style(self):
         mock_agent = self._install_mock_agent({
@@ -600,11 +603,14 @@ class TestSendMessage(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["response_style"], "technical")
         self.assertEqual(resp.json()["detail_level"], "detailed")
-        mock_agent.chat.assert_awaited_once_with(
-            [{"role": "user", "content": "Опиши поля датасета"}],
-            response_style="technical",
-            detail_level="detailed",
+        mock_agent.chat.assert_awaited_once()
+        called_messages = mock_agent.chat.await_args.args[0]
+        self.assertEqual(
+            [(item["role"], item["content"]) for item in called_messages],
+            [("user", "Опиши поля датасета")],
         )
+        self.assertEqual(mock_agent.chat.await_args.kwargs["response_style"], "technical")
+        self.assertEqual(mock_agent.chat.await_args.kwargs["detail_level"], "detailed")
 
     def test_send_message_normalizes_agent_reply_style_and_detail(self):
         self._install_mock_agent({
@@ -663,11 +669,14 @@ class TestSendMessage(unittest.TestCase):
         )
 
         self.assertEqual(resp.status_code, 200)
-        mock_agent.chat.assert_awaited_once_with(
-            [{"role": "user", "content": "Опиши источник данных"}],
-            response_style="technical",
-            detail_level="detailed",
+        mock_agent.chat.assert_awaited_once()
+        called_messages = mock_agent.chat.await_args.args[0]
+        self.assertEqual(
+            [(item["role"], item["content"]) for item in called_messages],
+            [("user", "Опиши источник данных")],
         )
+        self.assertEqual(mock_agent.chat.await_args.kwargs["response_style"], "technical")
+        self.assertEqual(mock_agent.chat.await_args.kwargs["detail_level"], "detailed")
 
     def test_send_message_persists_both_messages(self):
         """User message AND assistant reply should be in the DB afterward."""
@@ -714,6 +723,62 @@ class TestSendMessage(unittest.TestCase):
         self.assertEqual(messages[1]["response_style"], "technical")
         self.assertEqual(messages[1]["detail_level"], "detailed")
         self.assertEqual(messages[1]["artifacts"][0]["artifact_type"], "table_preview")
+
+    def test_send_message_passes_persisted_artifacts_back_into_agent_history(self):
+        first_agent = self._install_mock_agent({
+            "content": "Dashboard ready.",
+            "role": "assistant",
+            "finish_reason": "stop",
+            "model": "m",
+            "session_id": self.session_id,
+            "response_style": "business",
+            "detail_level": "standard",
+            "artifacts": [
+                {
+                    "artifact_type": "link",
+                    "title": "Pagila dashboard",
+                    "description": "Created dashboard",
+                    "payload": {
+                        "href": "http://host/superset/dashboard/77/",
+                        "link_label": "Открыть дашборд",
+                        "link_kind": "dashboard",
+                        "artifact_id": 77,
+                    },
+                }
+            ],
+        })
+        self.client.post(
+            f"/api/chats/{self.session_id}/messages",
+            json={"content": "Create dashboard"},
+            cookies=self._auth_cookies(),
+        )
+        first_agent.chat.assert_awaited_once()
+
+        second_agent = self._install_mock_agent({
+            "content": "Here is the link again.",
+            "role": "assistant",
+            "finish_reason": "stop",
+            "model": "m",
+            "session_id": self.session_id,
+            "response_style": "business",
+            "detail_level": "standard",
+            "artifacts": [],
+        })
+        self.client.post(
+            f"/api/chats/{self.session_id}/messages",
+            json={"content": "Дай мне ссылку на дашборд"},
+            cookies=self._auth_cookies(),
+        )
+
+        second_agent.chat.assert_awaited_once()
+        called_messages = second_agent.chat.await_args.args[0]
+        self.assertEqual(len(called_messages), 3)
+        self.assertEqual(called_messages[1]["role"], "assistant")
+        self.assertEqual(called_messages[1]["artifacts"][0]["artifact_type"], "link")
+        self.assertEqual(
+            called_messages[1]["artifacts"][0]["payload"]["artifact_id"],
+            77,
+        )
 
     # ------------------------------------------------------------------
     # Blocked response (guardrails)
@@ -941,11 +1006,14 @@ class TestSendMessage(unittest.TestCase):
         )
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(resp.json()["detail_level"], "concise")
-        mock_agent.chat.assert_awaited_once_with(
-            [{"role": "user", "content": "Краткая сводка"}],
-            response_style="business",
-            detail_level="concise",
+        mock_agent.chat.assert_awaited_once()
+        called_messages = mock_agent.chat.await_args.args[0]
+        self.assertEqual(
+            [(item["role"], item["content"]) for item in called_messages],
+            [("user", "Краткая сводка")],
         )
+        self.assertEqual(mock_agent.chat.await_args.kwargs["response_style"], "business")
+        self.assertEqual(mock_agent.chat.await_args.kwargs["detail_level"], "concise")
 
     # ------------------------------------------------------------------
     # Regression: per-message metadata preserved after multiple sends
@@ -1071,11 +1139,14 @@ class TestSendMessage(unittest.TestCase):
         self.assertEqual(resp.json()["response_style"], "technical")
         self.assertEqual(resp.json()["detail_level"], "concise")
         # Agent must receive the body-specified settings, not the chat defaults
-        mock_agent.chat.assert_awaited_once_with(
-            [{"role": "user", "content": "First message"}],
-            response_style="technical",
-            detail_level="concise",
+        mock_agent.chat.assert_awaited_once()
+        called_messages = mock_agent.chat.await_args.args[0]
+        self.assertEqual(
+            [(item["role"], item["content"]) for item in called_messages],
+            [("user", "First message")],
         )
+        self.assertEqual(mock_agent.chat.await_args.kwargs["response_style"], "technical")
+        self.assertEqual(mock_agent.chat.await_args.kwargs["detail_level"], "concise")
 
 
 if __name__ == "__main__":

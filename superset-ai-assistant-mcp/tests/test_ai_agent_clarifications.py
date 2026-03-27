@@ -9,6 +9,12 @@ from backend.mcp_client.tool_registry import (
 
 
 class _FakeStructuredVizService:
+    def list_databases(self):
+        return [
+            {"id": 1, "name": "examples", "backend": "postgresql"},
+            {"id": 7, "name": "Pagila Demo (PostgreSQL)", "backend": "postgresql"},
+        ]
+
     def list_datasets(self, limit: int = 300, *, search: str = ""):
         return [
             {
@@ -309,6 +315,264 @@ class _NumericYearStructuredVizService(_FakeStructuredVizService):
         )
 
 
+class _PagilaWorkflowVizService(_FakeStructuredVizService):
+    def __init__(self):
+        self._next_chart_id = 900
+        self.created_charts = []
+        self.created_dashboards = []
+
+    def list_datasets(self, limit: int = 300, *, search: str = ""):
+        return [
+            {
+                "id": 26,
+                "table_name": "sales_by_store",
+                "schema": "public",
+                "database_name": "Pagila Demo (PostgreSQL)",
+                "database_id": 7,
+            },
+            {
+                "id": 27,
+                "table_name": "sales_by_film_category",
+                "schema": "public",
+                "database_name": "Pagila Demo (PostgreSQL)",
+                "database_id": 7,
+            },
+            {
+                "id": 28,
+                "table_name": "payment",
+                "schema": "public",
+                "database_name": "Pagila Demo (PostgreSQL)",
+                "database_id": 7,
+            },
+            {
+                "id": 29,
+                "table_name": "rental",
+                "schema": "public",
+                "database_name": "Pagila Demo (PostgreSQL)",
+                "database_id": 7,
+            },
+            {
+                "id": 32,
+                "table_name": "customer",
+                "schema": "public",
+                "database_name": "Pagila Demo (PostgreSQL)",
+                "database_id": 7,
+            },
+        ]
+
+    def get_dataset_metadata(self, dataset_id: int):
+        mapping = {
+            26: {
+                "id": 26,
+                "table_name": "sales_by_store",
+                "schema": "public",
+                "database_id": 7,
+                "database_name": "Pagila Demo (PostgreSQL)",
+                "columns": [
+                    {"column_name": "store", "type": "TEXT"},
+                    {"column_name": "manager", "type": "TEXT"},
+                    {"column_name": "total_sales", "type": "NUMERIC"},
+                ],
+            },
+            27: {
+                "id": 27,
+                "table_name": "sales_by_film_category",
+                "schema": "public",
+                "database_id": 7,
+                "database_name": "Pagila Demo (PostgreSQL)",
+                "columns": [
+                    {"column_name": "category", "type": "TEXT"},
+                    {"column_name": "total_sales", "type": "NUMERIC"},
+                ],
+            },
+            28: {
+                "id": 28,
+                "table_name": "payment",
+                "schema": "public",
+                "database_id": 7,
+                "database_name": "Pagila Demo (PostgreSQL)",
+                "columns": [
+                    {"column_name": "payment_id", "type": "INTEGER"},
+                    {"column_name": "customer_id", "type": "INTEGER"},
+                    {"column_name": "amount", "type": "NUMERIC"},
+                    {"column_name": "payment_date", "type": "TIMESTAMP"},
+                ],
+            },
+            29: {
+                "id": 29,
+                "table_name": "rental",
+                "schema": "public",
+                "database_id": 7,
+                "database_name": "Pagila Demo (PostgreSQL)",
+                "columns": [
+                    {"column_name": "rental_id", "type": "INTEGER"},
+                    {"column_name": "rental_date", "type": "TIMESTAMP"},
+                    {"column_name": "customer_id", "type": "INTEGER"},
+                ],
+            },
+            32: {
+                "id": 32,
+                "table_name": "customer",
+                "schema": "public",
+                "database_id": 7,
+                "database_name": "Pagila Demo (PostgreSQL)",
+                "columns": [
+                    {"column_name": "customer_id", "type": "INTEGER"},
+                    {"column_name": "store_id", "type": "INTEGER"},
+                    {"column_name": "create_date", "type": "TIMESTAMP"},
+                ],
+            },
+        }
+        return mapping[int(dataset_id)]
+
+    def preview_sql(self, *, database_id: int, sql: str, schema: str = "", preview_limit: int = 12):
+        if "sales_by_store" in sql:
+            rows = [
+                {"store": "Store 1", "total_sales": 1200.5},
+                {"store": "Store 2", "total_sales": 980.2},
+            ]
+            columns = [
+                {"column": "store", "inferred_type": "text"},
+                {"column": "total_sales", "inferred_type": "numeric"},
+            ]
+        elif "sales_by_film_category" in sql:
+            rows = [
+                {"category": "Sports", "total_sales": 850.0},
+                {"category": "Animation", "total_sales": 760.5},
+            ]
+            columns = [
+                {"column": "category", "inferred_type": "text"},
+                {"column": "total_sales", "inferred_type": "numeric"},
+            ]
+        elif "payment" in sql:
+            rows = [
+                {"period": "2007-02-14", "amount": 320.0},
+                {"period": "2007-02-15", "amount": 410.5},
+            ]
+            columns = [
+                {"column": "period", "inferred_type": "temporal"},
+                {"column": "amount", "inferred_type": "numeric"},
+            ]
+        elif "rental" in sql:
+            rows = [
+                {"period": "2007-02-14", "orders_count": 35},
+                {"period": "2007-02-15", "orders_count": 42},
+            ]
+            columns = [
+                {"column": "period", "inferred_type": "temporal"},
+                {"column": "orders_count", "inferred_type": "numeric"},
+            ]
+        else:
+            rows = [{"customer_id": 1, "total_count": 7}]
+            columns = [
+                {"column": "customer_id", "inferred_type": "numeric"},
+                {"column": "total_count", "inferred_type": "numeric"},
+            ]
+        return {
+            "database_id": int(database_id),
+            "schema": schema,
+            "sql_executed": sql,
+            "preview_limit": preview_limit,
+            "rows_count": len(rows),
+            "rows": rows,
+            "columns": columns,
+        }
+
+    def recommend_viz_types(
+        self,
+        *,
+        rows,
+        columns,
+        metric_column="",
+        dimension_column="",
+        time_column="",
+    ):
+        if time_column:
+            return {"recommended": "line", "candidates": [{"viz_type": "line", "reason": "time series"}]}
+        return {"recommended": "bar", "candidates": [{"viz_type": "bar", "reason": "dimension + metric"}]}
+
+    def create_chart_with_share(
+        self,
+        *,
+        dataset_id: int,
+        slice_name: str,
+        viz_type: str,
+        metric_column: str = "",
+        dimension_column: str = "",
+        time_column: str = "",
+        row_limit: int = 1000,
+        description: str = "",
+    ):
+        self._next_chart_id += 1
+        chart_id = self._next_chart_id
+        payload = {
+            "chart_id": chart_id,
+            "chart_url": f"/explore/?slice_id={chart_id}",
+            "chart_link": f"http://superset.local/explore/?slice_id={chart_id}",
+            "viz_type": viz_type,
+            "params": {"dataset_id": dataset_id, "viz_type": viz_type},
+        }
+        self.created_charts.append(
+            {
+                "slice_name": slice_name,
+                "dataset_id": dataset_id,
+                "viz_type": viz_type,
+                "chart_id": chart_id,
+            }
+        )
+        return payload
+
+    def generate_dashboard(
+        self,
+        *,
+        chart_ids,
+        dashboard_title: str,
+        description: str = "",
+    ):
+        dashboard = {
+            "dashboard_id": 1201,
+            "dashboard_url": "/superset/dashboard/1201/",
+            "dashboard_link": "http://superset.local/superset/dashboard/1201/",
+        }
+        self.created_dashboards.append(
+            {
+                "chart_ids": list(chart_ids),
+                "dashboard_title": dashboard_title,
+            }
+        )
+        return dashboard
+
+
+class _StrictPagilaWorkflowVizService(_PagilaWorkflowVizService):
+    def create_chart_with_share(
+        self,
+        *,
+        dataset_id: int,
+        slice_name: str,
+        viz_type: str,
+        metric_column: str = "",
+        dimension_column: str = "",
+        time_column: str = "",
+        row_limit: int = 1000,
+        description: str = "",
+    ):
+        if int(dataset_id) in {28, 29}:
+            if dimension_column == "customer_id":
+                raise RuntimeError("runtime_semantic_warning: customer_id is high-cardinality")
+            if not time_column:
+                raise RuntimeError("runtime_semantic_warning: expected time axis for payment/rental trend")
+        return super().create_chart_with_share(
+            dataset_id=dataset_id,
+            slice_name=slice_name,
+            viz_type=viz_type,
+            metric_column=metric_column,
+            dimension_column=dimension_column,
+            time_column=time_column,
+            row_limit=row_limit,
+            description=description,
+        )
+
+
 class TestAIAgentClarifications(unittest.TestCase):
     def setUp(self):
         self.agent = SupersetAIAgent.__new__(SupersetAIAgent)
@@ -582,6 +846,191 @@ class TestAIAgentClarifications(unittest.TestCase):
         self.assertEqual(reply["artifacts"][0]["payload"]["chart_type"], "line")
         self.assertEqual(reply["artifacts"][0]["payload"]["x_key"], "year")
         self.assertEqual(reply["artifacts"][1]["artifact_type"], "table_preview")
+
+    def test_database_info_reply_uses_database_level_evidence_for_pagila(self):
+        with unittest.mock.patch(
+            "backend.ai_agent.get_us13_15_viz_service",
+            return_value=_PagilaWorkflowVizService(),
+        ):
+            reply = self.agent._build_database_workflow_reply_sync(
+                user_message="Выведи мне информацию о Pagila Demo (PostgreSQL) у нас",
+                response_style="business",
+                detail_level="standard",
+                messages=[{"role": "user", "content": "Выведи мне информацию о Pagila Demo (PostgreSQL) у нас"}],
+            )
+
+        self.assertIsNotNone(reply)
+        assert reply is not None
+        self.assertIn("Pagila Demo (PostgreSQL)", reply["content"])
+        self.assertNotIn("не найден", reply["content"].casefold())
+        self.assertEqual(reply["artifacts"][0]["artifact_type"], "table_preview")
+        rows = reply["artifacts"][0]["payload"]["rows"]
+        self.assertTrue(any(row["dataset"] == "payment" for row in rows))
+
+    def test_pagila_chart_workflow_creates_real_chart_artifacts(self):
+        service = _PagilaWorkflowVizService()
+        with unittest.mock.patch(
+            "backend.ai_agent.get_us13_15_viz_service",
+            return_value=service,
+        ):
+            reply = self.agent._build_database_workflow_reply_sync(
+                user_message="Сделай мне любой подходящий для анализа график по Pagila Demo (PostgreSQL)",
+                response_style="business",
+                detail_level="standard",
+                messages=[{"role": "user", "content": "Сделай мне любой подходящий для анализа график по Pagila Demo (PostgreSQL)"}],
+            )
+
+        self.assertIsNotNone(reply)
+        assert reply is not None
+        self.assertEqual(len(service.created_charts), 1)
+        artifact_types = [item["artifact_type"] for item in reply["artifacts"]]
+        self.assertIn("chart_preview", artifact_types)
+        self.assertIn("table_preview", artifact_types)
+        self.assertIn("link", artifact_types)
+        chart_link_artifact = next(item for item in reply["artifacts"] if item["artifact_type"] == "link")
+        self.assertEqual(chart_link_artifact["payload"]["link_kind"], "chart")
+        self.assertIn("/explore/?slice_id=", chart_link_artifact["payload"]["href"])
+        self.assertIn("[Открыть график](", reply["content"])
+
+    def test_payment_date_prompt_prefers_temporal_axis_over_customer_dimension(self):
+        metadata = _PagilaWorkflowVizService().get_dataset_metadata(28)
+
+        plan = self.agent._build_structured_query_plan(
+            "Покажи выручку по датам платежей",
+            metadata,
+        )
+
+        self.assertIsNotNone(plan)
+        assert plan is not None
+        self.assertEqual(plan["time_column"], "payment_date")
+        self.assertEqual(plan["dimension_column"], "")
+        self.assertEqual(plan["chart_type"], "line")
+        self.assertIn("DATE_TRUNC('month', \"payment_date\")", plan["sql"])
+        self.assertNotIn("customer_id", plan["sql"])
+
+    def test_pagila_dashboard_workflow_creates_dashboard_and_chart_metadata(self):
+        service = _PagilaWorkflowVizService()
+        with unittest.mock.patch(
+            "backend.ai_agent.get_us13_15_viz_service",
+            return_value=service,
+        ):
+            reply = self.agent._build_database_workflow_reply_sync(
+                user_message="Сделай мне большой дашборд на несколько графиков по всей схеме Pagila Demo (PostgreSQL)",
+                response_style="technical",
+                detail_level="standard",
+                messages=[{"role": "user", "content": "Сделай мне большой дашборд на несколько графиков по всей схеме Pagila Demo (PostgreSQL)"}],
+            )
+
+        self.assertIsNotNone(reply)
+        assert reply is not None
+        self.assertGreaterEqual(len(service.created_charts), 3)
+        self.assertEqual(len(service.created_dashboards), 1)
+        dashboard_link = next(
+            item for item in reply["artifacts"]
+            if item["artifact_type"] == "link" and item["payload"].get("link_kind") == "dashboard"
+        )
+        self.assertIn("/superset/dashboard/1201/", dashboard_link["payload"]["href"])
+        self.assertIn("Открыть дашборд", reply["content"])
+
+    def test_pagila_dashboard_workflow_survives_strict_trend_validation(self):
+        service = _StrictPagilaWorkflowVizService()
+        with unittest.mock.patch(
+            "backend.ai_agent.get_us13_15_viz_service",
+            return_value=service,
+        ):
+            reply = self.agent._build_database_workflow_reply_sync(
+                user_message="Сделай мне большой дашборд на несколько графиков по всей схеме Pagila Demo (PostgreSQL)",
+                response_style="technical",
+                detail_level="standard",
+                messages=[{"role": "user", "content": "Сделай мне большой дашборд на несколько графиков по всей схеме Pagila Demo (PostgreSQL)"}],
+            )
+
+        self.assertIsNotNone(reply)
+        assert reply is not None
+        self.assertEqual(len(service.created_dashboards), 1)
+        self.assertGreaterEqual(len(service.created_charts), 4)
+        self.assertIn("Открыть дашборд", reply["content"])
+
+    def test_followup_dashboard_link_uses_recent_artifacts(self):
+        previous_assistant = {
+            "role": "assistant",
+            "content": "Готово",
+            "artifacts": [
+                {
+                    "artifact_type": "link",
+                    "title": "Pagila dashboard",
+                    "description": "Созданный дашборд",
+                    "payload": {
+                        "href": "http://superset.local/superset/dashboard/1201/",
+                        "link_label": "Открыть дашборд",
+                        "link_kind": "dashboard",
+                        "artifact_id": 1201,
+                    },
+                }
+            ],
+        }
+        reply = self.agent._build_database_workflow_reply_sync(
+            user_message="Дай мне ссылку на дашборд",
+            response_style="business",
+            detail_level="concise",
+            messages=[
+                {"role": "user", "content": "Сделай мне dashboard"},
+                previous_assistant,
+                {"role": "user", "content": "Дай мне ссылку на дашборд"},
+            ],
+        )
+
+        self.assertIsNotNone(reply)
+        assert reply is not None
+        self.assertIn("[Открыть дашборд](", reply["content"])
+        self.assertEqual(reply["artifacts"][0]["payload"]["artifact_id"], 1201)
+
+    def test_followup_chart_demo_uses_recent_chart_preview(self):
+        previous_assistant = {
+            "role": "assistant",
+            "content": "График готов",
+            "artifacts": [
+                {
+                    "artifact_type": "chart_preview",
+                    "title": "Preview графика",
+                    "description": "Demo chart",
+                    "payload": {
+                        "chart_type": "bar",
+                        "rows": [{"store": "Store 1", "total_sales": 1200.5}],
+                        "x_key": "store",
+                        "y_key": "total_sales",
+                        "href": "http://superset.local/explore/?slice_id=901",
+                        "link_label": "Открыть график",
+                    },
+                },
+                {
+                    "artifact_type": "link",
+                    "title": "Pagila chart",
+                    "description": "Созданный chart",
+                    "payload": {
+                        "href": "http://superset.local/explore/?slice_id=901",
+                        "link_label": "Открыть график",
+                        "link_kind": "chart",
+                        "artifact_id": 901,
+                    },
+                },
+            ],
+        }
+        reply = self.agent._build_database_workflow_reply_sync(
+            user_message="Выведи мне демо этого графика",
+            response_style="business",
+            detail_level="standard",
+            messages=[
+                {"role": "user", "content": "Сделай график"},
+                previous_assistant,
+                {"role": "user", "content": "Выведи мне демо этого графика"},
+            ],
+        )
+
+        self.assertIsNotNone(reply)
+        assert reply is not None
+        self.assertEqual(reply["artifacts"][0]["artifact_type"], "chart_preview")
+        self.assertIn("[Открыть график](", reply["content"])
 
 
 class TestAIAgentStyleRewrite(unittest.IsolatedAsyncioTestCase):

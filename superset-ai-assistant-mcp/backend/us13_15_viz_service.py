@@ -958,6 +958,60 @@ class US13To15VizService:
             "viz_type": safe_viz_type,
         }
 
+    def create_chart_with_share(
+        self,
+        *,
+        dataset_id: int,
+        slice_name: str,
+        viz_type: str,
+        metric_column: str = "",
+        dimension_column: str = "",
+        time_column: str = "",
+        row_limit: int = 1000,
+        description: str = "",
+    ) -> Dict[str, Any]:
+        safe_slice_name = _normalize_text(slice_name) or "AI Chart"
+        safe_viz_type = _normalize_text(viz_type).lower() or "table"
+
+        params = self.build_chart_params(
+            dataset_id=dataset_id,
+            viz_type=viz_type,
+            metric_column=metric_column,
+            dimension_column=dimension_column,
+            time_column=time_column,
+            row_limit=row_limit,
+        )
+
+        chart = self._create_chart(
+            slice_name=safe_slice_name,
+            datasource_id=int(dataset_id),
+            datasource_type="table",
+            viz_type=safe_viz_type,
+            params=params,
+            description=description,
+            metric_column=metric_column,
+            dimension_column=dimension_column,
+            time_column=time_column,
+        )
+
+        chart_id = int(chart["chart_id"])
+        chart_url = chart.get("chart_url") or f"/explore/?slice_id={chart_id}"
+        self._emit_artifact_event(
+            "useful_links_produced",
+            status="ok",
+            chart_id=chart_id,
+            link_count=1,
+            link_kinds=["chart"],
+        )
+
+        return {
+            "chart_id": chart_id,
+            "chart_url": chart_url,
+            "chart_link": self._to_absolute_url(chart_url),
+            "params": params,
+            "viz_type": safe_viz_type,
+        }
+
     def generate_dashboard(
         self,
         *,
@@ -995,6 +1049,9 @@ class US13To15VizService:
         return {
             "dashboard_id": dashboard_id,
             "dashboard_url": dashboard_url or f"/superset/dashboard/{dashboard_id}/",
+            "dashboard_link": self._to_absolute_url(
+                dashboard_url or f"/superset/dashboard/{dashboard_id}/"
+            ),
             "raw": payload,
         }
 

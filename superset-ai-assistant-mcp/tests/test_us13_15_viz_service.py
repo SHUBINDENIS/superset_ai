@@ -410,6 +410,33 @@ class TestUS13To15VizService(unittest.TestCase):
         self.assertIn("chart_created", event_names)
         self.assertIn("useful_links_produced", event_names)
 
+    def test_create_chart_with_share_returns_absolute_link(self):
+        calls = []
+
+        def fake_call_product_client(method_name, request):
+            calls.append((method_name, request))
+            if method_name == "generate_chart":
+                return {
+                    "chart": {"id": 44, "url": "/explore/?slice_id=44"},
+                    "explore_url": "/explore/?slice_id=44",
+                    "success": True,
+                }
+            raise AssertionError(f"unexpected method {method_name}")
+
+        self.service._call_product_client = fake_call_product_client
+
+        result = self.service.create_chart_with_share(
+            dataset_id=7,
+            slice_name="Revenue by store",
+            viz_type="bar",
+            metric_column="sales",
+            dimension_column="region",
+        )
+
+        self.assertEqual(result["chart_id"], 44)
+        self.assertEqual(result["chart_link"], "http://localhost:8088/explore/?slice_id=44")
+        self.assertEqual([name for name, _ in calls], ["generate_chart"])
+
     def test_create_dashboard_widget_with_share_uses_compat_chart_extension_for_pie(self):
         calls = []
 
@@ -462,6 +489,26 @@ class TestUS13To15VizService(unittest.TestCase):
 
         self.assertEqual(url, "http://localhost:8088/explore/?form_data_key=abc")
         self.assertEqual(calls[0][0], "generate_explore_link")
+
+    def test_generate_dashboard_returns_absolute_share_link(self):
+        calls = []
+
+        def fake_call_product_client(method_name, request):
+            calls.append((method_name, request))
+            if method_name == "generate_dashboard":
+                return {
+                    "dashboard": {"id": 77, "url": "/superset/dashboard/77/"},
+                    "dashboard_url": "/superset/dashboard/77/",
+                }
+            raise AssertionError(f"unexpected method {method_name}")
+
+        self.service._call_product_client = fake_call_product_client
+
+        result = self.service.generate_dashboard(chart_ids=[1, 2], dashboard_title="Pagila")
+
+        self.assertEqual(result["dashboard_id"], 77)
+        self.assertEqual(result["dashboard_link"], "http://localhost:8088/superset/dashboard/77/")
+        self.assertEqual(calls[0][0], "generate_dashboard")
 
     def test_open_sql_lab_link_uses_built_in_tool(self):
         calls = []
