@@ -14,6 +14,7 @@ import {
 import { ApiError } from "@/lib/api-client";
 import {
   chatsApi,
+  type ChatSession,
   type ChatMessage,
   type ChatSessionList,
   type MessageList,
@@ -58,6 +59,19 @@ function messagesKey(sessionId: string | null) {
   return ["chats", sessionId, "messages"] as const;
 }
 
+function upsertChatSession(
+  current: ChatSessionList | undefined,
+  session: ChatSession,
+): ChatSessionList {
+  const sessions = current?.sessions ?? [];
+  return {
+    sessions: [
+      session,
+      ...sessions.filter((item) => item.session_id !== session.session_id),
+    ],
+  };
+}
+
 function buildErrorMessage(message: string, sessionId: string): ChatMessage {
   return {
     role: "assistant",
@@ -97,6 +111,13 @@ export function useCreateChat() {
       source?: string;
     }) => chatsApi.create(variables.title, variables.traceContext),
     onSuccess: (created, variables) => {
+      qc.setQueryData<ChatSessionList>(CHATS_KEY, (current) =>
+        upsertChatSession(current, created),
+      );
+      qc.setQueryData<MessageList>(
+        messagesKey(created.session_id),
+        (current) => current ?? { messages: [] },
+      );
       setActiveSessionId(created.session_id);
       logFrontendEvent(
         "chat_new",
