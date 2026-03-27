@@ -343,7 +343,7 @@ class SupersetAIAgent:
 
     def _resolve_dataset_for_scope_via_rest(self, scope: Dict[str, str]) -> Dict[str, Any]:
         try:
-            svc = get_us13_15_viz_service()
+            svc = self._get_viz_service_for_sync_work()
             datasets = svc.list_datasets(limit=1000)
         except Exception as exc:
             backend_logger.warning(
@@ -356,7 +356,7 @@ class SupersetAIAgent:
             return {}
 
         try:
-            svc = get_us13_15_viz_service()
+            svc = self._get_viz_service_for_sync_work()
             metadata = svc.get_dataset_metadata(int(best["dataset_id"]))
             columns = metadata.get("columns", [])
             metrics = metadata.get("metrics", [])
@@ -669,7 +669,7 @@ class SupersetAIAgent:
         if not query:
             return ""
         try:
-            svc = get_us13_15_viz_service()
+            svc = self._get_viz_service_for_sync_work()
             datasets = svc.list_datasets(limit=300)
         except Exception as exc:
             backend_logger.warning(
@@ -729,6 +729,17 @@ class SupersetAIAgent:
             "Правило: для business-mode не начинай ответ с просьбы назвать таблицу, если кандидат выше выглядит правдоподобным."
         )
         return "\n".join(lines)
+
+    @staticmethod
+    def _get_viz_service_for_sync_work() -> Any:
+        svc = get_us13_15_viz_service()
+        clone = getattr(svc, "clone_for_worker", None)
+        if callable(clone):
+            try:
+                return clone()
+            except Exception:
+                return svc
+        return svc
 
     @staticmethod
     def _quote_sql_identifier(value: str) -> str:
@@ -807,6 +818,9 @@ class SupersetAIAgent:
             patterns=["date", "time", "month", "year"],
             type_patterns=["date", "time", "timestamp"],
         )
+        requested_year = self._extract_requested_year(query)
+        if requested_year is not None and not time_column:
+            return 0
         if metric_column and self._contains_any_pattern(query, ["выруч", "sales", "revenue", "продаж", "оплат"]):
             score += 90
         if store_column and self._contains_any_pattern(query, ["магазин", "store", "shop"]):
@@ -849,6 +863,8 @@ class SupersetAIAgent:
             patterns=["date", "time", "month", "year"],
             type_patterns=["date", "time", "timestamp"],
         )
+        if requested_year is not None and not time_column:
+            return None
         if wants_store:
             dimension_column = self._pick_first_matching_column(columns, patterns=["store", "shop"])
         elif wants_category:
@@ -909,10 +925,6 @@ class SupersetAIAgent:
                 f"EXTRACT(YEAR FROM {self._quote_sql_identifier(time_column)}) = {requested_year}"
             )
             assumptions.append(f"фильтр по {requested_year} году применяется по полю {time_column}")
-        elif requested_year is not None:
-            assumptions.append(
-                f"в запросе указан {requested_year} год, но в dataset не найдено явное поле даты"
-            )
 
         from_ref = self._build_sql_table_ref(table_name, schema_name)
         order_clause = ""
@@ -950,9 +962,6 @@ class SupersetAIAgent:
             sql_parts.append("WHERE " + " AND ".join(where_clauses))
         sql_parts.append(order_clause)
         sql = "\n".join(part for part in sql_parts if part)
-
-        if requested_year is not None and not time_column and not dimension_column:
-            return None
 
         return {
             "database_id": int(database_id),
@@ -1156,6 +1165,320 @@ class SupersetAIAgent:
             if parts:
                 return "Первые значения: " + "; ".join(parts) + "."
         return f"Получено {len(rows)} строк(и) preview."
+
+    def _build_availability_summary_preview_sync(
+        self,
+        *,
+        svc: Any,
+        plan: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        time_column = str(plan.get("time_column") or "").strip()
+        table_name = str(plan.get("table_name") or "").strip()
+        database_id = int(plan.get("database_id") or 0)
+        if not time_column or not table_name or database_id <= 0:
+            return None
+
+        schema_name = str(plan.get("schema") or "").strip()
+        from_ref = self._build_sql_table_ref(table_name, schema_name)
+        requested_year = plan.get("requested_year")
+        year_count_sql = "NULL::bigint AS matching_rows"
+        if isinstance(requested_year, int):
+            year_count_sql = (
+                "SUM(CASE WHEN EXTRACT(YEAR FROM "
+                f"{self._quote_sql_identifier(time_column)}) = {requested_year} "
+                "THEN 1 ELSE 0 END)::bigint AS matching_rows"
+            )
+
+        sql = "\n".join(
+            [
+                "SELECT",
+                "  COUNT(*)::bigint AS total_rows,",
+                f"  {year_count_sql},",
+                f"  MIN({self._quote_sql_identifier(time_column)})::date AS min_period,",
+                f"  MAX({self._quote_sql_identifier(time_column)})::date AS max_period",
+                f"FROM {from_ref}",
+            ]
+        )
+        try:
+            return svc.preview_sql(
+                database_id=database_id,
+                sql=sql,
+                schema=schema_name,
+                preview_limit=1,
+            )
+        except Exception as exc:
+            backend_logger.warning(
+                f"Session {self.session_id}: availability summary failed for dataset "
+                f"{plan.get('dataset_id')}: {exc}"
+            )
+            return None
+
+    @staticmethod
+    def _extract_availability_row(preview: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        if not isinstance(preview, dict):
+            return {}
+        rows = preview.get("rows", [])
+        if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+            return rows[0]
+        return {}
+
+    def _build_structured_no_data_response(
+        self,
+        *,
+        plan: Dict[str, Any],
+        detail_level: Optional[str],
+        response_style: Optional[str],
+        chart_link: str = "",
+        sql_lab_link: str = "",
+        availability_preview: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        detail = self._normalize_detail_level(detail_level)
+        response_style = self._normalize_response_style(response_style)
+        dataset_label = str(plan.get("table_name") or "").strip() or "dataset"
+        metric_desc = str(plan.get("metric_description", plan.get("metric_label", "")) or "").strip()
+        group_hint = str(plan.get("group_hint") or "").strip()
+        requested_year = plan.get("requested_year")
+        time_column = str(plan.get("time_column") or "").strip()
+        database_name = str(plan.get("database_name") or "").strip() or "-"
+        schema_name = str(plan.get("schema") or "").strip()
+        table_ref = f"{schema_name}.{dataset_label}" if schema_name else dataset_label
+        sql_text = str(plan.get("sql") or "").strip()
+        availability_row = self._extract_availability_row(availability_preview)
+        min_period = str(availability_row.get("min_period") or "").strip()
+        max_period = str(availability_row.get("max_period") or "").strip()
+        total_rows = availability_row.get("total_rows")
+        matching_rows = availability_row.get("matching_rows")
+        available_range = ""
+        if min_period and max_period:
+            available_range = f"Доступный диапазон: {min_period} — {max_period}."
+
+        next_actions = self._join_markdown_links(
+            [
+                ("Открыть SQL Lab", sql_lab_link),
+                ("Открыть график", chart_link),
+            ]
+        )
+
+        if response_style == "technical":
+            fields_lines = [
+                f"- metric: {metric_desc or 'COUNT(*)'}",
+                f"- dimension: {str(plan.get('dimension_column') or '-').strip() or '-'}",
+                f"- time: {time_column or '-'}",
+            ]
+            if group_hint:
+                fields_lines.append(f"- grain: {group_hint}")
+            assumptions = [
+                f"Dataset `{dataset_label}` выбран как наиболее подходящий кандидат под запрос."
+            ]
+            if requested_year is not None and time_column:
+                assumptions.append(f"Фильтр по {requested_year} году применён к полю `{time_column}`.")
+            limitations = [
+                f"За {requested_year} год preview вернул 0 строк."
+                if requested_year is not None
+                else "Preview вернул 0 строк по текущему фильтру."
+            ]
+            if available_range:
+                limitations.append(available_range)
+            if total_rows not in (None, ""):
+                limitations.append(
+                    f"Всего строк в источнике: {self._normalize_metric_value(total_rows)}."
+                )
+
+            if detail == "concise":
+                lines = [
+                    "**Источник**",
+                    f"Dataset `{dataset_label}`; источник `{table_ref}` в базе `{database_name}`.",
+                    "",
+                    "**Поля**",
+                    ", ".join(
+                        token
+                        for token in [
+                            metric_desc,
+                            str(plan.get("dimension_column") or "").strip(),
+                            time_column,
+                        ]
+                        if token
+                    ) or "Ключевые поля не определены.",
+                    "",
+                    "**SQL / агрегация**",
+                    f"```sql\n{sql_text}\n```",
+                    "",
+                    f"За {requested_year} год данных не найдено."
+                    if requested_year is not None
+                    else "По текущему фильтру данных не найдено.",
+                ]
+            elif detail == "standard":
+                lines = [
+                    "**Источник**",
+                    f"`{table_ref}` в базе `{database_name}`.",
+                    "",
+                    "**Dataset / datasource**",
+                    f"Dataset `{dataset_label}`, dataset_id={plan.get('dataset_id', 0)}.",
+                    "",
+                    "**Поля**",
+                    *fields_lines,
+                    "",
+                    "**Предположения**",
+                    *(f"- {item}" for item in assumptions),
+                    "",
+                    "**SQL**",
+                    f"```sql\n{sql_text}\n```",
+                    "",
+                    "**Что можно сделать дальше**",
+                    (
+                        f"- Preview за {requested_year} год вернул 0 строк."
+                        if requested_year is not None
+                        else "- Preview по текущему фильтру вернул 0 строк."
+                    ),
+                    "- Проверить доступный период в этом источнике.",
+                    "- Ослабить фильтр по году или выбрать соседний временной диапазон.",
+                ]
+                if next_actions:
+                    lines.append(f"- {next_actions}")
+            else:
+                lines = [
+                    "**Источник**",
+                    f"`{table_ref}` в базе `{database_name}`; dataset `{dataset_label}` (dataset_id={plan.get('dataset_id', 0)}).",
+                    "",
+                    "**Поля**",
+                    *fields_lines,
+                    "",
+                    "**Предположения**",
+                    *(f"- {item}" for item in assumptions),
+                    "",
+                    "**SQL**",
+                    f"```sql\n{sql_text}\n```",
+                    "",
+                    "**Preview summary**",
+                    f"За {requested_year} год preview вернул 0 строк."
+                    if requested_year is not None
+                    else "Preview вернул 0 строк по текущему фильтру.",
+                    "",
+                    "**Viz recommendation**",
+                    "Сначала стоит проверить доступный период и только потом строить итоговый график.",
+                    "",
+                    "**Ограничения**",
+                    *(f"- {item}" for item in limitations[:3]),
+                    "",
+                    "**Что можно сделать дальше**",
+                    "- Перестроить график по доступному диапазону дат.",
+                    "- Переключить источник, если нужен именно 2025 год.",
+                ]
+                if next_actions:
+                    lines.append(f"- {next_actions}")
+        else:
+            assumption_line = f"В качестве рабочего допущения выбран dataset `{dataset_label}`."
+            no_data_line = (
+                f"За {requested_year} год в выбранном источнике данных записей не найдено."
+                if requested_year is not None
+                else "По текущему фильтру в выбранном источнике данных записей не найдено."
+            )
+            what_used_lines = [
+                assumption_line,
+                f"Метрика: {metric_desc or 'рабочая агрегация'}.",
+            ]
+            if group_hint:
+                what_used_lines.append(f"Группировка: {group_hint}.")
+            if requested_year is not None and time_column:
+                what_used_lines.append(f"Фильтр: {requested_year} год по полю `{time_column}`.")
+            if detail == "concise":
+                lines = [
+                    "**Краткий вывод**",
+                    no_data_line,
+                    "",
+                    "**Что использовано**",
+                    *what_used_lines[:4],
+                    "",
+                    "**Следующий шаг**",
+                    "Могу сразу перестроить результат по доступному периоду."
+                    + (f" {next_actions}" if next_actions else ""),
+                ]
+            else:
+                lines = [
+                    "**Краткий вывод**",
+                    no_data_line,
+                    "",
+                    "**Что использовано**",
+                    *what_used_lines,
+                    "",
+                    "**Что это значит**",
+                    (
+                        "Проблема не в построении запроса: сам источник сейчас не даёт строк под этот период."
+                        if requested_year is not None
+                        else "Текущий фильтр слишком узкий, поэтому график пока пустой."
+                    ),
+                ]
+                if detail == "detailed":
+                    key_facts: List[str] = []
+                    if total_rows not in (None, ""):
+                        key_facts.append(
+                            f"- Всего строк в dataset: {self._normalize_metric_value(total_rows)}"
+                        )
+                    if available_range:
+                        key_facts.append(f"- {available_range}")
+                    if matching_rows not in (None, "") and requested_year is not None:
+                        key_facts.append(
+                            f"- Строк за {requested_year} год: {self._normalize_metric_value(matching_rows)}"
+                        )
+                    if key_facts:
+                        lines.extend(["", "**Ключевые факты**", *key_facts[:3]])
+                lines.extend(
+                    [
+                        "",
+                        "**Следующий шаг**",
+                        "Могу сразу показать доступный период, снять фильтр по году или выбрать другой источник."
+                        + (f" {next_actions}" if next_actions else ""),
+                    ]
+                )
+
+        availability_rows = []
+        if availability_row:
+            availability_rows.append(
+                {
+                    "dataset": dataset_label,
+                    "requested_year": requested_year if requested_year is not None else "—",
+                    "matching_rows": matching_rows if matching_rows not in (None, "") else 0,
+                    "min_period": min_period or "—",
+                    "max_period": max_period or "—",
+                    "total_rows": total_rows if total_rows not in (None, "") else "—",
+                }
+            )
+        elif requested_year is not None:
+            availability_rows.append(
+                {
+                    "dataset": dataset_label,
+                    "requested_year": requested_year,
+                    "matching_rows": 0,
+                    "min_period": "—",
+                    "max_period": "—",
+                    "total_rows": "—",
+                }
+            )
+
+        artifacts: List[Dict[str, Any]] = []
+        if availability_rows:
+            artifacts.append(
+                self._build_table_artifact(
+                    title="Доступность данных",
+                    description="Краткая сводка по доступному периоду и объёму данных.",
+                    rows=availability_rows,
+                    href=sql_lab_link or chart_link,
+                    link_label="Открыть SQL Lab" if sql_lab_link else "Открыть результат в Superset",
+                )
+            )
+
+        return {
+            "content": self._strip_raw_urls_from_text(
+                self._apply_style_response_envelope("\n".join(lines), response_style)
+            ),
+            "role": "assistant",
+            "finish_reason": "stop",
+            "model": self.model_name,
+            "session_id": self.session_id,
+            "response_style": response_style,
+            "detail_level": detail,
+            "artifacts": artifacts,
+        }
 
     def _build_business_structured_response(
         self,
@@ -1455,7 +1778,7 @@ class SupersetAIAgent:
         ):
             return None
 
-        svc = get_us13_15_viz_service()
+        svc = self._get_viz_service_for_sync_work()
         datasets = self._collect_structured_dataset_candidates(
             svc=svc,
             user_message=query,
@@ -1487,6 +1810,10 @@ class SupersetAIAgent:
         best_recommendation: Dict[str, Any] = {}
         best_metadata: Optional[Dict[str, Any]] = None
         best_score = -1
+        best_empty_plan: Optional[Dict[str, Any]] = None
+        best_empty_preview: Optional[Dict[str, Any]] = None
+        best_empty_metadata: Optional[Dict[str, Any]] = None
+        best_empty_score = -1
 
         for candidate in scored_candidates[:4]:
             dataset_id = int(candidate.get("id", 0) or 0)
@@ -1513,6 +1840,11 @@ class SupersetAIAgent:
                 )
                 continue
             if int(preview.get("rows_count", 0) or 0) <= 0:
+                if score > best_empty_score:
+                    best_empty_score = score
+                    best_empty_plan = plan
+                    best_empty_preview = preview
+                    best_empty_metadata = metadata
                 continue
             recommendation = svc.recommend_viz_types(
                 rows=preview.get("rows", []),
@@ -1529,7 +1861,50 @@ class SupersetAIAgent:
                 best_metadata = metadata
 
         if best_plan is None or best_preview is None or best_metadata is None:
-            return None
+            if best_empty_plan is None or best_empty_preview is None or best_empty_metadata is None:
+                return None
+            table_name = str(
+                best_empty_plan.get("table_name")
+                or best_empty_metadata.get("table_name")
+                or ""
+            ).strip()
+            chart_link = ""
+            sql_lab_link = ""
+            try:
+                chart_link = svc.generate_explore_link(
+                    dataset_id=int(best_empty_plan.get("dataset_id") or 0),
+                    viz_type=str(best_empty_plan.get("chart_type") or "table"),
+                    metric_column=str(best_empty_plan.get("metric_column") or ""),
+                    dimension_column=str(best_empty_plan.get("dimension_column") or ""),
+                    time_column=str(best_empty_plan.get("time_column") or ""),
+                )
+            except Exception as exc:
+                backend_logger.warning(
+                    f"Session {self.session_id}: failed to generate empty-state explore link: {exc}"
+                )
+            try:
+                sql_lab_link = svc.open_sql_lab_link(
+                    database_id=int(best_empty_plan.get("database_id") or 0),
+                    schema_name=str(best_empty_plan.get("schema") or ""),
+                    dataset_in_context=table_name,
+                    title=f"AI SQL Preview · {table_name or 'dataset'}",
+                )
+            except Exception as exc:
+                backend_logger.warning(
+                    f"Session {self.session_id}: failed to generate empty-state SQL Lab link: {exc}"
+                )
+            availability_preview = self._build_availability_summary_preview_sync(
+                svc=svc,
+                plan=best_empty_plan,
+            )
+            return self._build_structured_no_data_response(
+                plan=best_empty_plan,
+                detail_level=detail_level,
+                response_style=response_style,
+                chart_link=chart_link,
+                sql_lab_link=sql_lab_link,
+                availability_preview=availability_preview,
+            )
 
         table_name = str(best_plan.get("table_name") or best_metadata.get("table_name") or "").strip()
         recommended_viz = str(

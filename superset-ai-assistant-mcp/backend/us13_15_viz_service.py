@@ -192,6 +192,16 @@ class US13To15VizService:
         self._loop = None
         self._metadata_cache.clear()
 
+    def clone_for_worker(self) -> "US13To15VizService":
+        return US13To15VizService(
+            base_url=self.base_url,
+            timeout_seconds=self.timeout_seconds,
+            default_preview_limit=self.default_preview_limit,
+            share_base_url=self.share_base_url,
+            metadata_cache_ttl_seconds=self.metadata_cache_ttl_seconds,
+            metadata_cache_max_entries=self.metadata_cache_max_entries,
+        )
+
     def _get_loop(self) -> asyncio.AbstractEventLoop:
         if self._loop is None or self._loop.is_closed():
             self._loop = asyncio.new_event_loop()

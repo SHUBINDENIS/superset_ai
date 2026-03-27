@@ -191,7 +191,7 @@ services:
     environment:
       <<: *assistant-runtime-env
       API_PORT: "8100"
-      API_CORS_ORIGINS: ${API_CORS_ORIGINS:-http://localhost:3001,http://127.0.0.1:3001}
+      API_CORS_ORIGINS: ${API_CORS_ORIGINS:-http://localhost:3001,http://127.0.0.1:3001,http://103.54.18.91:3001}
     command: ["bash", "superset-ai-assistant-mcp/start_fastapi_stack.sh"]
     volumes:
       - assistant_dev_data:/app/superset-ai-assistant-mcp/data
@@ -214,6 +214,7 @@ services:
       - "${DEV_NEXTJS_PORT:-3001}:3001"
     environment:
       NEXT_PUBLIC_API_URL: http://assistant-api:8100
+      NEXT_PUBLIC_BROWSER_API_URL: ${NEXT_PUBLIC_BROWSER_API_URL:-http://103.54.18.91:8100}
       NEXTJS_PORT: "3001"
       NEXTJS_RUNTIME: production
       NEXT_TELEMETRY_DISABLED: "1"

@@ -1,9 +1,9 @@
 /**
  * Thin fetch wrapper for the FastAPI backend.
  *
- * All requests go to `/api/...` which Next.js rewrites proxy to the
- * FastAPI server.  Cookies are included automatically (`credentials:
- * "include"`) so the httpOnly auth cookie flows transparently.
+ * In the browser we prefer a direct FastAPI origin when configured,
+ * because long-running chat requests can outlive the Next.js proxy path.
+ * Otherwise we fall back to `/api/...` on the same origin.
  */
 
 import type { FrontendTraceContext } from "./observability";
@@ -23,11 +23,23 @@ export interface ApiRequestInit extends RequestInit {
   traceContext?: Partial<FrontendTraceContext>;
 }
 
+function resolveApiUrl(path: string): string {
+  const cleanPath = `/api${path}`;
+  if (typeof window === "undefined") {
+    return cleanPath;
+  }
+  const directBase = (process.env.NEXT_PUBLIC_BROWSER_API_URL || "").trim().replace(/\/+$/, "");
+  if (!directBase) {
+    return cleanPath;
+  }
+  return `${directBase}${cleanPath}`;
+}
+
 export async function apiFetch<T>(
   path: string,
   init?: ApiRequestInit,
 ): Promise<T> {
-  const res = await fetch(`/api${path}`, {
+  const res = await fetch(resolveApiUrl(path), {
     credentials: "include",
     ...init,
     headers: {

@@ -148,6 +148,109 @@ class _SearchFirstStructuredVizService(_FakeStructuredVizService):
         return super().list_datasets(limit=limit, search=search)
 
 
+class _YearAwareStructuredVizService(_FakeStructuredVizService):
+    def list_datasets(self, limit: int = 300, *, search: str = ""):
+        normalized = str(search or "").strip().casefold()
+        if normalized in {"order", "orders", "payment", "date", "sales"}:
+            return [
+                {
+                    "id": 27,
+                    "table_name": "sales_by_film_category",
+                    "schema": "public",
+                    "database_name": "Pagila Demo (PostgreSQL)",
+                    "database_id": 7,
+                },
+                {
+                    "id": 43,
+                    "table_name": "payment",
+                    "schema": "public",
+                    "database_name": "Pagila Demo (PostgreSQL)",
+                    "database_id": 7,
+                },
+            ]
+        return super().list_datasets(limit=limit, search=search)
+
+    def get_dataset_metadata(self, dataset_id: int):
+        if int(dataset_id) == 27:
+            return {
+                "id": 27,
+                "table_name": "sales_by_film_category",
+                "schema": "public",
+                "database_id": 7,
+                "database_name": "Pagila Demo (PostgreSQL)",
+                "columns": [
+                    {"column_name": "category", "type": "TEXT"},
+                    {"column_name": "total_sales", "type": "NUMERIC"},
+                ],
+            }
+        return super().get_dataset_metadata(dataset_id)
+
+
+class _NoRowsStructuredVizService(_FakeStructuredVizService):
+    def list_datasets(self, limit: int = 300, *, search: str = ""):
+        normalized = str(search or "").strip().casefold()
+        if normalized in {"order", "orders", "payment", "rental", "date"}:
+            return [
+                {
+                    "id": 43,
+                    "table_name": "payment",
+                    "schema": "public",
+                    "database_name": "Pagila Demo (PostgreSQL)",
+                    "database_id": 7,
+                }
+            ]
+        return super().list_datasets(limit=limit, search=search)
+
+    def preview_sql(self, *, database_id: int, sql: str, schema: str = "", preview_limit: int = 12):
+        if "COUNT(*)::bigint AS total_rows" in sql:
+            return {
+                "database_id": int(database_id),
+                "schema": schema,
+                "sql_executed": sql,
+                "preview_limit": preview_limit,
+                "rows_count": 1,
+                "rows": [
+                    {
+                        "total_rows": 14596,
+                        "matching_rows": 0,
+                        "min_period": "2007-02-14",
+                        "max_period": "2007-05-14",
+                    }
+                ],
+                "columns": [
+                    {"column": "total_rows", "inferred_type": "numeric"},
+                    {"column": "matching_rows", "inferred_type": "numeric"},
+                    {"column": "min_period", "inferred_type": "temporal"},
+                    {"column": "max_period", "inferred_type": "temporal"},
+                ],
+            }
+        if "payment" in sql:
+            return {
+                "database_id": int(database_id),
+                "schema": schema,
+                "sql_executed": sql,
+                "preview_limit": preview_limit,
+                "rows_count": 0,
+                "rows": [],
+                "columns": [],
+            }
+        return super().preview_sql(
+            database_id=database_id,
+            sql=sql,
+            schema=schema,
+            preview_limit=preview_limit,
+        )
+
+
+class _CloneableStructuredVizService(_FakeStructuredVizService):
+    def __init__(self):
+        self.clone_calls = 0
+
+    def clone_for_worker(self):
+        self.clone_calls += 1
+        return _FakeStructuredVizService()
+
+
 class TestAIAgentClarifications(unittest.TestCase):
     def setUp(self):
         self.agent = SupersetAIAgent.__new__(SupersetAIAgent)
@@ -338,6 +441,51 @@ class TestAIAgentClarifications(unittest.TestCase):
         self.assertIn("Dataset `payment`", reply["content"])
         self.assertIn("YEAR(payment_date) = 2025", reply["content"])
         self.assertEqual(reply["artifacts"][0]["artifact_type"], "chart_preview")
+
+    def test_structured_reply_rejects_year_queries_for_datasets_without_time_field(self):
+        with unittest.mock.patch(
+            "backend.ai_agent.get_us13_15_viz_service",
+            return_value=_YearAwareStructuredVizService(),
+        ):
+            reply = self.agent._build_structured_analytics_reply_sync(
+                user_message="Сделай график по заказам за 2025 год",
+                response_style="technical",
+                detail_level="standard",
+            )
+
+        self.assertIsNotNone(reply)
+        self.assertIn("Dataset `payment`", reply["content"])
+        self.assertNotIn("sales_by_film_category", reply["content"])
+        self.assertIn("YEAR(payment_date) = 2025", reply["content"])
+
+    def test_structured_reply_returns_no_data_response_when_year_has_no_rows(self):
+        with unittest.mock.patch(
+            "backend.ai_agent.get_us13_15_viz_service",
+            return_value=_NoRowsStructuredVizService(),
+        ):
+            reply = self.agent._build_structured_analytics_reply_sync(
+                user_message="Сделай график по заказам за 2025 год",
+                response_style="technical",
+                detail_level="standard",
+            )
+
+        self.assertIsNotNone(reply)
+        self.assertIn("Dataset `payment`", reply["content"])
+        self.assertIn("0 строк", reply["content"])
+        self.assertIn('EXTRACT(YEAR FROM "payment_date") = 2025', reply["content"])
+        self.assertEqual(reply["artifacts"][0]["artifact_type"], "table_preview")
+        self.assertEqual(reply["artifacts"][0]["payload"]["rows"][0]["matching_rows"], 0)
+
+    def test_sync_viz_helpers_clone_service_for_worker_usage(self):
+        cloneable = _CloneableStructuredVizService()
+        with unittest.mock.patch(
+            "backend.ai_agent.get_us13_15_viz_service",
+            return_value=cloneable,
+        ):
+            svc = self.agent._get_viz_service_for_sync_work()
+
+        self.assertIsInstance(svc, _FakeStructuredVizService)
+        self.assertEqual(cloneable.clone_calls, 1)
 
 
 class TestAIAgentStyleRewrite(unittest.IsolatedAsyncioTestCase):
