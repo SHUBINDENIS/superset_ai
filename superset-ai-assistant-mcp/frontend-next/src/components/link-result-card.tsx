@@ -8,13 +8,18 @@ import { createTraceContext, describeUsefulLink, logFrontendEvent } from "@/lib/
 interface LinkResultCardProps {
   title: string;
   href: string;
+  route?: string;
 }
 
-export function LinkResultCard({ title, href }: LinkResultCardProps) {
+export function LinkResultCard({
+  title,
+  href,
+  route = "/app/share",
+}: LinkResultCardProps) {
   const [copied, setCopied] = useState(false);
 
   async function handleCopy() {
-    const traceContext = createTraceContext({ route: "/app/share" });
+    const traceContext = createTraceContext({ route });
     try {
       await navigator.clipboard.writeText(href);
       setCopied(true);
@@ -52,7 +57,7 @@ export function LinkResultCard({ title, href }: LinkResultCardProps) {
                   title,
                   ...describeUsefulLink(href),
                 },
-                { traceContext: createTraceContext({ route: "/app/share" }) },
+                { traceContext: createTraceContext({ route }) },
               )
             }
           >

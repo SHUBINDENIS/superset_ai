@@ -12,6 +12,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 import { ApiError } from "@/lib/api-client";
+import { publishChatSyncEvent } from "@/lib/chat-sync";
 import {
   chatsApi,
   type ChatSession,
@@ -156,13 +157,20 @@ function replaceChatSession(
   };
 }
 
-function buildErrorMessage(message: string, sessionId: string): ChatMessage {
+function buildErrorMessage(
+  message: string,
+  sessionId: string,
+  responseStyle?: ResponseStyle,
+  detailLevel?: DetailLevel,
+): ChatMessage {
   return {
     role: "assistant",
     content: `Ошибка при обработке запроса: ${message}`,
     session_id: sessionId,
     created_at: new Date().toISOString(),
     finish_reason: "error",
+    response_style: responseStyle,
+    detail_level: detailLevel,
   };
 }
 
@@ -214,6 +222,10 @@ export function useCreateChat() {
           }),
         },
       );
+      publishChatSyncEvent({
+        type: "chat_created",
+        sessionId: created.session_id,
+      });
       qc.invalidateQueries({ queryKey: CHATS_KEY });
     },
   });
@@ -247,6 +259,10 @@ export function useRenameChat() {
           }),
         },
       );
+      publishChatSyncEvent({
+        type: "chat_renamed",
+        sessionId: variables.sessionId,
+      });
       qc.invalidateQueries({ queryKey: CHATS_KEY });
     },
   });
@@ -280,6 +296,10 @@ export function useActivateChat() {
           }),
         },
       );
+      publishChatSyncEvent({
+        type: "chat_activated",
+        sessionId: session.session_id,
+      });
       qc.invalidateQueries({ queryKey: CHATS_KEY });
     },
   });
@@ -306,6 +326,10 @@ export function useClearMessages() {
           }),
         },
       );
+      publishChatSyncEvent({
+        type: "chat_cleared",
+        sessionId: variables.sessionId,
+      });
       qc.invalidateQueries({ queryKey: CHATS_KEY });
     },
   });
@@ -359,6 +383,10 @@ export function useDeleteChat() {
           }),
         },
       );
+      publishChatSyncEvent({
+        type: "chat_deleted",
+        sessionId: variables.sessionId,
+      });
       qc.invalidateQueries({ queryKey: CHATS_KEY });
       qc.invalidateQueries({ queryKey: AUTH_KEY });
     },
@@ -453,6 +481,10 @@ export function useSendMessage() {
             session_id: reply.session_id,
             created_at: new Date().toISOString(),
             finish_reason: reply.finish_reason,
+            model: reply.model,
+            response_style: reply.response_style,
+            detail_level: reply.detail_level,
+            artifacts: reply.artifacts ?? [],
           },
         ],
       }));
@@ -467,6 +499,7 @@ export function useSendMessage() {
           finish_reason: reply.finish_reason,
           status: reply.finish_reason === "blocked" ? "blocked" : "ok",
           link_count: extractLinkCount(reply.content),
+          artifact_count: reply.artifacts?.length ?? 0,
           message_chars: reply.content.length,
         },
         { traceContext: resolvedTrace },
@@ -478,21 +511,23 @@ export function useSendMessage() {
           { traceContext: resolvedTrace },
         );
       }
+      publishChatSyncEvent({
+        type: "chat_messages_updated",
+        sessionId,
+      });
     },
 
-    onError: (error, { sessionId, traceContext }, context) => {
-      const previousMessages = context?.previous?.messages ?? [];
-      const optimisticUserMessage = context?.optimisticUserMessage;
-      const nextMessages = optimisticUserMessage
-        ? [
-            ...previousMessages,
-            optimisticUserMessage,
-            buildErrorMessage(error.message, sessionId),
-          ]
-        : [...previousMessages, buildErrorMessage(error.message, sessionId)];
-      qc.setQueryData<MessageList>(messagesKey(sessionId), {
-        messages: nextMessages,
-      });
+    onError: (
+      error,
+      { sessionId, responseStyle, detailLevel, traceContext },
+      _context,
+    ) => {
+      qc.setQueryData<MessageList>(messagesKey(sessionId), (current) => ({
+        messages: [
+          ...(current?.messages ?? []),
+          buildErrorMessage(error.message, sessionId, responseStyle, detailLevel),
+        ],
+      }));
       logFrontendEvent(
         "assistant_reply_error",
         { status: "error", error_message: error.message },
@@ -504,6 +539,10 @@ export function useSendMessage() {
           }),
         },
       );
+      publishChatSyncEvent({
+        type: "chat_messages_updated",
+        sessionId,
+      });
     },
 
     onSettled: (_data, error, variables) => {
@@ -568,6 +607,10 @@ export function useUpdateChatSettings() {
           }),
         },
       );
+      publishChatSyncEvent({
+        type: "chat_settings_updated",
+        sessionId: variables.sessionId,
+      });
     },
     onError: (_error, _variables, context) => {
       if (context?.previous) {

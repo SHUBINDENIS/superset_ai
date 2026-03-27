@@ -31,8 +31,8 @@ export function ChatControlsBar({
               Эти параметры сохраняются для чата «{chatTitle}» и не влияют на другие диалоги.
             </p>
           </div>
-          <span className="text-[11px] text-muted-foreground">
-            {saving ? "Сохраняем..." : "Сохраняется автоматически"}
+            <span className="text-[11px] text-muted-foreground">
+            {saving ? "Сохраняем..." : "Применяется к следующим ответам"}
           </span>
         </div>
 

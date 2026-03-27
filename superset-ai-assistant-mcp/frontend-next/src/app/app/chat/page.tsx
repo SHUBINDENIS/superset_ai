@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { BookOpenText, Bot, MessageSquare, Plus, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChatControlsBar } from "@/components/chat-controls-bar";
@@ -9,6 +10,7 @@ import { ChatHelpDrawer } from "@/components/chat-help-drawer";
 import { ChatInput } from "@/components/chat-input";
 import { ChatMessage, ChatThinking } from "@/components/chat-message";
 import { useAuth } from "@/hooks/use-auth";
+import { subscribeChatSyncEvents } from "@/lib/chat-sync";
 import { createTraceContext, extendTraceContext, logFrontendEvent } from "@/lib/observability";
 import {
   useChatUI,
@@ -25,8 +27,16 @@ const DEFAULT_CHAT_SETTINGS: ChatSettings = {
   detail_level: "standard",
 };
 
+function settingsEqual(left: ChatSettings, right: ChatSettings) {
+  return (
+    left.response_style === right.response_style &&
+    left.detail_level === right.detail_level
+  );
+}
+
 export default function ChatPage() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const {
     activeSessionId,
     isSessionPending,
@@ -40,6 +50,16 @@ export default function ChatPage() {
   const messagesQuery = useMessages(activeSessionId);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [draftSettingsBySessionId, setDraftSettingsBySessionId] = useState<
+    Record<string, ChatSettings>
+  >({});
+  const [savingSettingsBySessionId, setSavingSettingsBySessionId] = useState<
+    Record<string, boolean>
+  >({});
+  const queuedSettingsBySessionIdRef = useRef<Record<string, ChatSettings | undefined>>(
+    {},
+  );
+  const inFlightSettingsBySessionIdRef = useRef<Record<string, boolean>>({});
 
   const sessions = chatsQuery.data?.sessions ?? [];
   const activeSession = useMemo(
@@ -48,10 +68,19 @@ export default function ChatPage() {
   );
   const messages = messagesQuery.data?.messages ?? [];
   const hasLoadedSessions = chatsQuery.data !== undefined;
-  const activeSettings = activeSession?.settings ?? DEFAULT_CHAT_SETTINGS;
+  const activeDraftSettings = activeSessionId
+    ? draftSettingsBySessionId[activeSessionId]
+    : undefined;
+  const activeSettings =
+    activeDraftSettings ??
+    activeSession?.settings ??
+    DEFAULT_CHAT_SETTINGS;
   const activeResponseStyle = activeSettings.response_style;
   const activeDetailLevel = activeSettings.detail_level;
   const activeSessionPending = isSessionPending(activeSessionId);
+  const activeSessionSettingsSaving = activeSessionId
+    ? Boolean(savingSettingsBySessionId[activeSessionId])
+    : false;
   const otherPendingCount = Object.entries(pendingBySessionId).filter(
     ([sessionId, count]) => sessionId !== activeSessionId && count > 0,
   ).length;
@@ -82,19 +111,147 @@ export default function ChatPage() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length, activeSessionPending]);
 
+  useEffect(() => {
+    return subscribeChatSyncEvents((event) => {
+      if (event.type === "chat_deleted" && activeSessionId === event.sessionId) {
+        setActiveSessionId(null);
+      }
+      queryClient.invalidateQueries({ queryKey: ["chats"] });
+      queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
+      queryClient.invalidateQueries({
+        queryKey: ["chats", event.sessionId, "messages"],
+      });
+      if (event.type === "chat_deleted") {
+        queryClient.removeQueries({
+          queryKey: ["chats", event.sessionId, "messages"],
+        });
+      }
+    });
+  }, [activeSessionId, queryClient, setActiveSessionId]);
+
+  useEffect(() => {
+    setDraftSettingsBySessionId((current) => {
+      const validSessionIds = new Set(sessions.map((item) => item.session_id));
+      let changed = false;
+      const next: Record<string, ChatSettings> = {};
+      for (const [sessionId, settings] of Object.entries(current)) {
+        if (!validSessionIds.has(sessionId)) {
+          changed = true;
+          continue;
+        }
+        const serverSettings =
+          sessions.find((item) => item.session_id === sessionId)?.settings ??
+          DEFAULT_CHAT_SETTINGS;
+        if (
+          !inFlightSettingsBySessionIdRef.current[sessionId] &&
+          settingsEqual(settings, serverSettings)
+        ) {
+          changed = true;
+          continue;
+        }
+        next[sessionId] = settings;
+      }
+      return changed ? next : current;
+    });
+  }, [sessions]);
+
+  function setSettingsSaving(sessionId: string, saving: boolean) {
+    setSavingSettingsBySessionId((current) => {
+      const key = String(sessionId || "").trim();
+      if (!key) {
+        return current;
+      }
+      if (saving) {
+        return { ...current, [key]: true };
+      }
+      if (!(key in current)) {
+        return current;
+      }
+      const { [key]: _removed, ...rest } = current;
+      return rest;
+    });
+  }
+
+  function queueSettingsSync(sessionId: string, nextSettings: ChatSettings) {
+    const key = String(sessionId || "").trim();
+    if (!key) {
+      return;
+    }
+    queuedSettingsBySessionIdRef.current[key] = nextSettings;
+    if (inFlightSettingsBySessionIdRef.current[key]) {
+      return;
+    }
+
+    const flush = () => {
+      const queued = queuedSettingsBySessionIdRef.current[key];
+      if (!queued) {
+        setSettingsSaving(key, false);
+        return;
+      }
+      queuedSettingsBySessionIdRef.current[key] = undefined;
+      inFlightSettingsBySessionIdRef.current[key] = true;
+      setSettingsSaving(key, true);
+      updateChatSettings.mutate(
+        {
+          sessionId: key,
+          settings: queued,
+          traceContext: createTraceContext({
+            sessionId: key,
+            chatId: key,
+            route: "/app/chat",
+          }),
+        },
+        {
+          onSuccess: (updated) => {
+            setDraftSettingsBySessionId((current) => {
+              const draft = current[key];
+              if (!draft || !settingsEqual(draft, updated.settings)) {
+                return current;
+              }
+              const { [key]: _removed, ...rest } = current;
+              return rest;
+            });
+          },
+          onError: () => {
+            if (queuedSettingsBySessionIdRef.current[key]) {
+              return;
+            }
+            setDraftSettingsBySessionId((current) => {
+              if (!(key in current)) {
+                return current;
+              }
+              const { [key]: _removed, ...rest } = current;
+              return rest;
+            });
+          },
+          onSettled: () => {
+            inFlightSettingsBySessionIdRef.current[key] = false;
+            if (queuedSettingsBySessionIdRef.current[key]) {
+              flush();
+              return;
+            }
+            setSettingsSaving(key, false);
+          },
+        },
+      );
+    };
+
+    flush();
+  }
+
   function handleSettingsPatch(patch: Partial<ChatSettings>) {
     if (!activeSessionId) {
       return;
     }
-    updateChatSettings.mutate({
-      sessionId: activeSessionId,
-      settings: patch,
-      traceContext: createTraceContext({
-        sessionId: activeSessionId,
-        chatId: activeSessionId,
-        route: "/app/chat",
-      }),
-    });
+    const nextSettings: ChatSettings = {
+      response_style: patch.response_style ?? activeResponseStyle,
+      detail_level: patch.detail_level ?? activeDetailLevel,
+    };
+    setDraftSettingsBySessionId((current) => ({
+      ...current,
+      [activeSessionId]: nextSettings,
+    }));
+    queueSettingsSync(activeSessionId, nextSettings);
   }
 
   function handleResponseStyleChange(nextStyle: ResponseStyle) {
@@ -132,8 +289,10 @@ export default function ChatPage() {
             sendMessage.mutate({
               sessionId: created.session_id,
               content,
-              responseStyle: DEFAULT_CHAT_SETTINGS.response_style,
-              detailLevel: DEFAULT_CHAT_SETTINGS.detail_level,
+              responseStyle:
+                created.settings?.response_style ?? DEFAULT_CHAT_SETTINGS.response_style,
+              detailLevel:
+                created.settings?.detail_level ?? DEFAULT_CHAT_SETTINGS.detail_level,
               traceContext: extendTraceContext(baseTrace, {
                 sessionId: created.session_id,
                 chatId: created.session_id,
@@ -273,13 +432,18 @@ export default function ChatPage() {
         chatTitle={activeSession?.title ?? "новый чат"}
         responseStyle={activeResponseStyle}
         detailLevel={activeDetailLevel}
-        disabled={!activeSessionId || isChatBusy}
-        saving={updateChatSettings.isPending}
+        disabled={!activeSessionId}
+        saving={activeSessionSettingsSaving}
         onResponseStyleChange={handleResponseStyleChange}
         onDetailLevelChange={handleDetailLevelChange}
       />
 
-      <ChatInput onSend={handleSend} disabled={isChatBusy} />
+      <ChatInput
+        onSend={handleSend}
+        disabled={isChatBusy}
+        responseStyle={activeResponseStyle}
+        detailLevel={activeDetailLevel}
+      />
     </div>
   );
 }

@@ -81,6 +81,7 @@ class TestObservability(unittest.IsolatedAsyncioTestCase):
         agent._rate_limited_until_monotonic = None
         agent._ensure_initialized = AsyncMock(return_value=None)
         agent._safe_agent_run = AsyncMock(return_value="Готово")
+        agent._build_structured_analytics_reply_sync = lambda **kwargs: None
         agent._get_rate_limit_remaining = lambda: 0
         agent._extract_table_hints_from_text = lambda text: []
         agent._parse_scope_from_text = lambda text: {}

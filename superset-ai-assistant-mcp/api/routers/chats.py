@@ -254,7 +254,18 @@ async def send_message(
     username = current_user["username"]
 
     # 1. Verify session exists and belongs to user
-    _session_or_404(auth_service, username, session_id)
+    session = _session_or_404(auth_service, username, session_id)
+    session_settings = session.get("settings", {}) if isinstance(session, dict) else {}
+    resolved_response_style = str(
+        body.response_style
+        or session_settings.get("response_style")
+        or "business"
+    )
+    resolved_detail_level = str(
+        body.detail_level
+        or session_settings.get("detail_level")
+        or "standard"
+    )
 
     # 2. Persist user message
     auth_service.save_chat_message(
@@ -284,8 +295,8 @@ async def send_message(
         try:
             reply = await agent.chat(
                 messages,
-                response_style=body.response_style,
-                detail_level=body.detail_level,
+                response_style=resolved_response_style,
+                detail_level=resolved_detail_level,
             )
         except Exception as exc:
             raise HTTPException(
@@ -299,6 +310,13 @@ async def send_message(
             session_id=session_id,
             role="assistant",
             content=reply.get("content", ""),
+            metadata={
+                "finish_reason": reply.get("finish_reason", "stop"),
+                "model": reply.get("model", ""),
+                "response_style": reply.get("response_style") or resolved_response_style,
+                "detail_level": reply.get("detail_level") or resolved_detail_level,
+                "artifacts": reply.get("artifacts", []),
+            },
         )
 
         # 7. Return
@@ -308,4 +326,7 @@ async def send_message(
             finish_reason=reply.get("finish_reason", "stop"),
             model=reply.get("model", ""),
             session_id=session_id,
+            response_style=reply.get("response_style") or resolved_response_style,
+            detail_level=reply.get("detail_level") or resolved_detail_level,
+            artifacts=reply.get("artifacts", []),
         )

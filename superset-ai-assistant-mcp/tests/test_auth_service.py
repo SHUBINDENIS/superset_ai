@@ -289,6 +289,47 @@ class TestAuthService(unittest.TestCase):
             [],
         )
 
+    def test_chat_history_persists_message_metadata_and_artifacts(self):
+        self.service.register_user("henry", "superpass")
+        session_id = self.service.get_or_create_user_session("henry")
+
+        self.service.save_chat_message(
+            username="henry",
+            session_id=session_id,
+            role="assistant",
+            content="Собрал preview",
+            metadata={
+                "finish_reason": "stop",
+                "model": "gpt-5.4-mini",
+                "response_style": "technical",
+                "detail_level": "detailed",
+                "artifacts": [
+                    {
+                        "artifact_type": "table_preview",
+                        "title": "Preview",
+                        "description": "Rows",
+                        "payload": {
+                            "columns": [{"key": "store", "label": "store"}],
+                            "rows": [{"store": "A"}],
+                        },
+                    }
+                ],
+            },
+        )
+
+        history = self.service.list_chat_history(
+            username="henry",
+            session_id=session_id,
+            limit=10,
+        )
+
+        self.assertEqual(len(history), 1)
+        self.assertEqual(history[0]["finish_reason"], "stop")
+        self.assertEqual(history[0]["model"], "gpt-5.4-mini")
+        self.assertEqual(history[0]["response_style"], "technical")
+        self.assertEqual(history[0]["detail_level"], "detailed")
+        self.assertEqual(history[0]["artifacts"][0]["artifact_type"], "table_preview")
+
     def test_archive_non_active_chat_hides_it_from_default_list(self):
         self.service.register_user("helen", "superpass")
         first_session_id = self.service.get_or_create_user_session("helen")

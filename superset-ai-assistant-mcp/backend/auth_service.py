@@ -72,6 +72,7 @@ class AuthService:
                     session_id TEXT NOT NULL,
                     role TEXT NOT NULL,
                     content TEXT NOT NULL,
+                    metadata_json TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL,
                     FOREIGN KEY (username) REFERENCES auth_users(username) ON DELETE CASCADE
                 );
@@ -102,6 +103,7 @@ class AuthService:
                     ON auth_chat_sessions(username, is_archived, last_message_at, updated_at, created_at);
                 """
             )
+            self._ensure_chat_history_metadata_column(conn)
             self._ensure_chat_session_settings_column(conn)
             self._backfill_chat_sessions(conn)
 
@@ -115,6 +117,19 @@ class AuthService:
                 """
                 ALTER TABLE auth_chat_sessions
                 ADD COLUMN settings_json TEXT NOT NULL DEFAULT '{}'
+                """
+            )
+
+    def _ensure_chat_history_metadata_column(self, conn: sqlite3.Connection) -> None:
+        columns = {
+            str(row["name"]).strip().casefold()
+            for row in conn.execute("PRAGMA table_info(auth_chat_history)").fetchall()
+        }
+        if "metadata_json" not in columns:
+            conn.execute(
+                """
+                ALTER TABLE auth_chat_history
+                ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'
                 """
             )
 
@@ -214,6 +229,102 @@ class AuthService:
     ) -> str:
         payload = self._normalize_chat_settings(settings, existing=existing)
         return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+    @staticmethod
+    def _normalize_chat_artifacts(artifacts: Any) -> List[Dict[str, Any]]:
+        normalized: List[Dict[str, Any]] = []
+        if not isinstance(artifacts, list):
+            return normalized
+        for item in artifacts[:5]:
+            if not isinstance(item, dict):
+                continue
+            artifact_type = str(item.get("artifact_type") or "").strip().lower()
+            if artifact_type not in {"table_preview", "chart_preview", "link"}:
+                continue
+            title = str(item.get("title") or "").strip()
+            description = str(item.get("description") or "").strip()
+            payload = item.get("payload")
+            if not isinstance(payload, dict):
+                payload = {}
+            normalized.append(
+                {
+                    "artifact_type": artifact_type,
+                    "title": title,
+                    "description": description,
+                    "payload": AuthService._make_json_safe(payload),
+                }
+            )
+        return normalized
+
+    @staticmethod
+    def _make_json_safe(value: Any) -> Any:
+        if value is None or isinstance(value, (str, int, float, bool)):
+            return value
+        if isinstance(value, list):
+            return [AuthService._make_json_safe(item) for item in value]
+        if isinstance(value, tuple):
+            return [AuthService._make_json_safe(item) for item in value]
+        if isinstance(value, dict):
+            return {
+                str(key): AuthService._make_json_safe(item)
+                for key, item in value.items()
+            }
+        return str(value)
+
+    def _normalize_message_metadata(
+        self,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        payload = metadata if isinstance(metadata, dict) else {}
+        response_style = payload.get("response_style")
+        detail_level = payload.get("detail_level")
+        normalized: Dict[str, Any] = {
+            "finish_reason": str(payload.get("finish_reason") or "").strip(),
+            "model": str(payload.get("model") or "").strip(),
+            "artifacts": self._normalize_chat_artifacts(payload.get("artifacts")),
+        }
+        if response_style is not None:
+            normalized["response_style"] = self._normalize_response_style(response_style)
+        else:
+            normalized["response_style"] = None
+        if detail_level is not None:
+            normalized["detail_level"] = self._normalize_detail_level(detail_level)
+        else:
+            normalized["detail_level"] = None
+        return normalized
+
+    def _serialize_message_metadata(
+        self,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        normalized = self._normalize_message_metadata(metadata)
+        payload: Dict[str, Any] = {}
+        if normalized["finish_reason"]:
+            payload["finish_reason"] = normalized["finish_reason"]
+        if normalized["model"]:
+            payload["model"] = normalized["model"]
+        if normalized["response_style"] is not None:
+            payload["response_style"] = normalized["response_style"]
+        if normalized["detail_level"] is not None:
+            payload["detail_level"] = normalized["detail_level"]
+        if normalized["artifacts"]:
+            payload["artifacts"] = normalized["artifacts"]
+        return json.dumps(payload, ensure_ascii=False, sort_keys=True)
+
+    def _deserialize_message_metadata(self, raw: Any) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {}
+        if isinstance(raw, dict):
+            payload = raw
+        else:
+            text = str(raw or "").strip()
+            if text:
+                try:
+                    parsed = json.loads(text)
+                    if isinstance(parsed, dict):
+                        payload = parsed
+                except Exception:
+                    payload = {}
+        return self._normalize_message_metadata(payload)
 
     def _load_history_session_metadata(
         self,
@@ -1159,6 +1270,7 @@ class AuthService:
         session_id: str,
         role: str,
         content: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         clean_username = self._normalize_username(username)
         clean_session_id = str(session_id or "").strip()
@@ -1181,10 +1293,17 @@ class AuthService:
             created_at = self._utc_now()
             conn.execute(
                 """
-                INSERT INTO auth_chat_history(username, session_id, role, content, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO auth_chat_history(username, session_id, role, content, metadata_json, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (clean_username, clean_session_id, clean_role, clean_content, created_at),
+                (
+                    clean_username,
+                    clean_session_id,
+                    clean_role,
+                    clean_content,
+                    self._serialize_message_metadata(metadata),
+                    created_at,
+                ),
             )
             self._sync_chat_session_activity(
                 conn,
@@ -1209,7 +1328,7 @@ class AuthService:
             if clean_session_id:
                 rows = conn.execute(
                     """
-                    SELECT session_id, role, content, created_at
+                    SELECT session_id, role, content, metadata_json, created_at
                     FROM auth_chat_history
                     WHERE username = ? COLLATE NOCASE AND session_id = ?
                     ORDER BY id DESC
@@ -1220,7 +1339,7 @@ class AuthService:
             else:
                 rows = conn.execute(
                     """
-                    SELECT session_id, role, content, created_at
+                    SELECT session_id, role, content, metadata_json, created_at
                     FROM auth_chat_history
                     WHERE username = ? COLLATE NOCASE
                     ORDER BY id DESC
@@ -1231,12 +1350,18 @@ class AuthService:
 
         history: List[Dict[str, Any]] = []
         for row in reversed(rows):
+            metadata = self._deserialize_message_metadata(row["metadata_json"])
             history.append(
                 {
                     "session_id": str(row["session_id"]),
                     "role": str(row["role"]),
                     "content": str(row["content"]),
                     "created_at": str(row["created_at"]),
+                    "finish_reason": str(metadata.get("finish_reason") or ""),
+                    "model": str(metadata.get("model") or ""),
+                    "response_style": metadata.get("response_style"),
+                    "detail_level": metadata.get("detail_level"),
+                    "artifacts": metadata.get("artifacts") or [],
                 }
             )
         return history

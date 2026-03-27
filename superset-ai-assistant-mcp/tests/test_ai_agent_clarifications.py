@@ -8,9 +8,104 @@ from backend.mcp_client.tool_registry import (
 )
 
 
+class _FakeStructuredVizService:
+    def list_datasets(self, limit: int = 300):
+        return [
+            {
+                "id": 42,
+                "table_name": "sales_by_store",
+                "schema": "public",
+                "database_name": "Pagila Demo (PostgreSQL)",
+                "database_id": 7,
+            },
+            {
+                "id": 43,
+                "table_name": "payment",
+                "schema": "public",
+                "database_name": "Pagila Demo (PostgreSQL)",
+                "database_id": 7,
+            },
+        ]
+
+    def get_dataset_metadata(self, dataset_id: int):
+        if int(dataset_id) == 43:
+            return {
+                "id": 43,
+                "table_name": "payment",
+                "schema": "public",
+                "database_id": 7,
+                "database_name": "Pagila Demo (PostgreSQL)",
+                "columns": [
+                    {"column_name": "payment_date", "type": "TIMESTAMP"},
+                    {"column_name": "amount", "type": "NUMERIC"},
+                    {"column_name": "customer_id", "type": "INTEGER"},
+                ],
+            }
+        return {
+            "id": 42,
+            "table_name": "sales_by_store",
+            "schema": "public",
+            "database_id": 7,
+            "database_name": "Pagila Demo (PostgreSQL)",
+            "columns": [
+                {"column_name": "store", "type": "TEXT"},
+                {"column_name": "total_sales", "type": "NUMERIC"},
+            ],
+        }
+
+    def preview_sql(self, *, database_id: int, sql: str, schema: str = "", preview_limit: int = 12):
+        if "payment" in sql:
+            return {
+                "database_id": int(database_id),
+                "schema": schema,
+                "sql_executed": sql,
+                "preview_limit": preview_limit,
+                "rows_count": 3,
+                "rows": [
+                    {"period": "2025-01-01", "orders_count": 120},
+                    {"period": "2025-02-01", "orders_count": 144},
+                    {"period": "2025-03-01", "orders_count": 138},
+                ],
+                "columns": [
+                    {"column": "period", "inferred_type": "temporal"},
+                    {"column": "orders_count", "inferred_type": "numeric"},
+                ],
+            }
+        return {
+            "database_id": int(database_id),
+            "schema": schema,
+            "sql_executed": sql,
+            "preview_limit": preview_limit,
+            "rows_count": 2,
+            "rows": [
+                {"store": "Store 1", "total_sales": 101.5},
+                {"store": "Store 2", "total_sales": 88.0},
+            ],
+            "columns": [
+                {"column": "store", "inferred_type": "text"},
+                {"column": "total_sales", "inferred_type": "numeric"},
+            ],
+        }
+
+    def recommend_viz_types(
+        self,
+        *,
+        rows,
+        columns,
+        metric_column="",
+        dimension_column="",
+        time_column="",
+    ):
+        if time_column:
+            return {"recommended": "line", "candidates": []}
+        return {"recommended": "bar", "candidates": []}
+
+
 class TestAIAgentClarifications(unittest.TestCase):
     def setUp(self):
         self.agent = SupersetAIAgent.__new__(SupersetAIAgent)
+        self.agent.session_id = "sess-test"
+        self.agent.model_name = "gpt-5.4-mini"
         self.agent.rate_limit_cooldown_seconds = 20
         self.agent._rate_limited_until_monotonic = None
 
@@ -136,6 +231,44 @@ class TestAIAgentClarifications(unittest.TestCase):
     def test_agent_no_longer_exposes_legacy_launcher_resolution_helpers(self):
         self.assertFalse(hasattr(SupersetAIAgent, "_resolve_mcp_python_command"))
         self.assertFalse(hasattr(SupersetAIAgent, "_resolve_mcp_server_path"))
+
+    def test_structured_business_reply_contains_preview_artifacts(self):
+        with unittest.mock.patch(
+            "backend.ai_agent.get_us13_15_viz_service",
+            return_value=_FakeStructuredVizService(),
+        ):
+            reply = self.agent._build_structured_analytics_reply_sync(
+                user_message="Покажи выручку по магазинам",
+                response_style="business",
+                detail_level="standard",
+            )
+
+        self.assertIsNotNone(reply)
+        self.assertEqual(reply["response_style"], "business")
+        self.assertEqual(reply["detail_level"], "standard")
+        self.assertTrue(reply["content"].startswith("Кратко для бизнеса:"))
+        artifact_types = [item["artifact_type"] for item in reply["artifacts"]]
+        self.assertIn("table_preview", artifact_types)
+        self.assertIn("chart_preview", artifact_types)
+
+    def test_structured_technical_reply_contains_sql_and_sections(self):
+        with unittest.mock.patch(
+            "backend.ai_agent.get_us13_15_viz_service",
+            return_value=_FakeStructuredVizService(),
+        ):
+            reply = self.agent._build_structured_analytics_reply_sync(
+                user_message="Сделай график по заказам за 2025 год",
+                response_style="technical",
+                detail_level="detailed",
+            )
+
+        self.assertIsNotNone(reply)
+        self.assertEqual(reply["response_style"], "technical")
+        self.assertEqual(reply["detail_level"], "detailed")
+        self.assertTrue(reply["content"].startswith("Технический разбор:"))
+        self.assertIn("## Техническая конфигурация", reply["content"])
+        self.assertIn("- sql:", reply["content"])
+        self.assertEqual(reply["artifacts"][0]["artifact_type"], "chart_preview")
 
 
 class TestAIAgentStyleRewrite(unittest.IsolatedAsyncioTestCase):

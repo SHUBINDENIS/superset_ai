@@ -31,6 +31,10 @@ export interface ChatMessage {
   content: string;
   created_at: string;
   finish_reason?: string;
+  model?: string;
+  response_style?: ResponseStyle;
+  detail_level?: DetailLevel;
+  artifacts?: ChatArtifact[];
 }
 
 export interface MessageList {
@@ -43,6 +47,9 @@ export interface SendMessageResponse {
   finish_reason: string;
   model: string;
   session_id: string;
+  response_style?: ResponseStyle;
+  detail_level?: DetailLevel;
+  artifacts?: ChatArtifact[];
 }
 
 export type ResponseStyle = "business" | "technical";
@@ -51,6 +58,13 @@ export type DetailLevel = "concise" | "standard" | "detailed";
 export interface ChatSettings {
   response_style: ResponseStyle;
   detail_level: DetailLevel;
+}
+
+export interface ChatArtifact {
+  artifact_type: "table_preview" | "chart_preview" | "link";
+  title: string;
+  description?: string;
+  payload: Record<string, unknown>;
 }
 
 export interface DeleteChatResponse {

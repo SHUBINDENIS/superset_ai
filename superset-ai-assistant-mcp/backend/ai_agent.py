@@ -639,6 +639,600 @@ class SupersetAIAgent:
         )
         return "\n".join(lines)
 
+    @staticmethod
+    def _quote_sql_identifier(value: str) -> str:
+        token = str(value or "").strip()
+        return f'"{token.replace(chr(34), chr(34) * 2)}"'
+
+    @classmethod
+    def _build_sql_table_ref(cls, table_name: str, schema_name: str = "") -> str:
+        safe_table = cls._quote_sql_identifier(table_name)
+        safe_schema = str(schema_name or "").strip()
+        if not safe_schema:
+            return safe_table
+        return f"{cls._quote_sql_identifier(safe_schema)}.{safe_table}"
+
+    @staticmethod
+    def _extract_requested_year(text: str) -> Optional[int]:
+        match = re.search(r"\b(20\d{2})\b", str(text or ""))
+        if not match:
+            return None
+        try:
+            return int(match.group(1))
+        except Exception:
+            return None
+
+    @staticmethod
+    def _normalize_metric_value(value: Any) -> str:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if float(value).is_integer():
+                return f"{int(value):,}".replace(",", " ")
+            return f"{float(value):,.2f}".replace(",", " ").replace(".", ",")
+        return str(value)
+
+    @staticmethod
+    def _pick_first_matching_column(
+        columns: List[Dict[str, Any]],
+        *,
+        patterns: List[str],
+        type_patterns: Optional[List[str]] = None,
+    ) -> str:
+        for item in columns:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("column_name") or "").strip()
+            if not name:
+                continue
+            low = name.casefold()
+            type_hint = str(item.get("type") or item.get("inferred_type") or "").casefold()
+            if patterns and any(token in low for token in patterns):
+                return name
+            if type_patterns and any(token in type_hint for token in type_patterns):
+                return name
+        return ""
+
+    def _score_dataset_metadata_fit(
+        self,
+        user_message: str,
+        metadata: Dict[str, Any],
+    ) -> int:
+        query = str(user_message or "").casefold()
+        columns = metadata.get("columns", []) if isinstance(metadata, dict) else []
+        if not isinstance(columns, list):
+            return 0
+        score = 0
+        metric_column = self._pick_first_matching_column(
+            columns,
+            patterns=["sales", "revenue", "amount", "total", "price"],
+        )
+        store_column = self._pick_first_matching_column(columns, patterns=["store", "shop"])
+        category_column = self._pick_first_matching_column(columns, patterns=["category"])
+        customer_column = self._pick_first_matching_column(
+            columns,
+            patterns=["customer", "client"],
+        )
+        time_column = self._pick_first_matching_column(
+            columns,
+            patterns=["date", "time", "month", "year"],
+            type_patterns=["date", "time", "timestamp"],
+        )
+        if metric_column and self._contains_any_pattern(query, ["выруч", "sales", "revenue", "продаж", "оплат"]):
+            score += 90
+        if store_column and self._contains_any_pattern(query, ["магазин", "store", "shop"]):
+            score += 90
+        if category_column and self._contains_any_pattern(query, ["категор", "category"]):
+            score += 90
+        if customer_column and self._contains_any_pattern(query, ["клиент", "customer", "client"]):
+            score += 50
+        if time_column and (
+            self._contains_any_pattern(query, ["график", "chart", "trend", "динам", "месяц", "month", "год", "year"])
+            or self._extract_requested_year(query) is not None
+        ):
+            score += 65
+        if time_column and self._contains_any_pattern(query, ["заказ", "order", "аренд", "rental"]):
+            score += 45
+        return score
+
+    def _build_structured_query_plan(
+        self,
+        user_message: str,
+        metadata: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        query = str(user_message or "").casefold()
+        columns = metadata.get("columns", []) if isinstance(metadata, dict) else []
+        if not isinstance(columns, list) or not columns:
+            return None
+
+        wants_chart = self._contains_any_pattern(query, ["график", "chart", "plot", "визуал", "динам", "trend"])
+        wants_revenue = self._contains_any_pattern(query, ["выруч", "sales", "revenue", "продаж", "оплат"])
+        wants_orders = self._contains_any_pattern(query, ["заказ", "order", "аренд", "rental"])
+        wants_store = self._contains_any_pattern(query, ["магазин", "store", "shop"])
+        wants_category = self._contains_any_pattern(query, ["категор", "category"])
+        wants_customer = self._contains_any_pattern(query, ["клиент", "customer", "client"])
+        requested_year = self._extract_requested_year(query)
+
+        time_column = self._pick_first_matching_column(
+            columns,
+            patterns=["date", "time", "month", "year"],
+            type_patterns=["date", "time", "timestamp"],
+        )
+        if wants_store:
+            dimension_column = self._pick_first_matching_column(columns, patterns=["store", "shop"])
+        elif wants_category:
+            dimension_column = self._pick_first_matching_column(columns, patterns=["category"])
+        elif wants_customer:
+            dimension_column = self._pick_first_matching_column(columns, patterns=["customer", "client"])
+        else:
+            dimension_column = self._pick_first_matching_column(
+                columns,
+                patterns=["store", "category", "customer", "client", "film", "name"],
+            )
+
+        metric_column = self._pick_first_matching_column(
+            columns,
+            patterns=["sales", "revenue", "amount", "total", "price", "payment"],
+        )
+        if not metric_column:
+            metric_column = self._pick_first_matching_column(
+                columns,
+                patterns=["count", "qty", "quantity"],
+            )
+
+        metric_label = "metric_value"
+        metric_description = ""
+        if wants_orders and not wants_revenue:
+            metric_sql = "COUNT(*)"
+            metric_label = "orders_count"
+            metric_description = "COUNT(*) как количество заказов/операций"
+        elif metric_column:
+            metric_sql = f"SUM({self._quote_sql_identifier(metric_column)})"
+            metric_label = metric_column
+            metric_description = f"SUM({metric_column})"
+        else:
+            return None
+
+        schema_name = str(metadata.get("schema") or "").strip()
+        table_name = str(metadata.get("table_name") or "").strip()
+        database_id = metadata.get("database_id")
+        if not table_name or not isinstance(database_id, int):
+            return None
+
+        where_clauses: List[str] = []
+        assumptions: List[str] = []
+        if requested_year is not None and time_column:
+            where_clauses.append(
+                f"EXTRACT(YEAR FROM {self._quote_sql_identifier(time_column)}) = {requested_year}"
+            )
+            assumptions.append(f"фильтр по {requested_year} году применяется по полю {time_column}")
+        elif requested_year is not None:
+            assumptions.append(
+                f"в запросе указан {requested_year} год, но в dataset не найдено явное поле даты"
+            )
+
+        from_ref = self._build_sql_table_ref(table_name, schema_name)
+        order_clause = ""
+        select_sql = ""
+        chart_type = "table"
+        x_key = ""
+        y_key = metric_label
+        group_hint = ""
+        if time_column and (requested_year is not None or wants_chart):
+            x_key = "period"
+            chart_type = "line"
+            group_hint = f"по месяцам ({time_column})"
+            select_sql = (
+                f"SELECT DATE_TRUNC('month', {self._quote_sql_identifier(time_column)})::date AS {x_key}, "
+                f"{metric_sql} AS {metric_label} "
+                f"FROM {from_ref}"
+            )
+            order_clause = "GROUP BY 1 ORDER BY 1 ASC LIMIT 12"
+        elif dimension_column:
+            x_key = dimension_column
+            chart_type = "bar"
+            group_hint = f"по полю {dimension_column}"
+            select_sql = (
+                f"SELECT {self._quote_sql_identifier(dimension_column)} AS {self._quote_sql_identifier(dimension_column)}, "
+                f"{metric_sql} AS {metric_label} "
+                f"FROM {from_ref}"
+            )
+            order_clause = f"GROUP BY 1 ORDER BY {metric_label} DESC LIMIT 10"
+        else:
+            select_sql = f"SELECT {metric_sql} AS {metric_label} FROM {from_ref}"
+            order_clause = "LIMIT 1"
+
+        sql_parts = [select_sql]
+        if where_clauses:
+            sql_parts.append("WHERE " + " AND ".join(where_clauses))
+        sql_parts.append(order_clause)
+        sql = "\n".join(part for part in sql_parts if part)
+
+        if requested_year is not None and not time_column and not dimension_column:
+            return None
+
+        return {
+            "database_id": int(database_id),
+            "database_name": str(metadata.get("database_name") or "").strip(),
+            "dataset_id": int(metadata.get("id") or 0),
+            "table_name": table_name,
+            "schema": schema_name,
+            "metric_column": metric_column,
+            "metric_label": metric_label,
+            "metric_description": metric_description or metric_label,
+            "dimension_column": dimension_column,
+            "time_column": time_column,
+            "chart_type": chart_type,
+            "x_key": x_key,
+            "y_key": y_key,
+            "group_hint": group_hint,
+            "requested_year": requested_year,
+            "sql": sql,
+            "assumptions": assumptions,
+        }
+
+    @staticmethod
+    def _build_table_artifact(
+        *,
+        title: str,
+        description: str,
+        rows: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        columns: List[Dict[str, str]] = []
+        if rows:
+            for key in rows[0].keys():
+                columns.append({"key": str(key), "label": str(key)})
+        return {
+            "artifact_type": "table_preview",
+            "title": title,
+            "description": description,
+            "payload": {
+                "columns": columns,
+                "rows": rows[:10],
+            },
+        }
+
+    @staticmethod
+    def _build_chart_artifact(
+        *,
+        title: str,
+        description: str,
+        chart_type: str,
+        rows: List[Dict[str, Any]],
+        x_key: str,
+        y_key: str,
+    ) -> Optional[Dict[str, Any]]:
+        if chart_type not in {"bar", "line"} or not rows or not x_key or not y_key:
+            return None
+        return {
+            "artifact_type": "chart_preview",
+            "title": title,
+            "description": description,
+            "payload": {
+                "chart_type": chart_type,
+                "rows": rows[:12],
+                "x_key": x_key,
+                "y_key": y_key,
+            },
+        }
+
+    def _build_business_structured_response(
+        self,
+        *,
+        plan: Dict[str, Any],
+        preview: Dict[str, Any],
+        detail_level: Optional[str],
+    ) -> str:
+        rows = preview.get("rows", []) if isinstance(preview, dict) else []
+        row_count = int(preview.get("rows_count", 0) or 0) if isinstance(preview, dict) else 0
+        detail = self._normalize_detail_level(detail_level)
+        dataset_label = str(plan.get("table_name") or "").strip()
+        assumption_line = (
+            f"В качестве рабочего допущения использован dataset `{dataset_label}`."
+            if dataset_label
+            else "Использован наиболее правдоподобный dataset для этого вопроса."
+        )
+        if not rows:
+            return (
+                "## Краткий вывод\n"
+                "По выбранному предположению данных для ответа не нашлось.\n\n"
+                "## Что было использовано\n"
+                f"{assumption_line}\n\n"
+                "## Что это значит для бизнеса\n"
+                "Нужно уточнить период, фильтры или источник данных, иначе вывод будет пустым.\n\n"
+                "## Следующий шаг\n"
+                "Уточните период или попросите меня показать структуру выбранного dataset."
+            )
+
+        top_row = rows[0]
+        x_key = str(plan.get("x_key") or "").strip()
+        y_key = str(plan.get("y_key") or "").strip()
+        highlight = ""
+        if x_key and y_key and x_key in top_row and y_key in top_row:
+            highlight = (
+                f"Сейчас на первом месте {top_row[x_key]} со значением "
+                f"{self._normalize_metric_value(top_row[y_key])}."
+            )
+        elif y_key and y_key in top_row:
+            highlight = (
+                f"Текущее агрегированное значение: "
+                f"{self._normalize_metric_value(top_row[y_key])}."
+            )
+
+        lines = [
+            "## Краткий вывод",
+            highlight or "Собрал первую полезную сводку по наиболее правдоподобному источнику данных.",
+            "",
+            "## Что было использовано",
+            assumption_line,
+            f"Агрегация: {plan.get('metric_description', plan.get('metric_label', 'metric'))}.",
+        ]
+        if detail == "concise":
+            return "\n".join(
+                [
+                    "## Краткий вывод",
+                    highlight or "Собрал первую полезную сводку по выбранному dataset.",
+                    "",
+                    "## Что было использовано",
+                    assumption_line,
+                    "",
+                    "## Следующий шаг",
+                    "Если нужно, уточню период, сегмент или подготовлю следующий график.",
+                ]
+            )
+        if plan.get("group_hint"):
+            lines.append(f"Группировка: {plan['group_hint']}.")
+        if plan.get("assumptions"):
+            lines.append("Допущения: " + "; ".join(plan["assumptions"]))
+        lines.extend(
+            [
+                "",
+                "## Что это значит для бизнеса",
+                (
+                    f"Сводка уже пригодна для первичного сравнения: показано {row_count} строк(и) результата, "
+                    "по которым можно увидеть лидеров и распределение."
+                ),
+                "",
+                "## Следующий шаг",
+                "Если нужно, могу сразу уточнить период, детализировать по сегменту или подготовить следующий график.",
+            ]
+        )
+        if detail == "detailed" and len(rows) > 1 and x_key and y_key:
+            lines.insert(
+                lines.index("## Что это значит для бизнеса") + 1,
+                "Топ значений: "
+                + "; ".join(
+                    f"{row.get(x_key)} — {self._normalize_metric_value(row.get(y_key))}"
+                    for row in rows[:3]
+                ),
+            )
+            lines[-1] = (
+                "Если нужно, могу сразу перейти к сравнению top-n, фильтру по периоду "
+                "или подготовить виджет для дашборда."
+            )
+        return "\n".join(lines)
+
+    def _build_technical_structured_response(
+        self,
+        *,
+        plan: Dict[str, Any],
+        preview: Dict[str, Any],
+        detail_level: Optional[str],
+        recommendation: Dict[str, Any],
+    ) -> str:
+        rows = preview.get("rows", []) if isinstance(preview, dict) else []
+        detail = self._normalize_detail_level(detail_level)
+        schema_name = str(plan.get("schema") or "").strip()
+        table_name = str(plan.get("table_name") or "-").strip() or "-"
+        table_ref = f"{schema_name}.{table_name}" if schema_name else table_name
+        lines = [
+            "## Что найдено",
+            f"Построен preview на dataset `{table_name}`; получено {preview.get('rows_count', 0)} строк(и).",
+            "",
+            "## Источник данных",
+            f"- database: {plan.get('database_name', '-')}",
+            f"- schema.table: {table_ref}",
+        ]
+        if detail != "concise":
+            lines.append(f"- dataset_id: {plan.get('dataset_id', 0)}")
+        lines.extend(
+            [
+                "",
+                "## Использованные поля",
+                f"- metric: {plan.get('metric_description', plan.get('metric_label', '-'))}",
+                f"- dimension: {plan.get('dimension_column') or '-'}",
+                f"- time: {plan.get('time_column') or '-'}",
+                "",
+                "## Предположения и ограничения",
+            ]
+        )
+        assumptions = plan.get("assumptions") or []
+        if assumptions:
+            lines.extend(f"- {item}" for item in assumptions)
+        else:
+            lines.append("- Использован лучший dataset-кандидат по эвристикам запроса.")
+        lines.extend(
+            [
+                "",
+                "## Техническая конфигурация",
+                f"- chart preview: {plan.get('chart_type', '-')}",
+                f"- recommended viz: {recommendation.get('recommended', '-') if isinstance(recommendation, dict) else '-'}",
+            ]
+        )
+        if detail in {"standard", "detailed"}:
+            lines.append(f"- sql: {preview.get('sql_executed', '')}")
+        if detail == "detailed" and rows:
+            lines.append(
+                "- first rows: "
+                + "; ".join(
+                    ", ".join(f"{key}={value}" for key, value in row.items())
+                    for row in rows[:3]
+                )
+            )
+        lines.extend(
+            [
+                "",
+                "## Следующие действия",
+                "- Можно уточнить фильтры, период или уровень агрегации.",
+                "- При необходимости следующий шаг — recommendation/share для виджета или дашборда.",
+            ]
+        )
+        return "\n".join(lines)
+
+    def _build_structured_analytics_reply_sync(
+        self,
+        *,
+        user_message: str,
+        response_style: Optional[str],
+        detail_level: Optional[str],
+    ) -> Optional[Dict[str, Any]]:
+        query = str(user_message or "").strip()
+        if not query:
+            return None
+        if not self._contains_any_pattern(
+            query,
+            [
+                "выруч",
+                "sales",
+                "revenue",
+                "продаж",
+                "магазин",
+                "store",
+                "категор",
+                "category",
+                "график",
+                "chart",
+                "заказ",
+                "order",
+                "payment",
+                "оплат",
+                "динам",
+                "month",
+                "год",
+                "year",
+            ],
+        ):
+            return None
+
+        svc = get_us13_15_viz_service()
+        datasets = svc.list_datasets(limit=300)
+        scored_candidates: List[Dict[str, Any]] = []
+        for item in datasets:
+            if not isinstance(item, dict):
+                continue
+            base_score = self._score_dataset_candidate_for_prompt(query, item)
+            if base_score <= 0:
+                continue
+            candidate = dict(item)
+            candidate["score"] = base_score
+            scored_candidates.append(candidate)
+        if not scored_candidates:
+            return None
+
+        scored_candidates.sort(
+            key=lambda item: (
+                int(item.get("score", 0)),
+                int(item.get("id", 0) or 0),
+            ),
+            reverse=True,
+        )
+
+        best_plan: Optional[Dict[str, Any]] = None
+        best_preview: Optional[Dict[str, Any]] = None
+        best_recommendation: Dict[str, Any] = {}
+        best_metadata: Optional[Dict[str, Any]] = None
+        best_score = -1
+
+        for candidate in scored_candidates[:4]:
+            dataset_id = int(candidate.get("id", 0) or 0)
+            if dataset_id <= 0:
+                continue
+            try:
+                metadata = svc.get_dataset_metadata(dataset_id)
+            except Exception:
+                continue
+            plan = self._build_structured_query_plan(query, metadata)
+            if plan is None:
+                continue
+            score = int(candidate.get("score", 0)) + self._score_dataset_metadata_fit(query, metadata)
+            try:
+                preview = svc.preview_sql(
+                    database_id=plan["database_id"],
+                    sql=plan["sql"],
+                    schema=plan["schema"],
+                    preview_limit=12,
+                )
+            except Exception as exc:
+                backend_logger.warning(
+                    f"Session {self.session_id}: structured preview candidate failed for dataset {dataset_id}: {exc}"
+                )
+                continue
+            if int(preview.get("rows_count", 0) or 0) <= 0:
+                continue
+            recommendation = svc.recommend_viz_types(
+                rows=preview.get("rows", []),
+                columns=preview.get("columns", []),
+                metric_column=str(plan.get("y_key") or ""),
+                dimension_column=str(plan.get("dimension_column") or ""),
+                time_column=str(plan.get("time_column") or ""),
+            )
+            if score > best_score:
+                best_score = score
+                best_plan = plan
+                best_preview = preview
+                best_recommendation = recommendation
+                best_metadata = metadata
+
+        if best_plan is None or best_preview is None or best_metadata is None:
+            return None
+
+        table_name = str(best_plan.get("table_name") or best_metadata.get("table_name") or "").strip()
+        if self._normalize_response_style(response_style) == "technical":
+            content = self._build_technical_structured_response(
+                plan=best_plan,
+                preview=best_preview,
+                detail_level=detail_level,
+                recommendation=best_recommendation,
+            )
+        else:
+            content = self._build_business_structured_response(
+                plan=best_plan,
+                preview=best_preview,
+                detail_level=detail_level,
+            )
+
+        table_artifact = self._build_table_artifact(
+            title=f"Табличный preview: {table_name or 'dataset'}",
+            description=(
+                f"Источник: {best_plan.get('database_name', '-')}, "
+                f"dataset `{table_name or '-'}`"
+            ),
+            rows=best_preview.get("rows", []),
+        )
+        chart_artifact = self._build_chart_artifact(
+            title=f"График: {table_name or 'dataset'}",
+            description=(
+                f"{best_plan.get('metric_description', best_plan.get('metric_label', 'metric'))}; "
+                f"{best_plan.get('group_hint', 'preview')}"
+            ),
+            chart_type=str(best_plan.get("chart_type") or ""),
+            rows=best_preview.get("rows", []),
+            x_key=str(best_plan.get("x_key") or ""),
+            y_key=str(best_plan.get("y_key") or ""),
+        )
+        artifacts = [table_artifact]
+        if chart_artifact is not None:
+            artifacts.insert(0, chart_artifact)
+
+        return {
+            "content": self._apply_style_response_envelope(content, response_style),
+            "role": "assistant",
+            "finish_reason": "stop",
+            "model": self.model_name,
+            "session_id": self.session_id,
+            "response_style": self._normalize_response_style(response_style),
+            "detail_level": self._normalize_detail_level(detail_level),
+            "artifacts": artifacts,
+        }
+
     def _build_response_style_guidance(self, response_style: Optional[str]) -> str:
         normalized = self._normalize_response_style(response_style)
         if normalized == "technical":
@@ -1273,6 +1867,9 @@ class SupersetAIAgent:
                 "finish_reason": "error",
                 "model": self.model_name,
                 "session_id": self.session_id,
+                "response_style": self._normalize_response_style(response_style),
+                "detail_level": self._normalize_detail_level(detail_level),
+                "artifacts": [],
             }
 
         try:
@@ -1294,6 +1891,9 @@ class SupersetAIAgent:
                     "finish_reason": "rate_limit_cooldown",
                     "model": self.model_name,
                     "session_id": self.session_id,
+                    "response_style": self._normalize_response_style(response_style),
+                    "detail_level": self._normalize_detail_level(detail_level),
+                    "artifacts": [],
                 }
 
             conversation_context = ""
@@ -1361,6 +1961,9 @@ class SupersetAIAgent:
                         "finish_reason": "blocked",
                         "model": self.model_name,
                         "session_id": self.session_id,
+                        "response_style": self._normalize_response_style(response_style),
+                        "detail_level": self._normalize_detail_level(detail_level),
+                        "artifacts": [],
                     }
 
                 warnings = guardrails_decision.get("warnings", [])
@@ -1480,6 +2083,35 @@ class SupersetAIAgent:
                 self._build_datasource_guardrail(table_hints),
             )
             superset_public_url = self._get_superset_public_url()
+
+            try:
+                structured_reply = await asyncio.to_thread(
+                    self._build_structured_analytics_reply_sync,
+                    user_message=last_user_message,
+                    response_style=response_style,
+                    detail_level=detail_level,
+                )
+            except Exception as exc:
+                backend_logger.warning(
+                    f"Session {self.session_id}: structured analytics fast path failed: {exc}"
+                )
+                structured_reply = None
+            if structured_reply is not None:
+                self._emit_agent_event(
+                    "structured_preview_reply",
+                    dataset_hint=str(
+                        (structured_reply.get("artifacts") or [{}])[0]
+                        .get("description", "")
+                    )[:200],
+                    artifact_count=len(structured_reply.get("artifacts") or []),
+                )
+                self._emit_agent_event(
+                    "turn_end",
+                    status="ok",
+                    finish_reason="stop",
+                    latency_ms=int((time.monotonic() - started_at) * 1000),
+                )
+                return structured_reply
             
             # Enhanced prompt
             enhanced_query = (
@@ -1542,6 +2174,9 @@ class SupersetAIAgent:
                 "finish_reason": "stop",
                 "model": self.model_name,
                 "session_id": self.session_id,
+                "response_style": self._normalize_response_style(response_style),
+                "detail_level": self._normalize_detail_level(detail_level),
+                "artifacts": [],
             }
             
         except Exception as e:
@@ -1578,6 +2213,9 @@ class SupersetAIAgent:
                     "finish_reason": "error",
                     "model": self.model_name,
                     "session_id": self.session_id,
+                    "response_style": self._normalize_response_style(response_style),
+                    "detail_level": self._normalize_detail_level(detail_level),
+                    "artifacts": [],
                 }
             latency_ms = int((time.monotonic() - started_at) * 1000)
             self._emit_agent_event(
@@ -1603,6 +2241,9 @@ class SupersetAIAgent:
                 "finish_reason": "error",
                 "model": self.model_name,
                 "session_id": self.session_id,
+                "response_style": self._normalize_response_style(response_style),
+                "detail_level": self._normalize_detail_level(detail_level),
+                "artifacts": [],
             }
     
     async def close(self):

@@ -550,6 +550,9 @@ class TestSendMessage(unittest.TestCase):
             "finish_reason": "stop",
             "model": "test-model",
             "session_id": self.session_id,
+            "response_style": "business",
+            "detail_level": "standard",
+            "artifacts": [],
         })
 
         resp = self.client.post(
@@ -564,6 +567,9 @@ class TestSendMessage(unittest.TestCase):
         self.assertEqual(data["role"], "assistant")
         self.assertEqual(data["model"], "test-model")
         self.assertEqual(data["session_id"], self.session_id)
+        self.assertEqual(data["response_style"], "business")
+        self.assertEqual(data["detail_level"], "standard")
+        self.assertEqual(data["artifacts"], [])
         mock_agent.chat.assert_awaited_once_with(
             [{"role": "user", "content": "What tables are available?"}],
             response_style="business",
@@ -577,6 +583,9 @@ class TestSendMessage(unittest.TestCase):
             "finish_reason": "stop",
             "model": "test-model",
             "session_id": self.session_id,
+            "response_style": "technical",
+            "detail_level": "detailed",
+            "artifacts": [],
         })
 
         resp = self.client.post(
@@ -589,8 +598,40 @@ class TestSendMessage(unittest.TestCase):
             cookies=self._auth_cookies(),
         )
         self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()["response_style"], "technical")
+        self.assertEqual(resp.json()["detail_level"], "detailed")
         mock_agent.chat.assert_awaited_once_with(
             [{"role": "user", "content": "Опиши поля датасета"}],
+            response_style="technical",
+            detail_level="detailed",
+        )
+
+    def test_send_message_uses_persisted_chat_settings_when_body_omits_them(self):
+        self.client.patch(
+            f"/api/chats/{self.session_id}/settings",
+            json={"response_style": "technical", "detail_level": "detailed"},
+            cookies=self._auth_cookies(),
+        )
+        mock_agent = self._install_mock_agent({
+            "content": "Technical answer",
+            "role": "assistant",
+            "finish_reason": "stop",
+            "model": "test-model",
+            "session_id": self.session_id,
+            "response_style": "technical",
+            "detail_level": "detailed",
+            "artifacts": [],
+        })
+
+        resp = self.client.post(
+            f"/api/chats/{self.session_id}/messages",
+            json={"content": "Опиши источник данных"},
+            cookies=self._auth_cookies(),
+        )
+
+        self.assertEqual(resp.status_code, 200)
+        mock_agent.chat.assert_awaited_once_with(
+            [{"role": "user", "content": "Опиши источник данных"}],
             response_style="technical",
             detail_level="detailed",
         )
@@ -603,6 +644,19 @@ class TestSendMessage(unittest.TestCase):
             "finish_reason": "stop",
             "model": "m",
             "session_id": self.session_id,
+            "response_style": "technical",
+            "detail_level": "detailed",
+            "artifacts": [
+                {
+                    "artifact_type": "table_preview",
+                    "title": "Preview",
+                    "description": "Rows",
+                    "payload": {
+                        "columns": [{"key": "store", "label": "store"}],
+                        "rows": [{"store": "Store 1"}],
+                    },
+                }
+            ],
         })
 
         self.client.post(
@@ -622,6 +676,9 @@ class TestSendMessage(unittest.TestCase):
         self.assertEqual(messages[0]["content"], "Show tables")
         self.assertEqual(messages[1]["role"], "assistant")
         self.assertEqual(messages[1]["content"], "Here are the tables.")
+        self.assertEqual(messages[1]["response_style"], "technical")
+        self.assertEqual(messages[1]["detail_level"], "detailed")
+        self.assertEqual(messages[1]["artifacts"][0]["artifact_type"], "table_preview")
 
     # ------------------------------------------------------------------
     # Blocked response (guardrails)

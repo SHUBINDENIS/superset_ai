@@ -3,6 +3,7 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { AlertTriangle, ShieldAlert, User, Bot } from "lucide-react";
+import { ChatArtifactCard } from "@/components/chat-artifact";
 import {
   createTraceContext,
   describeUsefulLink,
@@ -96,8 +97,13 @@ export function ChatMessage({
         : message.content;
   const normalizedContent = normalizeAssistantMarkdown(content);
   const links = extractLinks(normalizedContent);
+  const messageResponseStyle = message.response_style ?? responseStyle;
   const isTechnicalMessage =
-    !isUser && normalizedContent.trimStart().startsWith("Технический разбор:");
+    !isUser &&
+    (
+      normalizedContent.trimStart().startsWith("Технический разбор:") ||
+      messageResponseStyle === "technical"
+    );
 
   return (
     <div
@@ -160,7 +166,7 @@ export function ChatMessage({
             "prose prose-sm max-w-none dark:prose-invert prose-p:my-1 prose-li:my-0.5 prose-headings:mb-1 prose-headings:mt-3 prose-headings:text-sm",
             !isUser &&
               kind === "normal" &&
-              (isTechnicalMessage || responseStyle === "technical") &&
+              isTechnicalMessage &&
               "prose-code:text-[0.85em] prose-pre:border prose-pre:bg-muted/40",
           )}
         >
@@ -168,6 +174,17 @@ export function ChatMessage({
             {normalizedContent}
           </ReactMarkdown>
         </div>
+
+        {!isUser && Array.isArray(message.artifacts) && message.artifacts.length > 0 && (
+          <div className="mt-3 space-y-3 border-t pt-3">
+            {message.artifacts.map((artifact, index) => (
+              <ChatArtifactCard
+                key={`${artifact.artifact_type}-${artifact.title}-${index}`}
+                artifact={artifact}
+              />
+            ))}
+          </div>
+        )}
 
         {links.length > 0 && (
           <div className="mt-3 border-t pt-2">

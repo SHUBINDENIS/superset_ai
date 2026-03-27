@@ -3,13 +3,21 @@
 import { useState, useRef, type KeyboardEvent } from "react";
 import { SendHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import type { DetailLevel, ResponseStyle } from "@/lib/chats";
 
 interface ChatInputProps {
   onSend: (text: string) => void;
   disabled?: boolean;
+  responseStyle?: ResponseStyle;
+  detailLevel?: DetailLevel;
 }
 
-export function ChatInput({ onSend, disabled }: ChatInputProps) {
+export function ChatInput({
+  onSend,
+  disabled,
+  responseStyle = "business",
+  detailLevel = "standard",
+}: ChatInputProps) {
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -61,9 +69,23 @@ export function ChatInput({ onSend, disabled }: ChatInputProps) {
           <SendHorizontal className="h-4 w-4" />
         </Button>
       </div>
-      <p className="mx-auto mt-2 max-w-3xl text-[11px] text-muted-foreground">
-        Безопасный режим: задавайте бизнес-вопросы и read-only запросы.
-      </p>
+      <div className="mx-auto mt-2 flex max-w-3xl flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
+        <p>Безопасный режим: задавайте бизнес-вопросы и read-only запросы.</p>
+        <p>
+          Текущий ответ:{" "}
+          <span className="font-medium text-foreground">
+            {responseStyle === "technical" ? "Технический" : "Бизнес"}
+          </span>
+          {" · "}
+          <span className="font-medium text-foreground">
+            {detailLevel === "concise"
+              ? "Кратко"
+              : detailLevel === "detailed"
+                ? "Подробно"
+                : "Стандартно"}
+          </span>
+        </p>
+      </div>
     </div>
   );
 }

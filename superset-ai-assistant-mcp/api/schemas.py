@@ -116,6 +116,13 @@ class UpdateChatSettingsRequest(BaseModel):
 # Chat messages
 # ---------------------------------------------------------------------------
 
+class ChatArtifactResponse(BaseModel):
+    artifact_type: Literal["table_preview", "chart_preview", "link"]
+    title: str = ""
+    description: str = ""
+    payload: Dict[str, Any] = Field(default_factory=dict)
+
+
 class ChatMessageResponse(BaseModel):
     """Single persisted chat message."""
 
@@ -123,6 +130,11 @@ class ChatMessageResponse(BaseModel):
     role: str
     content: str
     created_at: str
+    finish_reason: str = ""
+    model: str = ""
+    response_style: Literal["business", "technical"] | None = None
+    detail_level: Literal["concise", "standard", "detailed"] | None = None
+    artifacts: List[ChatArtifactResponse] = Field(default_factory=list)
 
 
 class MessageListResponse(BaseModel):
@@ -131,8 +143,8 @@ class MessageListResponse(BaseModel):
 
 class SendMessageRequest(BaseModel):
     content: str = Field(..., min_length=1)
-    response_style: Literal["business", "technical"] = "business"
-    detail_level: Literal["concise", "standard", "detailed"] = "standard"
+    response_style: Literal["business", "technical"] | None = None
+    detail_level: Literal["concise", "standard", "detailed"] | None = None
 
 
 class SendMessageResponse(BaseModel):
@@ -143,6 +155,9 @@ class SendMessageResponse(BaseModel):
     finish_reason: str
     model: str = ""
     session_id: str
+    response_style: Literal["business", "technical"] | None = None
+    detail_level: Literal["concise", "standard", "detailed"] | None = None
+    artifacts: List[ChatArtifactResponse] = Field(default_factory=list)
 
 
 class ClearMessagesResponse(BaseModel):
