@@ -524,6 +524,12 @@ class SupersetAIAgent:
         score += self._score_name_for_patterns(query, ["фильм", "film", "movie"], 55) * (
             1 if self._contains_any_pattern(dataset_text, ["film", "movie"]) else 0
         )
+        score += self._score_name_for_patterns(query, ["игр", "game", "games"], 85) * (
+            1 if self._contains_any_pattern(dataset_text, ["game", "games", "video"]) else 0
+        )
+        score += self._score_name_for_patterns(query, ["global_sales", "global sales", "глобальн"], 95) * (
+            1 if self._contains_any_pattern(dataset_text, ["global", "sales", "game"]) else 0
+        )
         score += self._score_name_for_patterns(query, ["платеж", "payment", "оплат"], 90) * (
             1 if self._contains_any_pattern(dataset_text, ["payment"]) else 0
         )
@@ -569,6 +575,8 @@ class SupersetAIAgent:
             _push("store", "sales")
         if self._contains_any_pattern(query, ["категор", "category"]):
             _push("category", "film", "sales")
+        if self._contains_any_pattern(query, ["игр", "game", "games", "global_sales", "global sales"]):
+            _push("game", "games", "video", "sales")
         if self._contains_any_pattern(query, ["заказ", "order", "orders"]):
             _push("order", "orders", "payment", "rental")
         if self._contains_any_pattern(query, ["оплат", "payment"]):
@@ -793,6 +801,102 @@ class SupersetAIAgent:
                 return name
         return ""
 
+    @staticmethod
+    def _is_temporal_type_hint(type_hint: str) -> bool:
+        normalized = str(type_hint or "").casefold()
+        return any(token in normalized for token in ["date", "time", "timestamp", "temporal"])
+
+    @staticmethod
+    def _is_numeric_type_hint(type_hint: str) -> bool:
+        normalized = str(type_hint or "").casefold()
+        return any(
+            token in normalized
+            for token in ["int", "numeric", "decimal", "float", "double", "real", "number"]
+        )
+
+    @classmethod
+    def _pick_temporal_column(
+        cls,
+        columns: List[Dict[str, Any]],
+        *,
+        patterns: Optional[List[str]] = None,
+    ) -> str:
+        preferred = ""
+        fallback = ""
+        for item in columns:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("column_name") or "").strip()
+            if not name:
+                continue
+            type_hint = str(item.get("type") or item.get("inferred_type") or "").casefold()
+            if not cls._is_temporal_type_hint(type_hint):
+                continue
+            low = name.casefold()
+            if patterns and any(token in low for token in patterns):
+                return name
+            if any(token in low for token in ["date", "time", "period", "month", "week", "day"]):
+                preferred = preferred or name
+            fallback = fallback or name
+        return preferred or fallback
+
+    @classmethod
+    def _pick_ordered_numeric_column(
+        cls,
+        columns: List[Dict[str, Any]],
+        *,
+        patterns: List[str],
+    ) -> str:
+        for item in columns:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("column_name") or "").strip()
+            if not name:
+                continue
+            low = name.casefold()
+            if not any(token in low for token in patterns):
+                continue
+            type_hint = str(item.get("type") or item.get("inferred_type") or "").casefold()
+            if cls._is_numeric_type_hint(type_hint):
+                return name
+        return ""
+
+    @classmethod
+    def _pick_metric_column(
+        cls,
+        columns: List[Dict[str, Any]],
+        *,
+        patterns: List[str],
+    ) -> str:
+        numeric_fallback = ""
+        broad_fallback = ""
+        for item in columns:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("column_name") or "").strip()
+            if not name:
+                continue
+            low = name.casefold()
+            if not any(token in low for token in patterns):
+                continue
+            type_hint = str(item.get("type") or item.get("inferred_type") or "").casefold()
+            if cls._is_temporal_type_hint(type_hint):
+                continue
+            if cls._is_numeric_type_hint(type_hint):
+                return name
+            if broad_fallback == "":
+                broad_fallback = name
+        for item in columns:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("column_name") or "").strip()
+            if not name:
+                continue
+            type_hint = str(item.get("type") or item.get("inferred_type") or "").casefold()
+            if cls._is_numeric_type_hint(type_hint):
+                numeric_fallback = numeric_fallback or name
+        return broad_fallback or numeric_fallback
+
     def _score_dataset_metadata_fit(
         self,
         user_message: str,
@@ -803,9 +907,9 @@ class SupersetAIAgent:
         if not isinstance(columns, list):
             return 0
         score = 0
-        metric_column = self._pick_first_matching_column(
+        metric_column = self._pick_metric_column(
             columns,
-            patterns=["sales", "revenue", "amount", "total", "price"],
+            patterns=["sales", "revenue", "amount", "total", "price", "payment", "global"],
         )
         store_column = self._pick_first_matching_column(columns, patterns=["store", "shop"])
         category_column = self._pick_first_matching_column(columns, patterns=["category"])
@@ -813,13 +917,16 @@ class SupersetAIAgent:
             columns,
             patterns=["customer", "client"],
         )
-        time_column = self._pick_first_matching_column(
+        time_column = self._pick_temporal_column(
             columns,
             patterns=["date", "time", "month", "year"],
-            type_patterns=["date", "time", "timestamp"],
+        )
+        ordered_numeric_column = self._pick_ordered_numeric_column(
+            columns,
+            patterns=["year", "month", "week", "day", "period"],
         )
         requested_year = self._extract_requested_year(query)
-        if requested_year is not None and not time_column:
+        if requested_year is not None and not time_column and not ordered_numeric_column:
             return 0
         if metric_column and self._contains_any_pattern(query, ["выруч", "sales", "revenue", "продаж", "оплат"]):
             score += 90
@@ -834,6 +941,11 @@ class SupersetAIAgent:
             or self._extract_requested_year(query) is not None
         ):
             score += 65
+        if ordered_numeric_column and self._contains_any_pattern(
+            query,
+            ["график", "chart", "trend", "динам", "месяц", "month", "год", "year"],
+        ):
+            score += 55
         if time_column and self._contains_any_pattern(query, ["заказ", "order", "аренд", "rental"]):
             score += 45
         return score
@@ -858,12 +970,16 @@ class SupersetAIAgent:
         wants_average = self._contains_any_pattern(query, ["средн", "avg", "average"])
         requested_year = self._extract_requested_year(query)
 
-        time_column = self._pick_first_matching_column(
+        time_column = self._pick_temporal_column(
             columns,
             patterns=["date", "time", "month", "year"],
-            type_patterns=["date", "time", "timestamp"],
         )
-        if requested_year is not None and not time_column:
+        ordered_numeric_dimension = self._pick_ordered_numeric_column(
+            columns,
+            patterns=["year", "month", "week", "day", "period"],
+        )
+        numeric_year_column = self._pick_ordered_numeric_column(columns, patterns=["year"])
+        if requested_year is not None and not time_column and not numeric_year_column:
             return None
         if wants_store:
             dimension_column = self._pick_first_matching_column(columns, patterns=["store", "shop"])
@@ -876,13 +992,15 @@ class SupersetAIAgent:
                 columns,
                 patterns=["store", "category", "customer", "client", "film", "name"],
             )
+        if not dimension_column and ordered_numeric_dimension:
+            dimension_column = ordered_numeric_dimension
 
-        metric_column = self._pick_first_matching_column(
+        metric_column = self._pick_metric_column(
             columns,
-            patterns=["sales", "revenue", "amount", "total", "price", "payment"],
+            patterns=["sales", "revenue", "amount", "total", "price", "payment", "global"],
         )
         if not metric_column:
-            metric_column = self._pick_first_matching_column(
+            metric_column = self._pick_metric_column(
                 columns,
                 patterns=["count", "qty", "quantity"],
             )
@@ -925,6 +1043,13 @@ class SupersetAIAgent:
                 f"EXTRACT(YEAR FROM {self._quote_sql_identifier(time_column)}) = {requested_year}"
             )
             assumptions.append(f"фильтр по {requested_year} году применяется по полю {time_column}")
+        elif requested_year is not None and numeric_year_column:
+            where_clauses.append(
+                f"{self._quote_sql_identifier(numeric_year_column)} = {requested_year}"
+            )
+            assumptions.append(
+                f"фильтр по {requested_year} году применяется по numeric-полю {numeric_year_column}"
+            )
 
         from_ref = self._build_sql_table_ref(table_name, schema_name)
         order_clause = ""
@@ -943,6 +1068,16 @@ class SupersetAIAgent:
                 f"FROM {from_ref}"
             )
             order_clause = "GROUP BY 1 ORDER BY 1 ASC LIMIT 12"
+        elif wants_chart and dimension_column and dimension_column == ordered_numeric_dimension:
+            x_key = dimension_column
+            chart_type = "line"
+            group_hint = f"по полю {dimension_column}"
+            select_sql = (
+                f"SELECT {self._quote_sql_identifier(dimension_column)} AS {self._quote_sql_identifier(dimension_column)}, "
+                f"{metric_sql} AS {metric_label} "
+                f"FROM {from_ref}"
+            )
+            order_clause = "GROUP BY 1 ORDER BY 1 ASC LIMIT 20"
         elif dimension_column:
             x_key = dimension_column
             chart_type = "bar"

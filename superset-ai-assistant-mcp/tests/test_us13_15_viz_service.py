@@ -95,6 +95,35 @@ class TestUS13To15VizService(unittest.TestCase):
         all_types = [x["viz_type"] for x in rec["candidates"]]
         self.assertIn("bar", all_types)
 
+    def test_recommend_line_for_numeric_year_dimension(self):
+        rows = [
+            {"year": 2018, "global_sales": 102.4},
+            {"year": 2019, "global_sales": 118.7},
+            {"year": 2020, "global_sales": 121.2},
+        ]
+        columns = self.service.profile_columns(rows)
+        rec = self.service.recommend_viz_types(
+            rows=rows,
+            columns=columns,
+            metric_column="global_sales",
+            dimension_column="year",
+        )
+        self.assertEqual(rec["recommended"], "line")
+        self.assertEqual(rec["selected_columns"]["dimension"], "year")
+
+    def test_build_chart_params_line_with_numeric_dimension_does_not_set_time_grain(self):
+        params = self.service.build_chart_params(
+            dataset_id=77,
+            viz_type="line",
+            metric_column="global_sales",
+            dimension_column="year",
+            row_limit=200,
+        )
+        self.assertEqual(params["viz_type"], "line")
+        self.assertEqual(params["groupby"], ["year"])
+        self.assertNotIn("granularity_sqla", params)
+        self.assertNotIn("time_grain_sqla", params)
+
     def test_build_chart_params_line(self):
         params = self.service.build_chart_params(
             dataset_id=42,

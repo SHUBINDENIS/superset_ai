@@ -1,14 +1,21 @@
 "use client";
 
+import { useId, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { ExternalLink, LineChart, Table2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { LinkResultCard } from "@/components/link-result-card";
 import { ResultTable } from "@/components/result-table";
 import type { ChatArtifact } from "@/lib/chats";
-import { cn } from "@/lib/utils";
 
 interface ChatArtifactProps {
   artifact: ChatArtifact;
+}
+
+interface ChartPoint {
+  label: string;
+  value: number;
+  svgX: number;
+  svgY: number;
 }
 
 function renderValue(value: unknown) {
@@ -19,6 +26,27 @@ function renderValue(value: unknown) {
     return Number.isFinite(value) ? value.toLocaleString("ru-RU") : String(value);
   }
   return String(value);
+}
+
+function renderAxisLabel(value: unknown) {
+  if (typeof value === "string") {
+    const trimmed = value.trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed) || /^\d{4}-\d{2}-\d{2}T/.test(trimmed)) {
+      const parsed = new Date(trimmed);
+      if (!Number.isNaN(parsed.getTime())) {
+        return parsed.toLocaleDateString("ru-RU", {
+          day: "numeric",
+          month: "short",
+          year:
+            parsed.getUTCFullYear() !== new Date().getUTCFullYear()
+              ? "numeric"
+              : undefined,
+        });
+      }
+    }
+    return trimmed;
+  }
+  return renderValue(value);
 }
 
 function coerceRows(payload: Record<string, unknown>) {
@@ -88,6 +116,86 @@ function ArtifactAction({
   );
 }
 
+function ChartTooltip({
+  point,
+  xPercent,
+  yPercent,
+}: {
+  point: ChartPoint;
+  xPercent: number;
+  yPercent: number;
+}) {
+  return (
+    <div
+      data-testid="chat-chart-tooltip"
+      className="pointer-events-none absolute z-10 w-max max-w-[14rem] -translate-x-1/2 rounded-xl border border-slate-200/90 bg-white/95 px-3 py-2 shadow-lg backdrop-blur"
+      style={{
+        left: `${xPercent}%`,
+        top: `${yPercent}%`,
+      }}
+    >
+      <p className="text-[11px] font-medium text-slate-900">{point.label}</p>
+      <p className="mt-0.5 text-xs text-slate-600">{renderValue(point.value)}</p>
+    </div>
+  );
+}
+
+function buildChartGeometry(rows: Record<string, unknown>[], xKey: string, yKey: string) {
+  const width = 320;
+  const height = 184;
+  const left = 18;
+  const right = 14;
+  const top = 18;
+  const bottom = 24;
+  const innerWidth = width - left - right;
+  const innerHeight = height - top - bottom;
+  const rawPoints = rows
+    .map((row) => {
+      const value = Number(row[yKey]);
+      if (!Number.isFinite(value)) {
+        return null;
+      }
+      return {
+        label: renderAxisLabel(row[xKey]),
+        value,
+      };
+    })
+    .filter((item): item is { label: string; value: number } => !!item);
+
+  const values = rawPoints.map((item) => item.value);
+  const maxValue = Math.max(...values, 0);
+  const minValue = Math.min(...values, 0);
+  const valueSpan = maxValue - minValue;
+  const safeSpan = valueSpan === 0 ? Math.max(Math.abs(maxValue), 1) : valueSpan;
+  const svgPoints: ChartPoint[] = rawPoints.map((point, index) => {
+    const ratioX = rawPoints.length <= 1 ? 0.5 : index / Math.max(rawPoints.length - 1, 1);
+    const normalizedValue =
+      valueSpan === 0 ? 0.5 : (point.value - minValue) / safeSpan;
+    return {
+      label: point.label,
+      value: point.value,
+      svgX: left + ratioX * innerWidth,
+      svgY: top + (1 - normalizedValue) * innerHeight,
+    };
+  });
+
+  return {
+    width,
+    height,
+    left,
+    right,
+    top,
+    bottom,
+    innerWidth,
+    innerHeight,
+    minValue,
+    maxValue,
+    svgPoints,
+    baselineY: top + innerHeight,
+    gridYs: [0, 0.33, 0.66, 1].map((ratio) => top + ratio * innerHeight),
+  };
+}
+
 function ChartPreview({ artifact }: ChatArtifactProps) {
   const payload = artifact.payload ?? {};
   const chartType = String(payload.chart_type ?? "bar").trim().toLowerCase();
@@ -96,87 +204,34 @@ function ChartPreview({ artifact }: ChatArtifactProps) {
   const href = getPayloadHref(payload);
   const linkLabel = getPayloadLinkLabel(payload, "Открыть график");
   const rows = coerceRows(payload);
-  const numericValues = rows
-    .map((row) => Number(row[yKey]))
-    .filter((value) => Number.isFinite(value));
-  const maxValue = Math.max(...numericValues, 0);
+  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const gradientId = useId();
+  const chart = useMemo(() => buildChartGeometry(rows, xKey, yKey), [rows, xKey, yKey]);
 
-  if (!rows.length || !xKey || !yKey) {
+  if (!rows.length || !xKey || !yKey || !chart.svgPoints.length) {
     return null;
   }
 
-  if (chartType === "line") {
-    const points = rows
-      .map((row, index) => {
-        const value = Number(row[yKey]);
-        if (!Number.isFinite(value)) {
-          return null;
-        }
-        const x = rows.length === 1 ? 0 : (index / Math.max(rows.length - 1, 1)) * 100;
-        const y = maxValue > 0 ? 100 - (value / maxValue) * 100 : 100;
-        return `${x},${y}`;
-      })
-      .filter((item): item is string => !!item)
-      .join(" ");
+  const hoveredPoint =
+    hoveredIndex === null ? null : chart.svgPoints[hoveredIndex] ?? null;
+  const tooltipX =
+    hoveredPoint == null
+      ? 50
+      : Math.min(Math.max((hoveredPoint.svgX / chart.width) * 100, 14), 86);
+  const tooltipY =
+    hoveredPoint == null
+      ? 10
+      : Math.min(Math.max((hoveredPoint.svgY / chart.height) * 100 - 12, 6), 68);
 
-    return (
-      <div className="rounded-lg border bg-card p-4 shadow-sm">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <LineChart className="h-4 w-4 text-primary" />
-            <p className="text-sm font-medium">{artifact.title || "Preview графика"}</p>
-          </div>
-          <span className="rounded-full bg-muted px-2 py-1 text-[11px] text-muted-foreground">
-            line
-          </span>
-        </div>
-        {artifact.description && (
-          <p className="mt-1 text-xs text-muted-foreground">{artifact.description}</p>
-        )}
-        <div className="mt-3 flex flex-wrap gap-2 text-[11px] text-muted-foreground">
-          <span className="rounded-full bg-muted px-2 py-1">X: {xKey}</span>
-          <span className="rounded-full bg-muted px-2 py-1">Y: {yKey}</span>
-          <span className="rounded-full bg-muted px-2 py-1">{rows.length} точек</span>
-        </div>
-        <div className="mt-4 rounded-lg border bg-muted/20 p-3">
-          <svg viewBox="0 0 100 100" className="h-40 w-full overflow-visible">
-            <line x1="0" y1="100" x2="100" y2="100" stroke="currentColor" className="text-border" strokeWidth="1" />
-            <line x1="0" y1="50" x2="100" y2="50" stroke="currentColor" className="text-border/80" strokeWidth="1" />
-            <polyline
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-              className="text-primary"
-              points={points}
-            />
-          </svg>
-          <div className="mt-3 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2">
-            {rows.slice(0, 6).map((row, index) => (
-              <div
-                key={`${index}-${String(row[xKey] ?? "")}`}
-                className="rounded-md bg-background px-2 py-1"
-              >
-                <span className="font-medium text-foreground">{renderValue(row[xKey])}</span>
-                {" · "}
-                {renderValue(row[yKey])}
-              </div>
-            ))}
-          </div>
-        </div>
-        <ArtifactAction href={href} label={linkLabel} />
-      </div>
-    );
-  }
-
-  return (
-    <div className="rounded-lg border bg-card p-4 shadow-sm">
+  const commonHeader = (
+    <>
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <LineChart className="h-4 w-4 text-primary" />
           <p className="text-sm font-medium">{artifact.title || "Preview графика"}</p>
         </div>
         <span className="rounded-full bg-muted px-2 py-1 text-[11px] text-muted-foreground">
-          bar
+          {chartType === "line" ? "line" : "bar"}
         </span>
       </div>
       {artifact.description && (
@@ -187,25 +242,185 @@ function ChartPreview({ artifact }: ChatArtifactProps) {
         <span className="rounded-full bg-muted px-2 py-1">Y: {yKey}</span>
         <span className="rounded-full bg-muted px-2 py-1">{rows.length} точек</span>
       </div>
-      <div className="mt-4 space-y-3 rounded-lg border bg-muted/20 p-3">
-        {rows.slice(0, 8).map((row, index) => {
-          const value = Number(row[yKey]);
-          const width = maxValue > 0 && Number.isFinite(value) ? (value / maxValue) * 100 : 0;
-          return (
-            <div key={`${index}-${String(row[xKey] ?? "")}`} className="space-y-1">
-              <div className="flex items-center justify-between gap-3 text-xs">
-                <span className="truncate font-medium text-foreground">{renderValue(row[xKey])}</span>
-                <span className="shrink-0 text-muted-foreground">{renderValue(row[yKey])}</span>
-              </div>
-              <div className="h-2 rounded-full bg-muted">
-                <div
-                  className={cn("h-2 rounded-full bg-primary transition-all")}
-                  style={{ width: `${Math.max(width, value > 0 ? 6 : 0)}%` }}
+    </>
+  );
+
+  function handleSurfaceMove(event: ReactMouseEvent<HTMLDivElement>) {
+    if (!chart.svgPoints.length) {
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    if (!rect.width) {
+      return;
+    }
+    const relativeX = ((event.clientX - rect.left) / rect.width) * chart.width;
+    let nearestIndex = 0;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    chart.svgPoints.forEach((point, index) => {
+      const distance = Math.abs(point.svgX - relativeX);
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestIndex = index;
+      }
+    });
+    setHoveredIndex(nearestIndex);
+  }
+
+  if (chartType === "line") {
+    const polylinePoints = chart.svgPoints.map((point) => `${point.svgX},${point.svgY}`).join(" ");
+    const areaPath = [
+      `M ${chart.svgPoints[0]?.svgX ?? chart.left} ${chart.baselineY}`,
+      ...chart.svgPoints.map((point) => `L ${point.svgX} ${point.svgY}`),
+      `L ${chart.svgPoints[chart.svgPoints.length - 1]?.svgX ?? chart.left} ${chart.baselineY}`,
+      "Z",
+    ].join(" ");
+
+    return (
+      <div
+        data-testid="chat-chart-preview"
+        data-chart-type="line"
+        className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm"
+      >
+        {commonHeader}
+        <div
+          data-testid="chat-chart-surface"
+          className="relative mt-4 rounded-xl border border-slate-200/80 bg-slate-50/70 p-3"
+          onMouseMove={handleSurfaceMove}
+          onMouseLeave={() => setHoveredIndex(null)}
+        >
+          {hoveredPoint && (
+            <ChartTooltip point={hoveredPoint} xPercent={tooltipX} yPercent={tooltipY} />
+          )}
+          <svg viewBox={`0 0 ${chart.width} ${chart.height}`} className="h-44 w-full overflow-visible">
+            <defs>
+              <linearGradient id={gradientId} x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor="#2563eb" stopOpacity="0.22" />
+                <stop offset="100%" stopColor="#2563eb" stopOpacity="0.02" />
+              </linearGradient>
+            </defs>
+            {chart.gridYs.map((y, index) => (
+              <line
+                key={index}
+                x1={chart.left}
+                y1={y}
+                x2={chart.width - chart.right}
+                y2={y}
+                stroke="rgba(148, 163, 184, 0.28)"
+                strokeWidth="1"
+              />
+            ))}
+            <path d={areaPath} fill={`url(#${gradientId})`} />
+            <polyline
+              fill="none"
+              stroke="#2563eb"
+              strokeWidth="2.75"
+              strokeLinejoin="round"
+              strokeLinecap="round"
+              points={polylinePoints}
+            />
+            {chart.svgPoints.map((point, index) => (
+              <g key={`${point.label}-${index}`}>
+                <circle
+                  data-point-index={index}
+                  cx={point.svgX}
+                  cy={point.svgY}
+                  r="8"
+                  fill="transparent"
+                  onMouseEnter={() => setHoveredIndex(index)}
                 />
-              </div>
-            </div>
-          );
-        })}
+                <circle
+                  cx={point.svgX}
+                  cy={point.svgY}
+                  r={hoveredIndex === index ? "4.5" : "3.25"}
+                  fill="#ffffff"
+                  stroke="#2563eb"
+                  strokeWidth="2"
+                  className="transition-all"
+                  onMouseEnter={() => setHoveredIndex(index)}
+                />
+              </g>
+            ))}
+          </svg>
+          <div className="mt-3 flex items-center justify-between gap-3 text-[11px] text-slate-500">
+            <span>{chart.svgPoints[0]?.label ?? "—"}</span>
+            <span>
+              {chart.minValue === chart.maxValue
+                ? `Значение: ${renderValue(chart.maxValue)}`
+                : `Диапазон: ${renderValue(chart.minValue)} — ${renderValue(chart.maxValue)}`}
+            </span>
+            <span>{chart.svgPoints[chart.svgPoints.length - 1]?.label ?? "—"}</span>
+          </div>
+        </div>
+        <ArtifactAction href={href} label={linkLabel} />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      data-testid="chat-chart-preview"
+      data-chart-type="bar"
+      className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm"
+    >
+      {commonHeader}
+      <div
+        data-testid="chat-chart-surface"
+        className="relative mt-4 rounded-xl border border-slate-200/80 bg-slate-50/70 p-3"
+        onMouseMove={handleSurfaceMove}
+        onMouseLeave={() => setHoveredIndex(null)}
+      >
+        {hoveredPoint && (
+          <ChartTooltip point={hoveredPoint} xPercent={tooltipX} yPercent={tooltipY} />
+        )}
+        <svg viewBox={`0 0 ${chart.width} ${chart.height}`} className="h-44 w-full overflow-visible">
+          {chart.gridYs.map((y, index) => (
+            <line
+              key={index}
+              x1={chart.left}
+              y1={y}
+              x2={chart.width - chart.right}
+              y2={y}
+              stroke="rgba(148, 163, 184, 0.24)"
+              strokeWidth="1"
+            />
+          ))}
+          {chart.svgPoints.map((point, index) => {
+            const barWidth = Math.max(chart.innerWidth / Math.max(chart.svgPoints.length * 1.9, 2), 10);
+            const baseY = chart.baselineY;
+            const barHeight = Math.max(baseY - point.svgY, 6);
+            const x = point.svgX - barWidth / 2;
+            const y = baseY - barHeight;
+            return (
+              <g key={`${point.label}-${index}`}>
+                <rect
+                  data-bar-index={index}
+                  x={x}
+                  y={y}
+                  width={barWidth}
+                  height={barHeight}
+                  rx="8"
+                  fill={hoveredIndex === index ? "#1d4ed8" : "#3b82f6"}
+                  fillOpacity={hoveredIndex === index ? "0.92" : "0.82"}
+                  onMouseEnter={() => setHoveredIndex(index)}
+                />
+                <rect
+                  data-chart-hitbox={index}
+                  x={x - 6}
+                  y={chart.top}
+                  width={barWidth + 12}
+                  height={chart.innerHeight}
+                  fill="transparent"
+                  onMouseEnter={() => setHoveredIndex(index)}
+                />
+              </g>
+            );
+          })}
+        </svg>
+        <div className="mt-3 flex items-center justify-between gap-3 text-[11px] text-slate-500">
+          <span>{chart.svgPoints[0]?.label ?? "—"}</span>
+          <span>{`Диапазон: ${renderValue(chart.minValue)} — ${renderValue(chart.maxValue)}`}</span>
+          <span>{chart.svgPoints[chart.svgPoints.length - 1]?.label ?? "—"}</span>
+        </div>
       </div>
       <ArtifactAction href={href} label={linkLabel} />
     </div>
@@ -233,7 +448,10 @@ export function ChatArtifactCard({ artifact }: ChatArtifactProps) {
     const href = getPayloadHref(payload);
     const linkLabel = getPayloadLinkLabel(payload, "Открыть результат в Superset");
     return (
-      <div className="rounded-lg border bg-card p-4 shadow-sm">
+      <div
+        data-testid="chat-table-preview"
+        className="rounded-xl border border-slate-200/80 bg-white p-4 shadow-sm"
+      >
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <Table2 className="h-4 w-4 text-primary" />

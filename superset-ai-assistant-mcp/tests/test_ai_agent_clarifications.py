@@ -251,6 +251,64 @@ class _CloneableStructuredVizService(_FakeStructuredVizService):
         return _FakeStructuredVizService()
 
 
+class _NumericYearStructuredVizService(_FakeStructuredVizService):
+    def list_datasets(self, limit: int = 300, *, search: str = ""):
+        normalized = str(search or "").strip().casefold()
+        if normalized in {"year", "sales", "game", "games", "global"}:
+            return [
+                {
+                    "id": 77,
+                    "table_name": "video_game_sales",
+                    "schema": "public",
+                    "database_name": "Analytics Warehouse",
+                    "database_id": 11,
+                }
+            ]
+        return super().list_datasets(limit=limit, search=search)
+
+    def get_dataset_metadata(self, dataset_id: int):
+        if int(dataset_id) == 77:
+            return {
+                "id": 77,
+                "table_name": "video_game_sales",
+                "schema": "public",
+                "database_id": 11,
+                "database_name": "Analytics Warehouse",
+                "columns": [
+                    {"column_name": "year", "type": "BIGINT"},
+                    {"column_name": "global_sales", "type": "NUMERIC"},
+                    {"column_name": "platform", "type": "TEXT"},
+                ],
+            }
+        return super().get_dataset_metadata(dataset_id)
+
+    def preview_sql(self, *, database_id: int, sql: str, schema: str = "", preview_limit: int = 12):
+        if "video_game_sales" in sql:
+            return {
+                "database_id": int(database_id),
+                "schema": schema,
+                "sql_executed": sql,
+                "preview_limit": preview_limit,
+                "rows_count": 4,
+                "rows": [
+                    {"year": 2018, "global_sales": 102.4},
+                    {"year": 2019, "global_sales": 118.7},
+                    {"year": 2020, "global_sales": 121.2},
+                    {"year": 2021, "global_sales": 109.1},
+                ],
+                "columns": [
+                    {"column": "year", "inferred_type": "numeric"},
+                    {"column": "global_sales", "inferred_type": "numeric"},
+                ],
+            }
+        return super().preview_sql(
+            database_id=database_id,
+            sql=sql,
+            schema=schema,
+            preview_limit=preview_limit,
+        )
+
+
 class TestAIAgentClarifications(unittest.TestCase):
     def setUp(self):
         self.agent = SupersetAIAgent.__new__(SupersetAIAgent)
@@ -486,6 +544,44 @@ class TestAIAgentClarifications(unittest.TestCase):
 
         self.assertIsInstance(svc, _FakeStructuredVizService)
         self.assertEqual(cloneable.clone_calls, 1)
+
+    def test_structured_plan_uses_numeric_year_as_ordered_dimension_not_temporal(self):
+        metadata = _NumericYearStructuredVizService().get_dataset_metadata(77)
+
+        plan = self.agent._build_structured_query_plan(
+            "Построй график global_sales по year",
+            metadata,
+        )
+
+        self.assertIsNotNone(plan)
+        assert plan is not None
+        self.assertEqual(plan["time_column"], "")
+        self.assertEqual(plan["dimension_column"], "year")
+        self.assertEqual(plan["chart_type"], "line")
+        self.assertIn('SELECT "year" AS "year"', plan["sql"])
+        self.assertIn('SUM("global_sales") AS global_sales', plan["sql"])
+        self.assertNotIn("DATE_TRUNC", plan["sql"])
+        self.assertNotIn("EXTRACT(YEAR", plan["sql"])
+
+    def test_structured_reply_keeps_numeric_year_out_of_temporal_path(self):
+        with unittest.mock.patch(
+            "backend.ai_agent.get_us13_15_viz_service",
+            return_value=_NumericYearStructuredVizService(),
+        ):
+            reply = self.agent._build_structured_analytics_reply_sync(
+                user_message="Построй график global_sales по year",
+                response_style="technical",
+                detail_level="standard",
+            )
+
+        self.assertIsNotNone(reply)
+        assert reply is not None
+        self.assertIn("video_game_sales", reply["content"])
+        self.assertNotIn("DATE_TRUNC", reply["content"])
+        self.assertEqual(reply["artifacts"][0]["artifact_type"], "chart_preview")
+        self.assertEqual(reply["artifacts"][0]["payload"]["chart_type"], "line")
+        self.assertEqual(reply["artifacts"][0]["payload"]["x_key"], "year")
+        self.assertEqual(reply["artifacts"][1]["artifact_type"], "table_preview")
 
 
 class TestAIAgentStyleRewrite(unittest.IsolatedAsyncioTestCase):

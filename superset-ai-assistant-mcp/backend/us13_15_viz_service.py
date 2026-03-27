@@ -122,6 +122,13 @@ def _infer_unit(column_name: str) -> str:
     return ""
 
 
+def _looks_ordered_axis_name(column_name: str) -> bool:
+    name = _normalize_text(column_name).casefold()
+    if not name:
+        return False
+    return any(token in name for token in ["year", "month", "week", "day", "period", "quarter"])
+
+
 @dataclass
 class US13To15VizService:
     base_url: str
@@ -609,11 +616,14 @@ class US13To15VizService:
             for c in columns
             if c.get("inferred_type") in {"text", "boolean"}
         ]
+        ordered_numeric_cols = [c for c in numeric_cols if _looks_ordered_axis_name(c)]
 
         metric = metric_column if metric_column in numeric_cols else (numeric_cols[0] if numeric_cols else "")
         dimension = (
             dimension_column if dimension_column in text_cols else (text_cols[0] if text_cols else "")
         )
+        if not dimension and dimension_column in ordered_numeric_cols:
+            dimension = dimension_column
         time_col = time_column if time_column in temporal_cols else (temporal_cols[0] if temporal_cols else "")
 
         candidates: List[Dict[str, Any]] = []
@@ -655,6 +665,31 @@ class US13To15VizService:
                         "reason": "Небольшое число категорий, можно показать доли.",
                     }
                 )
+
+        ordered_numeric_dimension = ""
+        if dimension_column in ordered_numeric_cols:
+            ordered_numeric_dimension = dimension_column
+        elif ordered_numeric_cols:
+            ordered_numeric_dimension = ordered_numeric_cols[0]
+
+        if ordered_numeric_dimension and metric:
+            candidates.append(
+                {
+                    "viz_type": "line",
+                    "score": 0.93,
+                    "reason": (
+                        f"Числовая ось '{ordered_numeric_dimension}' выглядит как упорядоченный период, "
+                        f"а '{metric}' подходит как метрика."
+                    ),
+                }
+            )
+            candidates.append(
+                {
+                    "viz_type": "bar",
+                    "score": 0.86,
+                    "reason": "Упорядоченная числовая ось подходит для сравнительного bar chart.",
+                }
+            )
 
         if len(numeric_cols) >= 2:
             candidates.append(
