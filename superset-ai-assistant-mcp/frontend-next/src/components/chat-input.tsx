@@ -45,7 +45,7 @@ export function ChatInput({
   }
 
   return (
-    <div className="border-t bg-background px-4 py-3">
+    <div className="bg-background px-3 py-3 sm:px-4">
       <div className="mx-auto flex max-w-3xl items-end gap-2">
         <textarea
           ref={textareaRef}
@@ -69,7 +69,7 @@ export function ChatInput({
           <SendHorizontal className="h-4 w-4" />
         </Button>
       </div>
-      <div className="mx-auto mt-2 flex max-w-3xl flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
+      <div className="mx-auto mt-2 flex max-w-3xl flex-col gap-2 text-[11px] text-muted-foreground sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
         <p>Безопасный режим: задавайте бизнес-вопросы и read-only запросы.</p>
         <p>
           Текущий ответ:{" "}

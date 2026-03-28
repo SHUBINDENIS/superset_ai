@@ -18,9 +18,15 @@ import {
 
 interface ChatSidebarProps {
   sessions: ChatSession[];
+  collapsed?: boolean;
+  onNavigate?: () => void;
 }
 
-export function ChatSidebar({ sessions }: ChatSidebarProps) {
+export function ChatSidebar({
+  sessions,
+  collapsed = false,
+  onNavigate,
+}: ChatSidebarProps) {
   const { activeSessionId, isSessionPending } = useChatUI();
   const activateChat = useActivateChat();
   const createChat = useCreateChat();
@@ -92,7 +98,11 @@ export function ChatSidebar({ sessions }: ChatSidebarProps) {
       <Button
         variant="default"
         size="sm"
-        className="w-full justify-start gap-2"
+        className={cn(
+          "w-full gap-2",
+          collapsed ? "justify-center px-0" : "justify-start",
+        )}
+        title="Новый чат"
         onClick={() =>
           createChat.mutate({
             title: null,
@@ -102,21 +112,25 @@ export function ChatSidebar({ sessions }: ChatSidebarProps) {
               chatId: activeSessionId || undefined,
               route: "/app/chat",
             }),
+          }, {
+            onSuccess: () => onNavigate?.(),
           })
         }
         disabled={createChat.isPending}
       >
         <Plus className="h-3.5 w-3.5" />
-        {createChat.isPending ? "Создание..." : "Новый чат"}
+        <span className={cn(collapsed && "hidden")}>
+          {createChat.isPending ? "Создание..." : "Новый чат"}
+        </span>
       </Button>
 
-      {sessions.length === 0 && (
+      {!collapsed && sessions.length === 0 && (
         <p className="px-1 text-xs text-muted-foreground">
           Чаты пока не найдены.
         </p>
       )}
 
-      <div className="flex flex-col gap-0.5 overflow-y-auto">
+      {!collapsed && <div className="flex flex-col gap-0.5 overflow-y-auto">
         {sessions.map((s) => {
           const isActive = s.session_id === activeSessionId;
           const isRenaming = renamingId === s.session_id;
@@ -143,6 +157,8 @@ export function ChatSidebar({ sessions }: ChatSidebarProps) {
                       chatId: s.session_id,
                       route: "/app/chat",
                     }),
+                  }, {
+                    onSuccess: () => onNavigate?.(),
                   });
                 }
               }}
@@ -232,9 +248,9 @@ export function ChatSidebar({ sessions }: ChatSidebarProps) {
             </div>
           );
         })}
-      </div>
+      </div>}
 
-      {activeSessionId && (
+      {!collapsed && activeSessionId && (
         <Button
           variant="ghost"
           size="sm"

@@ -35,6 +35,7 @@ function settingsEqual(left: ChatSettings, right: ChatSettings) {
 }
 
 export default function ChatPage() {
+  const settingsCollapseStorageKey = "superset-ai:chat-settings-collapsed";
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const {
@@ -50,6 +51,7 @@ export default function ChatPage() {
   const messagesQuery = useMessages(activeSessionId);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [settingsCollapsed, setSettingsCollapsed] = useState(false);
   const [draftSettingsBySessionId, setDraftSettingsBySessionId] = useState<
     Record<string, ChatSettings>
   >({});
@@ -70,7 +72,7 @@ export default function ChatPage() {
   const hasLoadedSessions = chatsQuery.data !== undefined;
   const activeDraftSettings = activeSessionId
     ? draftSettingsBySessionId[activeSessionId]
-    : undefined;
+    : draftSettingsBySessionId["__new__"];
   const activeSettings =
     activeDraftSettings ??
     activeSession?.settings ??
@@ -112,11 +114,41 @@ export default function ChatPage() {
   }, [messages.length, activeSessionPending]);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      const stored = window.localStorage.getItem(settingsCollapseStorageKey);
+      if (stored === "true" || stored === "false") {
+        setSettingsCollapsed(stored === "true");
+        return;
+      }
+    } catch {
+      // Ignore storage issues and fall back to viewport default.
+    }
+    setSettingsCollapsed(window.innerWidth < 768);
+  }, [settingsCollapseStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+    try {
+      window.localStorage.setItem(
+        settingsCollapseStorageKey,
+        settingsCollapsed ? "true" : "false",
+      );
+    } catch {
+      // Collapse preference is non-critical.
+    }
+  }, [settingsCollapseStorageKey, settingsCollapsed]);
+
+  useEffect(() => {
     return subscribeChatSyncEvents((event) => {
       if (event.type === "chat_deleted" && activeSessionId === event.sessionId) {
         setActiveSessionId(null);
       }
-      queryClient.invalidateQueries({ queryKey: ["chats"] });
+      queryClient.invalidateQueries({ queryKey: ["chats"], exact: true });
       queryClient.invalidateQueries({ queryKey: ["auth", "me"] });
       queryClient.invalidateQueries({
         queryKey: ["chats", event.sessionId, "messages"],
@@ -135,6 +167,10 @@ export default function ChatPage() {
       let changed = false;
       const next: Record<string, ChatSettings> = {};
       for (const [sessionId, settings] of Object.entries(current)) {
+        if (sessionId === "__new__") {
+          next[sessionId] = settings;
+          continue;
+        }
         if (!validSessionIds.has(sessionId)) {
           changed = true;
           continue;
@@ -240,18 +276,18 @@ export default function ChatPage() {
   }
 
   function handleSettingsPatch(patch: Partial<ChatSettings>) {
-    if (!activeSessionId) {
-      return;
-    }
+    const key = activeSessionId || "__new__";
     const nextSettings: ChatSettings = {
       response_style: patch.response_style ?? activeResponseStyle,
       detail_level: patch.detail_level ?? activeDetailLevel,
     };
     setDraftSettingsBySessionId((current) => ({
       ...current,
-      [activeSessionId]: nextSettings,
+      [key]: nextSettings,
     }));
-    queueSettingsSync(activeSessionId, nextSettings);
+    if (activeSessionId) {
+      queueSettingsSync(activeSessionId, nextSettings);
+    }
   }
 
   function handleResponseStyleChange(nextStyle: ResponseStyle) {
@@ -278,6 +314,7 @@ export default function ChatPage() {
     );
 
     if (!activeSessionId) {
+      const settingsForNewChat = activeSettings;
       createChat.mutate(
         {
           title: "Новый чат",
@@ -286,13 +323,25 @@ export default function ChatPage() {
         },
         {
           onSuccess: (created) => {
+            setDraftSettingsBySessionId((current) => {
+              const { __new__: _removed, ...rest } = current;
+              return rest;
+            });
+            if (!settingsEqual(settingsForNewChat, DEFAULT_CHAT_SETTINGS)) {
+              updateChatSettings.mutate({
+                sessionId: created.session_id,
+                settings: settingsForNewChat,
+                traceContext: extendTraceContext(baseTrace, {
+                  sessionId: created.session_id,
+                  chatId: created.session_id,
+                }),
+              });
+            }
             sendMessage.mutate({
               sessionId: created.session_id,
               content,
-              responseStyle:
-                created.settings?.response_style ?? DEFAULT_CHAT_SETTINGS.response_style,
-              detailLevel:
-                created.settings?.detail_level ?? DEFAULT_CHAT_SETTINGS.detail_level,
+              responseStyle: settingsForNewChat.response_style,
+              detailLevel: settingsForNewChat.detail_level,
               traceContext: extendTraceContext(baseTrace, {
                 sessionId: created.session_id,
                 chatId: created.session_id,
@@ -318,9 +367,9 @@ export default function ChatPage() {
   const isLoadingMessages = !!activeSessionId && messagesQuery.isLoading;
 
   return (
-    <div className="flex h-full flex-col bg-background">
-      <div className="border-b px-6 py-4">
-        <div className="flex items-start justify-between gap-4">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
+      <div className="border-b px-4 py-4 sm:px-6">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
           <div>
             <div className="flex items-center gap-2">
               <MessageSquare className="h-5 w-5 text-primary" />
@@ -334,10 +383,11 @@ export default function ChatPage() {
             </p>
           </div>
 
-          <div className="flex shrink-0 flex-col items-stretch gap-3 sm:items-end">
+          <div className="flex w-full shrink-0 flex-col items-stretch gap-3 sm:w-auto sm:items-end">
             <Button
               variant="outline"
               size="sm"
+              className="w-full sm:w-auto"
               onClick={() => setHelpOpen((current) => !current)}
             >
               <BookOpenText className="mr-2 h-4 w-4" />
@@ -348,6 +398,7 @@ export default function ChatPage() {
               <Button
                 variant="outline"
                 size="sm"
+                className="w-full sm:w-auto"
                 onClick={() =>
                   createChat.mutate({
                     title: "Новый чат",
@@ -391,16 +442,16 @@ export default function ChatPage() {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto">
+      <div data-testid="chat-messages-scroll" className="min-h-0 flex-1 overflow-y-auto">
         {isBootstrappingChat ? (
-          <div className="flex h-full items-center justify-center px-6">
+          <div className="flex h-full items-center justify-center px-4 sm:px-6">
             <div className="flex items-center gap-3 rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">
               <Bot className="h-4 w-4" />
               Загружаем список чатов и активный диалог...
             </div>
           </div>
         ) : isLoadingMessages ? (
-          <div className="flex h-full items-center justify-center px-6">
+          <div className="flex h-full items-center justify-center px-4 sm:px-6">
             <div className="rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">
               Загружаем сообщения...
             </div>
@@ -408,7 +459,7 @@ export default function ChatPage() {
         ) : messages.length === 0 ? (
           <ChatEmpty />
         ) : (
-          <div className="mx-auto flex w-full max-w-4xl flex-col py-4">
+          <div className="mx-auto flex w-full max-w-4xl flex-col px-3 py-4 sm:px-4">
             {messages.map((message, index) => (
               <ChatMessage
                 key={`${message.created_at}-${message.role}-${index}`}
@@ -422,28 +473,35 @@ export default function ChatPage() {
         )}
       </div>
 
-      {messages.length === 0 && isChatBusy && (
-        <div className="px-6 pb-2">
-          <ChatThinking />
-        </div>
-      )}
+      <div
+        data-testid="chat-composer-shell"
+        className="sticky bottom-0 z-20 shrink-0 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/85"
+      >
+        {messages.length === 0 && isChatBusy && (
+          <div className="px-4 pb-2 pt-3 sm:px-6">
+            <ChatThinking />
+          </div>
+        )}
 
-      <ChatControlsBar
-        chatTitle={activeSession?.title ?? "новый чат"}
-        responseStyle={activeResponseStyle}
-        detailLevel={activeDetailLevel}
-        disabled={!activeSessionId}
-        saving={activeSessionSettingsSaving}
-        onResponseStyleChange={handleResponseStyleChange}
-        onDetailLevelChange={handleDetailLevelChange}
-      />
+        <ChatControlsBar
+          chatTitle={activeSession?.title ?? "новый чат"}
+          responseStyle={activeResponseStyle}
+          detailLevel={activeDetailLevel}
+          disabled={false}
+          saving={activeSessionSettingsSaving}
+          collapsed={settingsCollapsed}
+          onToggleCollapsed={() => setSettingsCollapsed((current) => !current)}
+          onResponseStyleChange={handleResponseStyleChange}
+          onDetailLevelChange={handleDetailLevelChange}
+        />
 
-      <ChatInput
-        onSend={handleSend}
-        disabled={isChatBusy}
-        responseStyle={activeResponseStyle}
-        detailLevel={activeDetailLevel}
-      />
+        <ChatInput
+          onSend={handleSend}
+          disabled={isChatBusy}
+          responseStyle={activeResponseStyle}
+          detailLevel={activeDetailLevel}
+        />
+      </div>
     </div>
   );
 }

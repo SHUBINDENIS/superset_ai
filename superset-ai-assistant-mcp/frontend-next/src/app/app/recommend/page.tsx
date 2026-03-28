@@ -123,9 +123,9 @@ export default function RecommendPage() {
   const result = recommendation;
 
   return (
-    <div className="h-full overflow-y-auto px-6 py-6">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-        <div className="flex items-start justify-between gap-4">
+    <div className="h-full overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 sm:gap-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-primary" />
@@ -137,7 +137,7 @@ export default function RecommendPage() {
               перебора.
             </p>
           </div>
-          <Button asChild variant="outline" size="sm">
+          <Button asChild variant="outline" size="sm" className="w-full sm:w-auto">
             <Link href="/app/share">Перейти к созданию виджета</Link>
           </Button>
         </div>

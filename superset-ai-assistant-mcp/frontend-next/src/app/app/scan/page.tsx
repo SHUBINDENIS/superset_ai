@@ -1,6 +1,4 @@
 "use client";
-
-import Link from "next/link";
 import { useMemo, useState } from "react";
 import { Loader2, ScanSearch } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -80,9 +78,9 @@ export default function ScanPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto px-6 py-6">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
-        <div className="flex items-start justify-between gap-4">
+    <div className="h-full overflow-y-auto px-4 py-4 sm:px-6 sm:py-6">
+      <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 sm:gap-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <div className="flex items-center gap-2">
               <ScanSearch className="h-5 w-5 text-primary" />
@@ -93,14 +91,6 @@ export default function ScanPage() {
               схемы и таблицы доступны. Если источник уже понятен, этот шаг
               можно пропустить и перейти в чат или в предпросмотр.
             </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button asChild variant="outline" size="sm">
-              <Link href="/app/chat">В чат</Link>
-            </Button>
-            <Button asChild variant="outline" size="sm">
-              <Link href="/app/preview">В предпросмотр</Link>
-            </Button>
           </div>
         </div>
 

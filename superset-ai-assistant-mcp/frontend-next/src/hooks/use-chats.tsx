@@ -226,7 +226,7 @@ export function useCreateChat() {
         type: "chat_created",
         sessionId: created.session_id,
       });
-      qc.invalidateQueries({ queryKey: CHATS_KEY });
+      qc.invalidateQueries({ queryKey: CHATS_KEY, exact: true });
     },
   });
 }
@@ -263,7 +263,7 @@ export function useRenameChat() {
         type: "chat_renamed",
         sessionId: variables.sessionId,
       });
-      qc.invalidateQueries({ queryKey: CHATS_KEY });
+      qc.invalidateQueries({ queryKey: CHATS_KEY, exact: true });
     },
   });
 }
@@ -300,7 +300,7 @@ export function useActivateChat() {
         type: "chat_activated",
         sessionId: session.session_id,
       });
-      qc.invalidateQueries({ queryKey: CHATS_KEY });
+      qc.invalidateQueries({ queryKey: CHATS_KEY, exact: true });
     },
   });
 }
@@ -330,7 +330,7 @@ export function useClearMessages() {
         type: "chat_cleared",
         sessionId: variables.sessionId,
       });
-      qc.invalidateQueries({ queryKey: CHATS_KEY });
+      qc.invalidateQueries({ queryKey: CHATS_KEY, exact: true });
     },
   });
 }
@@ -387,7 +387,7 @@ export function useDeleteChat() {
         type: "chat_deleted",
         sessionId: variables.sessionId,
       });
-      qc.invalidateQueries({ queryKey: CHATS_KEY });
+      qc.invalidateQueries({ queryKey: CHATS_KEY, exact: true });
       qc.invalidateQueries({ queryKey: AUTH_KEY });
     },
     onError: (error, variables) => {
@@ -550,7 +550,7 @@ export function useSendMessage() {
       if (!error) {
         qc.invalidateQueries({ queryKey: messagesKey(variables.sessionId) });
       }
-      qc.invalidateQueries({ queryKey: CHATS_KEY });
+      qc.invalidateQueries({ queryKey: CHATS_KEY, exact: true });
     },
   });
 }
@@ -618,7 +618,7 @@ export function useUpdateChatSettings() {
       }
     },
     onSettled: () => {
-      qc.invalidateQueries({ queryKey: CHATS_KEY });
+      qc.invalidateQueries({ queryKey: CHATS_KEY, exact: true });
     },
   });
 }
