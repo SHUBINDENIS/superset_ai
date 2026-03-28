@@ -74,13 +74,13 @@ Release highlights in the current branch:
 
 Key docs:
 
-- [User Guide](/home/superset_ai/docs/user-guide.md)
-- [Developer Guide](/home/superset_ai/docs/developer-guide.md)
-- [Architecture](/home/superset_ai/docs/architecture.md)
-- [Release Notes](/home/superset_ai/docs/release-notes.md)
-- [Deployment](/home/superset_ai/docs/deployment.md)
-- [Update And Debug](/home/superset_ai/docs/update-and-debug.md)
-- [Manual Smoke Checklist](/home/superset_ai/docs/manual-smoke-checklist.md)
+- [User Guide](docs/user-guide.md)
+- [Developer Guide](docs/developer-guide.md)
+- [Architecture](docs/architecture.md)
+- [Release Notes](docs/release-notes.md)
+- [Deployment](docs/deployment.md)
+- [Update And Debug](docs/update-and-debug.md)
+- [Manual Smoke Checklist](docs/manual-smoke-checklist.md)
 
 ## Quick Start
 
@@ -143,8 +143,8 @@ Baseline runtime assumptions used in CI and docs:
 
 Primary environment files:
 
-- root dev stack: [`.env.dev.example`](/home/superset_ai/.env.dev.example)
-- assistant service env: [`superset-ai-assistant-mcp/.env.example`](/home/superset_ai/superset-ai-assistant-mcp/.env.example)
+- root dev stack: [`.env.dev.example`](.env.dev.example)
+- assistant service env: [`superset-ai-assistant-mcp/.env.example`](superset-ai-assistant-mcp/.env.example)
 
 Most important variables:
 
@@ -166,9 +166,9 @@ Runtime config validation runs on API startup and in deploy helpers.
 
 Primary service entrypoints:
 
-- FastAPI container/start script: [`start_fastapi_stack.sh`](/home/superset_ai/superset-ai-assistant-mcp/start_fastapi_stack.sh)
-- Next.js proxy route: [`route.ts`](/home/superset_ai/superset-ai-assistant-mcp/frontend-next/src/app/api/[...path]/route.ts)
-- FastAPI app: [`api/main.py`](/home/superset_ai/superset-ai-assistant-mcp/api/main.py)
+- FastAPI container/start script: [`start_fastapi_stack.sh`](superset-ai-assistant-mcp/start_fastapi_stack.sh)
+- Next.js proxy route: [`route.ts`](superset-ai-assistant-mcp/frontend-next/src/app/api/[...path]/route.ts)
+- FastAPI app: [`api/main.py`](superset-ai-assistant-mcp/api/main.py)
 
 Production-like publication model:
 
@@ -178,7 +178,7 @@ Production-like publication model:
 
 Proxy reference:
 
-- [nginx-primary-ui.conf.example](/home/superset_ai/docs/examples/nginx-primary-ui.conf.example)
+- [nginx-primary-ui.conf.example](docs/examples/nginx-primary-ui.conf.example)
 
 ## Testing
 
@@ -248,19 +248,19 @@ Pagila flows are unavailable:
 
 Start here depending on your role:
 
-- product usage: [docs/user-guide.md](/home/superset_ai/docs/user-guide.md)
-- codebase and local dev: [docs/developer-guide.md](/home/superset_ai/docs/developer-guide.md)
-- system design and flows: [docs/architecture.md](/home/superset_ai/docs/architecture.md)
-- rollout and day-2 ops: [docs/deployment.md](/home/superset_ai/docs/deployment.md)
-- update/debug runbook: [docs/update-and-debug.md](/home/superset_ai/docs/update-and-debug.md)
-- current release summary: [docs/release-notes.md](/home/superset_ai/docs/release-notes.md)
+- product usage: [docs/user-guide.md](docs/user-guide.md)
+- codebase and local dev: [docs/developer-guide.md](docs/developer-guide.md)
+- system design and flows: [docs/architecture.md](docs/architecture.md)
+- rollout and day-2 ops: [docs/deployment.md](docs/deployment.md)
+- update/debug runbook: [docs/update-and-debug.md](docs/update-and-debug.md)
+- current release summary: [docs/release-notes.md](docs/release-notes.md)
 
 ## Historical Migration Material
 
 Migration evidence and parity artifacts remain in:
 
-- [`docs/mcp-migration/`](/home/superset_ai/docs/mcp-migration)
-- [`docs/streamlit-retirement-summary.md`](/home/superset_ai/docs/streamlit-retirement-summary.md)
+- [`docs/mcp-migration/`](docs/mcp-migration)
+- [`docs/streamlit-retirement-summary.md`](docs/streamlit-retirement-summary.md)
 
 These are historical/supporting documents, not the primary runbooks for the
 current product.

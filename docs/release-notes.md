@@ -92,10 +92,10 @@ Before merge:
 
 After merge:
 
-- use [manual-smoke-checklist.md](/home/superset_ai/docs/manual-smoke-checklist.md)
+- use [manual-smoke-checklist.md](manual-smoke-checklist.md)
   for smoke verification;
-- use [deployment.md](/home/superset_ai/docs/deployment.md) and
-  [production-rollout-runbook.md](/home/superset_ai/docs/production-rollout-runbook.md)
+- use [deployment.md](deployment.md) and
+  [production-rollout-runbook.md](production-rollout-runbook.md)
   for rollout;
-- use [update-and-debug.md](/home/superset_ai/docs/update-and-debug.md) for
+- use [update-and-debug.md](update-and-debug.md) for
   day-2 operations.

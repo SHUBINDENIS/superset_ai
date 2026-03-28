@@ -26,8 +26,8 @@ Not supported as runtime:
 
 Relevant historical references:
 
-- [streamlit-retirement-summary.md](/home/superset_ai/docs/streamlit-retirement-summary.md)
-- [mcp-migration/](/home/superset_ai/docs/mcp-migration)
+- [streamlit-retirement-summary.md](streamlit-retirement-summary.md)
+- [mcp-migration/](mcp-migration)
 
 ## Repository Structure
 
@@ -56,56 +56,56 @@ Relevant historical references:
 
 Core files:
 
-- [`src/app/app/layout.tsx`](/home/superset_ai/superset-ai-assistant-mcp/frontend-next/src/app/app/layout.tsx)
-- [`src/app/app/chat/page.tsx`](/home/superset_ai/superset-ai-assistant-mcp/frontend-next/src/app/app/chat/page.tsx)
-- [`src/app/app/preview/page.tsx`](/home/superset_ai/superset-ai-assistant-mcp/frontend-next/src/app/app/preview/page.tsx)
-- [`src/app/app/recommend/page.tsx`](/home/superset_ai/superset-ai-assistant-mcp/frontend-next/src/app/app/recommend/page.tsx)
-- [`src/app/app/share/page.tsx`](/home/superset_ai/superset-ai-assistant-mcp/frontend-next/src/app/app/share/page.tsx)
-- [`src/app/app/scan/page.tsx`](/home/superset_ai/superset-ai-assistant-mcp/frontend-next/src/app/app/scan/page.tsx)
-- [`src/hooks/use-auth.ts`](/home/superset_ai/superset-ai-assistant-mcp/frontend-next/src/hooks/use-auth.ts)
-- [`src/hooks/use-chats.tsx`](/home/superset_ai/superset-ai-assistant-mcp/frontend-next/src/hooks/use-chats.tsx)
-- [`src/hooks/use-viz.tsx`](/home/superset_ai/superset-ai-assistant-mcp/frontend-next/src/hooks/use-viz.tsx)
+- [`src/app/app/layout.tsx`](../superset-ai-assistant-mcp/frontend-next/src/app/app/layout.tsx)
+- [`src/app/app/chat/page.tsx`](../superset-ai-assistant-mcp/frontend-next/src/app/app/chat/page.tsx)
+- [`src/app/app/preview/page.tsx`](../superset-ai-assistant-mcp/frontend-next/src/app/app/preview/page.tsx)
+- [`src/app/app/recommend/page.tsx`](../superset-ai-assistant-mcp/frontend-next/src/app/app/recommend/page.tsx)
+- [`src/app/app/share/page.tsx`](../superset-ai-assistant-mcp/frontend-next/src/app/app/share/page.tsx)
+- [`src/app/app/scan/page.tsx`](../superset-ai-assistant-mcp/frontend-next/src/app/app/scan/page.tsx)
+- [`src/hooks/use-auth.ts`](../superset-ai-assistant-mcp/frontend-next/src/hooks/use-auth.ts)
+- [`src/hooks/use-chats.tsx`](../superset-ai-assistant-mcp/frontend-next/src/hooks/use-chats.tsx)
+- [`src/hooks/use-viz.tsx`](../superset-ai-assistant-mcp/frontend-next/src/hooks/use-viz.tsx)
 
 ### API
 
 Core files:
 
-- [`api/main.py`](/home/superset_ai/superset-ai-assistant-mcp/api/main.py)
-- [`api/deps.py`](/home/superset_ai/superset-ai-assistant-mcp/api/deps.py)
-- [`api/runtime_config.py`](/home/superset_ai/superset-ai-assistant-mcp/api/runtime_config.py)
-- [`api/schemas.py`](/home/superset_ai/superset-ai-assistant-mcp/api/schemas.py)
-- [`api/routers/auth.py`](/home/superset_ai/superset-ai-assistant-mcp/api/routers/auth.py)
-- [`api/routers/chats.py`](/home/superset_ai/superset-ai-assistant-mcp/api/routers/chats.py)
-- [`api/routers/viz.py`](/home/superset_ai/superset-ai-assistant-mcp/api/routers/viz.py)
-- [`api/routers/scan.py`](/home/superset_ai/superset-ai-assistant-mcp/api/routers/scan.py)
-- [`api/routers/health.py`](/home/superset_ai/superset-ai-assistant-mcp/api/routers/health.py)
+- [`api/main.py`](../superset-ai-assistant-mcp/api/main.py)
+- [`api/deps.py`](../superset-ai-assistant-mcp/api/deps.py)
+- [`api/runtime_config.py`](../superset-ai-assistant-mcp/api/runtime_config.py)
+- [`api/schemas.py`](../superset-ai-assistant-mcp/api/schemas.py)
+- [`api/routers/auth.py`](../superset-ai-assistant-mcp/api/routers/auth.py)
+- [`api/routers/chats.py`](../superset-ai-assistant-mcp/api/routers/chats.py)
+- [`api/routers/viz.py`](../superset-ai-assistant-mcp/api/routers/viz.py)
+- [`api/routers/scan.py`](../superset-ai-assistant-mcp/api/routers/scan.py)
+- [`api/routers/health.py`](../superset-ai-assistant-mcp/api/routers/health.py)
 
 ### Backend services
 
 Core files:
 
-- [`backend/ai_agent.py`](/home/superset_ai/superset-ai-assistant-mcp/backend/ai_agent.py)
-- [`backend/auth_service.py`](/home/superset_ai/superset-ai-assistant-mcp/backend/auth_service.py)
-- [`backend/us13_15_viz_service.py`](/home/superset_ai/superset-ai-assistant-mcp/backend/us13_15_viz_service.py)
-- [`backend/us1_schema_profiler.py`](/home/superset_ai/superset-ai-assistant-mcp/backend/us1_schema_profiler.py)
-- [`backend/observability.py`](/home/superset_ai/superset-ai-assistant-mcp/backend/observability.py)
-- [`backend/openai_safe_adapter.py`](/home/superset_ai/superset-ai-assistant-mcp/backend/openai_safe_adapter.py)
+- [`backend/ai_agent.py`](../superset-ai-assistant-mcp/backend/ai_agent.py)
+- [`backend/auth_service.py`](../superset-ai-assistant-mcp/backend/auth_service.py)
+- [`backend/us13_15_viz_service.py`](../superset-ai-assistant-mcp/backend/us13_15_viz_service.py)
+- [`backend/us1_schema_profiler.py`](../superset-ai-assistant-mcp/backend/us1_schema_profiler.py)
+- [`backend/observability.py`](../superset-ai-assistant-mcp/backend/observability.py)
+- [`backend/openai_safe_adapter.py`](../superset-ai-assistant-mcp/backend/openai_safe_adapter.py)
 
 ### MCP client layer
 
 Core files:
 
-- [`backend/mcp_client/runtime.py`](/home/superset_ai/superset-ai-assistant-mcp/backend/mcp_client/runtime.py)
-- [`backend/mcp_client/built_in_client.py`](/home/superset_ai/superset-ai-assistant-mcp/backend/mcp_client/built_in_client.py)
-- [`backend/mcp_client/legacy_compat_adapter.py`](/home/superset_ai/superset-ai-assistant-mcp/backend/mcp_client/legacy_compat_adapter.py)
-- [`backend/mcp_client/tool_registry.py`](/home/superset_ai/superset-ai-assistant-mcp/backend/mcp_client/tool_registry.py)
-- [`backend/mcp_client/errors.py`](/home/superset_ai/superset-ai-assistant-mcp/backend/mcp_client/errors.py)
+- [`backend/mcp_client/runtime.py`](../superset-ai-assistant-mcp/backend/mcp_client/runtime.py)
+- [`backend/mcp_client/built_in_client.py`](../superset-ai-assistant-mcp/backend/mcp_client/built_in_client.py)
+- [`backend/mcp_client/legacy_compat_adapter.py`](../superset-ai-assistant-mcp/backend/mcp_client/legacy_compat_adapter.py)
+- [`backend/mcp_client/tool_registry.py`](../superset-ai-assistant-mcp/backend/mcp_client/tool_registry.py)
+- [`backend/mcp_client/errors.py`](../superset-ai-assistant-mcp/backend/mcp_client/errors.py)
 
 ### Superset built-in MCP
 
 Core repo area:
 
-- [`superset/superset/mcp_service/`](/home/superset_ai/superset/superset/mcp_service)
+- [`superset/superset/mcp_service/`](../superset/superset/mcp_service)
 
 Relevant extension tools added for product parity:
 
@@ -174,7 +174,7 @@ This state is persisted in `sessionStorage` under
 
 There are two frontend API paths:
 
-1. same-origin proxy through [`src/app/api/[...path]/route.ts`](/home/superset_ai/superset-ai-assistant-mcp/frontend-next/src/app/api/[...path]/route.ts)
+1. same-origin proxy through [`src/app/api/[...path]/route.ts`](../superset-ai-assistant-mcp/frontend-next/src/app/api/[...path]/route.ts)
 2. optional direct browser-to-FastAPI calls through `NEXT_PUBLIC_BROWSER_API_URL`
 
 Why both exist:
@@ -411,11 +411,11 @@ Supported product runtimes:
 ### Tool inventory
 
 Product-required direct built-in tools are defined in
-[`tool_registry.py`](/home/superset_ai/superset-ai-assistant-mcp/backend/mcp_client/tool_registry.py)
+[`tool_registry.py`](../superset-ai-assistant-mcp/backend/mcp_client/tool_registry.py)
 and enforced by:
 
-- [`mcp_tool_inventory.yaml`](/home/superset_ai/superset-ai-assistant-mcp/tests/fixtures/mcp_tool_inventory.yaml)
-- [`test_tool_inventory.py`](/home/superset_ai/superset-ai-assistant-mcp/tests/unit/mcp_client/test_tool_inventory.py)
+- [`mcp_tool_inventory.yaml`](../superset-ai-assistant-mcp/tests/fixtures/mcp_tool_inventory.yaml)
+- [`test_tool_inventory.py`](../superset-ai-assistant-mcp/tests/unit/mcp_client/test_tool_inventory.py)
 
 ### Legacy compatibility
 
@@ -462,11 +462,11 @@ npm run dev -- --hostname 0.0.0.0 --port 3001
 
 ### Main operator/developer helpers
 
-- [`deploy-primary-stack.sh`](/home/superset_ai/docker/dev/deploy-primary-stack.sh)
-- [`refresh-primary-stack.sh`](/home/superset_ai/docker/dev/refresh-primary-stack.sh)
-- [`check-primary-stack.sh`](/home/superset_ai/docker/dev/check-primary-stack.sh)
-- [`validate-primary-env.sh`](/home/superset_ai/docker/dev/validate-primary-env.sh)
-- [`tail-primary-logs.sh`](/home/superset_ai/docker/dev/tail-primary-logs.sh)
+- [`deploy-primary-stack.sh`](../docker/dev/deploy-primary-stack.sh)
+- [`refresh-primary-stack.sh`](../docker/dev/refresh-primary-stack.sh)
+- [`check-primary-stack.sh`](../docker/dev/check-primary-stack.sh)
+- [`validate-primary-env.sh`](../docker/dev/validate-primary-env.sh)
+- [`tail-primary-logs.sh`](../docker/dev/tail-primary-logs.sh)
 
 ## Important Environment Variables
 
@@ -491,14 +491,14 @@ npm run dev -- --hostname 0.0.0.0 --port 3001
 
 ### High-signal assistant tests
 
-- [`test_api_auth.py`](/home/superset_ai/superset-ai-assistant-mcp/tests/test_api_auth.py)
-- [`test_api_chats.py`](/home/superset_ai/superset-ai-assistant-mcp/tests/test_api_chats.py)
-- [`test_api_viz.py`](/home/superset_ai/superset-ai-assistant-mcp/tests/test_api_viz.py)
-- [`test_api_scan.py`](/home/superset_ai/superset-ai-assistant-mcp/tests/test_api_scan.py)
-- [`test_ai_agent_clarifications.py`](/home/superset_ai/superset-ai-assistant-mcp/tests/test_ai_agent_clarifications.py)
-- [`test_us13_15_viz_service.py`](/home/superset_ai/superset-ai-assistant-mcp/tests/test_us13_15_viz_service.py)
-- [`tests/unit/mcp_client/`](/home/superset_ai/superset-ai-assistant-mcp/tests/unit/mcp_client)
-- [`tests/integration/mcp_client/test_built_in_live.py`](/home/superset_ai/superset-ai-assistant-mcp/tests/integration/mcp_client/test_built_in_live.py)
+- [`test_api_auth.py`](../superset-ai-assistant-mcp/tests/test_api_auth.py)
+- [`test_api_chats.py`](../superset-ai-assistant-mcp/tests/test_api_chats.py)
+- [`test_api_viz.py`](../superset-ai-assistant-mcp/tests/test_api_viz.py)
+- [`test_api_scan.py`](../superset-ai-assistant-mcp/tests/test_api_scan.py)
+- [`test_ai_agent_clarifications.py`](../superset-ai-assistant-mcp/tests/test_ai_agent_clarifications.py)
+- [`test_us13_15_viz_service.py`](../superset-ai-assistant-mcp/tests/test_us13_15_viz_service.py)
+- [`tests/unit/mcp_client/`](../superset-ai-assistant-mcp/tests/unit/mcp_client)
+- [`tests/integration/mcp_client/test_built_in_live.py`](../superset-ai-assistant-mcp/tests/integration/mcp_client/test_built_in_live.py)
 
 ### Common commands
 
@@ -538,7 +538,7 @@ npm run build
 
 ### CI coverage
 
-The main workflow at [`.github/workflows/ci.yml`](/home/superset_ai/.github/workflows/ci.yml)
+The main workflow at [`.github/workflows/ci.yml`](../.github/workflows/ci.yml)
 currently runs:
 
 - `lint`
@@ -563,26 +563,26 @@ currently runs:
 
 - inspect `AUTH_JWT_SECRET`;
 - inspect `AUTH_DB_PATH`;
-- run [`test_api_auth.py`](/home/superset_ai/superset-ai-assistant-mcp/tests/test_api_auth.py).
+- run [`test_api_auth.py`](../superset-ai-assistant-mcp/tests/test_api_auth.py).
 
 ### If chat is failing
 
 - inspect `assistant-api` logs;
 - confirm OpenAI and MCP config;
-- run [`test_api_chats.py`](/home/superset_ai/superset-ai-assistant-mcp/tests/test_api_chats.py);
-- run [`test_ai_agent_clarifications.py`](/home/superset_ai/superset-ai-assistant-mcp/tests/test_ai_agent_clarifications.py).
+- run [`test_api_chats.py`](../superset-ai-assistant-mcp/tests/test_api_chats.py);
+- run [`test_ai_agent_clarifications.py`](../superset-ai-assistant-mcp/tests/test_ai_agent_clarifications.py).
 
 ### If preview/recommend/share is failing
 
 - confirm dataset/database listing works;
 - confirm `SUPERSET_PUBLIC_URL` is correct;
-- run [`test_api_viz.py`](/home/superset_ai/superset-ai-assistant-mcp/tests/test_api_viz.py);
-- run [`test_us13_15_viz_service.py`](/home/superset_ai/superset-ai-assistant-mcp/tests/test_us13_15_viz_service.py).
+- run [`test_api_viz.py`](../superset-ai-assistant-mcp/tests/test_api_viz.py);
+- run [`test_us13_15_viz_service.py`](../superset-ai-assistant-mcp/tests/test_us13_15_viz_service.py).
 
 ### If scan is failing
 
 - confirm Superset and MCP are healthy;
-- rerun [`test_api_scan.py`](/home/superset_ai/superset-ai-assistant-mcp/tests/test_api_scan.py);
+- rerun [`test_api_scan.py`](../superset-ai-assistant-mcp/tests/test_api_scan.py);
 - inspect the scan report path returned by the endpoint.
 
 ### If links are wrong
@@ -595,7 +595,7 @@ currently runs:
 
 Structured assistant logs are described in:
 
-- [update-and-debug.md](/home/superset_ai/docs/update-and-debug.md)
+- [update-and-debug.md](update-and-debug.md)
 
 ## Known Debts And Caveats
 

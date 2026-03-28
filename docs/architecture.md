@@ -271,10 +271,10 @@ This is the new source of truth for tool execution in the released product.
 
 ### Main operational docs
 
-- [deployment.md](/home/superset_ai/docs/deployment.md)
-- [production-rollout-runbook.md](/home/superset_ai/docs/production-rollout-runbook.md)
-- [update-and-debug.md](/home/superset_ai/docs/update-and-debug.md)
-- [manual-smoke-checklist.md](/home/superset_ai/docs/manual-smoke-checklist.md)
+- [deployment.md](deployment.md)
+- [production-rollout-runbook.md](production-rollout-runbook.md)
+- [update-and-debug.md](update-and-debug.md)
+- [manual-smoke-checklist.md](manual-smoke-checklist.md)
 
 ## What This Version Implements
 

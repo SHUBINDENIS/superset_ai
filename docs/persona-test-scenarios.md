@@ -5,9 +5,9 @@
 пользовательские цели, а не только smoke-pass/fail.
 
 Этот документ дополняет:
-- [manual-smoke-checklist.md](/home/superset_ai/docs/manual-smoke-checklist.md)
-- [demo-query-pack.md](/home/superset_ai/docs/demo-query-pack.md)
-- [demo-pagila.md](/home/superset_ai/docs/demo-pagila.md)
+- [manual-smoke-checklist.md](manual-smoke-checklist.md)
+- [demo-query-pack.md](demo-query-pack.md)
+- [demo-pagila.md](demo-pagila.md)
 
 ## 1. Executive Summary
 
@@ -616,12 +616,12 @@ selector. If the selector is absent, record the mode test as `N/A`.
 ## 7. Manual Usage Instructions
 
 Use this pack in the following order:
-1. Start with [manual-smoke-checklist.md](/home/superset_ai/docs/manual-smoke-checklist.md) to confirm the stack is up.
+1. Start with [manual-smoke-checklist.md](manual-smoke-checklist.md) to confirm the stack is up.
 2. Use this document to choose persona-specific scenarios.
-3. Use [demo-query-pack.md](/home/superset_ai/docs/demo-query-pack.md) as a quick prompt bank during the run.
-4. Use [feedback-capture-template.md](/home/superset_ai/docs/feedback-capture-template.md) after each scenario.
+3. Use [demo-query-pack.md](demo-query-pack.md) as a quick prompt bank during the run.
+4. Use [feedback-capture-template.md](feedback-capture-template.md) after each scenario.
 5. If you are preparing a live walkthrough, run
-   [demo-defence-script.md](/home/superset_ai/docs/demo-defence-script.md) last.
+   [demo-defence-script.md](demo-defence-script.md) last.
 
 When running manually:
 - stay on Pagila-compatible prompts first;
