@@ -1,10 +1,14 @@
 "use client";
 
-import { Menu } from "lucide-react";
+import { BookOpenText, Menu } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/hooks/use-auth";
 import { AppSidebar } from "@/components/app-sidebar";
+import {
+  AppShellStateProvider,
+  useAppShellState,
+} from "@/components/app-shell-state";
 import { ChatUIProvider } from "@/hooks/use-chats";
 import { VizFlowProvider } from "@/hooks/use-viz";
 import { createTraceContext, logFrontendEvent, routeToWindow } from "@/lib/observability";
@@ -27,13 +31,23 @@ function getPageTitle(pathname: string) {
  * Redirects to /login when the auth cookie is missing or expired.
  */
 export default function AppLayout({ children }: { children: ReactNode }) {
+  return (
+    <AppShellStateProvider>
+      <AppLayoutInner>{children}</AppLayoutInner>
+    </AppShellStateProvider>
+  );
+}
+
+function AppLayoutInner({ children }: { children: ReactNode }) {
   const { user, isAuthenticated, isLoading } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const { mobileChatHelperHidden, toggleMobileChatHelper } = useAppShellState();
   const previousPathRef = useRef("");
   const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const pageTitle = useMemo(() => getPageTitle(pathname), [pathname]);
+  const isChatRoute = pathname.startsWith("/app/chat");
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
@@ -131,6 +145,23 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                 <p className="text-sm font-semibold tracking-tight">Superset AI</p>
                 <p className="truncate text-xs text-muted-foreground">{pageTitle}</p>
               </div>
+              {isChatRoute && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  data-testid="mobile-chat-helper-toggle"
+                  className="ml-auto shrink-0 gap-1.5"
+                  onClick={toggleMobileChatHelper}
+                  aria-label={
+                    mobileChatHelperHidden
+                      ? "Показать подсказки чата"
+                      : "Скрыть подсказки чата"
+                  }
+                >
+                  <BookOpenText className="h-4 w-4" />
+                  {mobileChatHelperHidden ? "Показать" : "Скрыть"}
+                </Button>
+              )}
             </header>
             <main className="min-h-0 min-w-0 flex-1 overflow-hidden">{children}</main>
           </div>

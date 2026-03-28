@@ -9,6 +9,7 @@ import { ChatEmpty } from "@/components/chat-empty";
 import { ChatHelpDrawer } from "@/components/chat-help-drawer";
 import { ChatInput } from "@/components/chat-input";
 import { ChatMessage, ChatThinking } from "@/components/chat-message";
+import { useAppShellState } from "@/components/app-shell-state";
 import { useAuth } from "@/hooks/use-auth";
 import { subscribeChatSyncEvents } from "@/lib/chat-sync";
 import { createTraceContext, extendTraceContext, logFrontendEvent } from "@/lib/observability";
@@ -37,6 +38,7 @@ function settingsEqual(left: ChatSettings, right: ChatSettings) {
 export default function ChatPage() {
   const settingsCollapseStorageKey = "superset-ai:chat-settings-collapsed";
   const { user } = useAuth();
+  const { isMobileViewport, mobileChatHelperHidden } = useAppShellState();
   const queryClient = useQueryClient();
   const {
     activeSessionId,
@@ -86,6 +88,7 @@ export default function ChatPage() {
   const otherPendingCount = Object.entries(pendingBySessionId).filter(
     ([sessionId, count]) => sessionId !== activeSessionId && count > 0,
   ).length;
+  const helperAreaHidden = isMobileViewport && mobileChatHelperHidden;
 
   useEffect(() => {
     if (!hasLoadedSessions) {
@@ -368,79 +371,83 @@ export default function ChatPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
-      <div className="border-b px-4 py-4 sm:px-6">
-        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <MessageSquare className="h-5 w-5 text-primary" />
-              <h1 className="text-lg font-semibold">
-                {activeSession?.title ?? "Чат"}
-              </h1>
+      {!helperAreaHidden && (
+        <div data-testid="chat-helper-area" className="border-b px-4 py-4 sm:px-6">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <MessageSquare className="h-5 w-5 text-primary" />
+                <h1 className="text-lg font-semibold">
+                  {activeSession?.title ?? "Чат"}
+                </h1>
+              </div>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Задавайте бизнес-вопрос напрямую. Если сначала нужно увидеть строки,
+                поля и структуру данных, откройте справку и перейдите в предпросмотр.
+              </p>
             </div>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Задавайте бизнес-вопрос напрямую. Если сначала нужно увидеть строки,
-              поля и структуру данных, откройте справку и перейдите в предпросмотр.
-            </p>
-          </div>
 
-          <div className="flex w-full shrink-0 flex-col items-stretch gap-3 sm:w-auto sm:items-end">
-            <Button
-              variant="outline"
-              size="sm"
-              className="w-full sm:w-auto"
-              onClick={() => setHelpOpen((current) => !current)}
-            >
-              <BookOpenText className="mr-2 h-4 w-4" />
-              {helpOpen ? "Скрыть подсказки" : "Как начать"}
-            </Button>
-
-            {!sessions.length && (
+            <div className="flex w-full shrink-0 flex-col items-stretch gap-3 sm:w-auto sm:items-end">
               <Button
                 variant="outline"
                 size="sm"
                 className="w-full sm:w-auto"
-                onClick={() =>
-                  createChat.mutate({
-                    title: "Новый чат",
-                    source: "chat_page_empty_state",
-                    traceContext: createTraceContext({
-                      sessionId: activeSessionId || user?.session_id || undefined,
-                      chatId: activeSessionId || undefined,
-                      route: "/app/chat",
-                    }),
-                  })
-                }
-                disabled={createChat.isPending}
+                onClick={() => setHelpOpen((current) => !current)}
               >
-                <Plus className="mr-2 h-4 w-4" />
-                Новый чат
+                <BookOpenText className="mr-2 h-4 w-4" />
+                {helpOpen ? "Скрыть подсказки" : "Как начать"}
               </Button>
+
+              {!sessions.length && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full sm:w-auto"
+                  onClick={() =>
+                    createChat.mutate({
+                      title: "Новый чат",
+                      source: "chat_page_empty_state",
+                      traceContext: createTraceContext({
+                        sessionId: activeSessionId || user?.session_id || undefined,
+                        chatId: activeSessionId || undefined,
+                        route: "/app/chat",
+                      }),
+                    })
+                  }
+                  disabled={createChat.isPending}
+                >
+                  <Plus className="mr-2 h-4 w-4" />
+                  Новый чат
+                </Button>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-3 space-y-3">
+            {helpOpen && (
+              <ChatHelpDrawer open={helpOpen} onClose={() => setHelpOpen(false)} />
             )}
+
+            {otherPendingCount > 0 && (
+              <div className="rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">
+                В других чатах сейчас выполняется {otherPendingCount === 1 ? "1 запрос" : `${otherPendingCount} запроса`}.
+                Вы можете продолжить работу в текущем чате независимо от них.
+              </div>
+            )}
+
+            <div className="rounded-lg border bg-card p-3">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 text-primary" />
+                <p className="text-sm font-medium">Безопасный режим</p>
+              </div>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Разрешены бизнес-вопросы и read-only аналитика. Опасные,
+                off-topic и policy-blocked запросы будут явно помечены в чате.
+              </p>
+            </div>
           </div>
         </div>
-
-        <div className="mt-3 space-y-3">
-          {helpOpen && <ChatHelpDrawer open={helpOpen} onClose={() => setHelpOpen(false)} />}
-
-          {otherPendingCount > 0 && (
-            <div className="rounded-lg border bg-card px-4 py-3 text-sm text-muted-foreground">
-              В других чатах сейчас выполняется {otherPendingCount === 1 ? "1 запрос" : `${otherPendingCount} запроса`}.
-              Вы можете продолжить работу в текущем чате независимо от них.
-            </div>
-          )}
-
-          <div className="rounded-lg border bg-card p-3">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-primary" />
-              <p className="text-sm font-medium">Безопасный режим</p>
-            </div>
-            <p className="mt-1 text-xs text-muted-foreground">
-              Разрешены бизнес-вопросы и read-only аналитика. Опасные,
-              off-topic и policy-blocked запросы будут явно помечены в чате.
-            </p>
-          </div>
-        </div>
-      </div>
+      )}
 
       <div data-testid="chat-messages-scroll" className="min-h-0 flex-1 overflow-y-auto">
         {isBootstrappingChat ? (
