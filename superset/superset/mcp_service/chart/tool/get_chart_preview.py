@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Protocol
 from fastmcp import Context
 from superset_core.mcp import tool
 
+from superset.mcp_service.chart.query_utils import execute_chart_query
 from superset.mcp_service.chart.schemas import (
     AccessibilityMetadata,
     ASCIIPreview,
@@ -129,61 +130,13 @@ class ASCIIPreviewStrategy(PreviewFormatStrategy):
 
     def generate(self) -> ASCIIPreview | ChartError:
         try:
-            from superset.commands.chart.data.get_data_command import ChartDataCommand
-            from superset.common.query_context_factory import QueryContextFactory
-            from superset.utils import json as utils_json
-
-            form_data = utils_json.loads(self.chart.params) if self.chart.params else {}
-
-            logger.info("Chart form_data keys: %s", list(form_data.keys()))
-            logger.info("Chart viz_type: %s", self.chart.viz_type)
-            logger.info("Chart datasource_id: %s", self.chart.datasource_id)
-            logger.info("Chart datasource_type: %s", self.chart.datasource_type)
-
-            # Check if datasource_id is None
-            if self.chart.datasource_id is None:
-                return ChartError(
-                    error="Chart has no datasource_id - cannot generate preview",
-                    error_type="InvalidChart",
-                )
-
-            # Build query for chart data
-            x_axis_config = form_data.get("x_axis")
-            groupby_columns = form_data.get("groupby", [])
-            metrics = form_data.get("metrics", [])
-
-            columns = groupby_columns.copy()
-            if x_axis_config and isinstance(x_axis_config, str):
-                columns.append(x_axis_config)
-            elif x_axis_config and isinstance(x_axis_config, dict):
-                if "column_name" in x_axis_config:
-                    columns.append(x_axis_config["column_name"])
-
-            factory = QueryContextFactory()
-            query_context = factory.create(
-                datasource={
-                    "id": self.chart.datasource_id,
-                    "type": self.chart.datasource_type,
-                },
-                queries=[
-                    {
-                        "filters": form_data.get("filters", []),
-                        "columns": columns,
-                        "metrics": metrics,
-                        "row_limit": 50,
-                        "order_desc": True,
-                    }
-                ],
-                form_data=form_data,
-                force=False,
+            query_result = execute_chart_query(
+                self.chart,
+                row_limit=50,
+                force_refresh=self.request.force_refresh,
+                cache_timeout=self.request.cache_timeout,
             )
-
-            command = ChartDataCommand(query_context)
-            result = command.run()
-
-            data = []
-            if result and "queries" in result and len(result["queries"]) > 0:
-                data = result["queries"][0].get("data", [])
+            data = query_result.get("data", [])
 
             ascii_chart = generate_ascii_chart(
                 data,
@@ -211,44 +164,13 @@ class TablePreviewStrategy(PreviewFormatStrategy):
 
     def generate(self) -> TablePreview | ChartError:
         try:
-            from superset.commands.chart.data.get_data_command import ChartDataCommand
-            from superset.common.query_context_factory import QueryContextFactory
-            from superset.utils import json as utils_json
-
-            form_data = utils_json.loads(self.chart.params) if self.chart.params else {}
-
-            # Check if datasource_id is None
-            if self.chart.datasource_id is None:
-                return ChartError(
-                    error="Chart has no datasource_id - cannot generate table preview",
-                    error_type="InvalidChart",
-                )
-
-            factory = QueryContextFactory()
-            query_context = factory.create(
-                datasource={
-                    "id": self.chart.datasource_id,
-                    "type": self.chart.datasource_type,
-                },
-                queries=[
-                    {
-                        "filters": form_data.get("filters", []),
-                        "columns": form_data.get("groupby", []),
-                        "metrics": form_data.get("metrics", []),
-                        "row_limit": 20,
-                        "order_desc": True,
-                    }
-                ],
-                form_data=form_data,
-                force=False,
+            query_result = execute_chart_query(
+                self.chart,
+                row_limit=20,
+                force_refresh=self.request.force_refresh,
+                cache_timeout=self.request.cache_timeout,
             )
-
-            command = ChartDataCommand(query_context)
-            result = command.run()
-
-            data = []
-            if result and "queries" in result and len(result["queries"]) > 0:
-                data = result["queries"][0].get("data", [])
+            data = query_result.get("data", [])
 
             table_data = _generate_ascii_table(data, 120)
 
@@ -282,70 +204,13 @@ class VegaLitePreviewStrategy(PreviewFormatStrategy):
     def generate(self) -> VegaLitePreview | ChartError:
         """Generate Vega-Lite JSON specification from chart data."""
         try:
-            # Get chart data directly using the same logic as get_chart_data tool
-            # but without calling the MCP tool wrapper
-            from superset.commands.chart.data.get_data_command import ChartDataCommand
-            from superset.common.query_context_factory import QueryContextFactory
-            from superset.daos.chart import ChartDAO
-            from superset.utils import json as utils_json
-
-            # Get the chart object if we don't have form_data access
-            if not hasattr(self.chart, "params") or not self.chart.params:
-                # Fetch full chart details
-                chart_obj = None
-                if self.chart.id is None:
-                    return ChartError(
-                        error="Chart has no ID - cannot generate Vega-Lite preview",
-                        error_type="InvalidChart",
-                    )
-
-                if isinstance(self.chart.id, int):
-                    chart_obj = ChartDAO.find_by_id(self.chart.id)
-                else:
-                    chart_obj = ChartDAO.find_by_id(self.chart.id, id_column="uuid")
-
-                if not chart_obj:
-                    return ChartError(
-                        error=f"Chart {self.chart.id} not found for data retrieval",
-                        error_type="ChartNotFound",
-                    )
-
-                form_data = (
-                    utils_json.loads(chart_obj.params) if chart_obj.params else {}
-                )
-            else:
-                form_data = (
-                    utils_json.loads(self.chart.params) if self.chart.params else {}
-                )
-
-            # Create query context for data retrieval
-            factory = QueryContextFactory()
-            query_context = factory.create(
-                datasource={
-                    "id": self.chart.datasource_id,
-                    "type": self.chart.datasource_type,
-                },
-                queries=[
-                    {
-                        "filters": form_data.get("filters", []),
-                        "columns": form_data.get("groupby", []),
-                        "metrics": form_data.get("metrics", []),
-                        "row_limit": 1000,  # More data for visualization
-                        "order_desc": True,
-                    }
-                ],
-                form_data=form_data,
-                force=self.request.force_refresh,
+            query_result = execute_chart_query(
+                self.chart,
+                row_limit=1000,
+                force_refresh=self.request.force_refresh,
+                cache_timeout=self.request.cache_timeout,
             )
-
-            # Execute the query
-            command = ChartDataCommand(query_context)
-            result = command.run()
-
-            # Extract data from result
-            chart_data = []
-            if result and "queries" in result and len(result["queries"]) > 0:
-                chart_data = result["queries"][0].get("data", [])
+            chart_data = query_result.get("data", [])
 
             if not chart_data or not isinstance(chart_data, list):
                 return ChartError(
@@ -479,7 +344,7 @@ class VegaLitePreviewStrategy(PreviewFormatStrategy):
         except Exception as e:
             logger.warning("Error in field type analysis: %s", e)
             # Return nominal types for all fields as fallback
-            return {field: "nominal" for field in fields}
+            return dict.fromkeys(fields, "nominal")
 
         return field_types
 

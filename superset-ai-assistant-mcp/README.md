@@ -1,105 +1,127 @@
-# Superset AI Assistant (прототип)
+# Superset AI Assistant
 
-Коротко: простой чат на Streamlit, который через MCP ходит в ваш Apache Superset.
+Этот каталог теперь поддерживает один runtime path:
 
-## Что нужно
-- Python 3.10+
-- Ключ OpenAI (`OPENAI_API_KEY`)
-- Запущенный Superset и путь к скрипту Superset MCP (`superset-mcp/main.py`)
+- `FastAPI` backend в `api/`
+- `Next.js` frontend в `frontend-next/`
+- shared backend services в `backend/`
 
-## Как запустить
-1. Скопируйте `.env.example` в `.env` и заполните:
-   - `OPENAI_API_KEY` — ключ OpenAI
-   - `OPENAI_MODEL` — рекомендуемо `gpt-4o-mini` для снижения риска 429 TPM
-   - `SUPERSET_MCP_PATH` — полный путь до `superset-mcp/main.py`
-   - `SUPERSET_BASE_URL`, `SUPERSET_PUBLIC_URL`, `SUPERSET_USERNAME`, `SUPERSET_PASSWORD` — доступ к Superset и базовый URL для всех ссылок (например, `http://103.54.18.91:8088`)
-   - `AI_ASSISTANT_WS_BASE_URL` — адрес WebSocket API (например, `ws://127.0.0.1:8052/ws/chat`)
-   - `AUTH_DB_PATH`, `AUTH_JWT_SECRET`, `AUTH_JWT_TTL_HOURS` — параметры локальной авторизации (логин/пароль + JWT)
-   - `AUTH_PASSWORD_MIN_LENGTH`, `AUTH_HISTORY_MAX_MESSAGES` — политика паролей и лимит загружаемой истории чата
-   - `AI_AGENT_MAX_STEPS`, `AI_AGENT_RECURSION_LIMIT` — лимиты шагов/рекурсии агента
-   - `AI_AGENT_HISTORY_*`, `AI_AGENT_CONTEXT_CHARS`, `AI_AGENT_RATE_LIMIT_COOLDOWN_SECONDS` — ограничения на размер контекста и анти-спам cooldown после 429
-2. Установите зависимости:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Запустите WebSocket API (терминал №1):
-   ```bash
-   uvicorn backend.ws_api:app --app-dir . --host 0.0.0.0 --port 8052
-   ```
-4. Запустите Streamlit UI (терминал №2):
-   ```bash
-   streamlit run frontend/app.py --server.port 8051 --server.address 0.0.0.0
-   ```
-5. Откройте `http://localhost:8051`:
-   - сначала появится экран `Вход / Регистрация` (логин+пароль, без SMS/2FA),
-   - после авторизации откроется основной интерфейс ассистента.
+`Streamlit` UI/runtime path удалён. История удаления и сохранённые backend-only
+модули перечислены в `../docs/streamlit-retirement-summary.md`.
 
-## Как пользоваться
-- В `sidebar` есть кнопки навигации по окнам: `Чат`, `US1`, `US2`, `US3`, `US4`, `US5`, `US13`, `US14`, `US15`.
-- Кнопка `Выход` завершает пользовательскую сессию в UI (аккаунт и история не удаляются).
-- Каждый US-экран открывается отдельно в основной области, чтобы не перегружать один sidebar.
-- Вводите текстовые запросы в чат — ассистент дергает MCP и Superset API.
-- В режиме `WebSocket (stream)` в чате появляется `WebSocket trace` с этапами `status/chunk/done`.
-- История чата сохраняется по пользователю и подгружается после повторного входа.
-- После успешного входа логин сохраняется в стандартной session-cookie браузера: при повторном открытии ссылки в том же браузерном сеансе повторный вход не требуется.
-- Если нет ответа, проверьте, что Superset MCP сервер запущен и переменные окружения заданы верно.
-- В окне `US1` есть кнопка `Запустить US1-сканирование`: она строит отчёт по схемам, таблицам, профилю и связям.
-- Если `postgres_databases=0`, откройте блок `Диагностика баз данных (US1)` — там будут `backend_hint` и причины фильтрации.
-- В окне `US2: Глоссарий (CRUD + Mapping)`:
-  - создание/редактирование/удаление терминов,
-  - примеры для терминов,
-  - привязки терминов к `database/dataset/schema/table/column/metric`.
-- В окне `US3: Правила маппинга (term -> column/metric)`:
-  - CRUD правил (keyword/regex, priority, enable/disable),
-  - применение правил к текущему запросу перед инференсом,
-  - логи срабатываний правил по сессии.
-- В окне `US4: Подсказки запросов`:
-  - каталог из 10+ примеров NL-запросов на русском с описанием,
-  - кнопка "Использовать этот пример" для быстрого старта запроса,
-  - автодополнение сущностей из US2-глоссария (термины + mapping), с fallback на доменные теги примеров.
-- В окне `US5: Конструктор запроса по критериям`:
-  - интерактивные уточнения по обязательным полям (таблица/датасет, метрика, период),
-  - сбор общего корректного запроса по нескольким критериям,
-  - журнал выбранных значений по сессии (сохранение, просмотр, очистка),
-  - строгая фиксация datasource: если указана таблица, chart не должен создаваться на другой таблице.
-- В окне `US13: Предпросмотр`:
-  - выполнение SQL в Superset SQL Lab (sync),
-  - первые N строк результата,
-  - авто-профиль колонок: типы, единицы и объяснение полей.
-- В окне `US14: Рекомендации`:
-  - авто-рекомендация типа графика по типам/кардинальности,
-  - применение типа графика в 1 клик в US5/US15.
-- В окне `US15: Шеринг`:
-  - создание chart и dashboard через Superset API,
-  - привязка chart к dashboard как виджета,
-  - выдача share-ссылок на dashboard и chart.
-- Для US10-US12 добавлены guardrails в чате:
-  - US10: блок prompt-injection и нерелевантных запросов (например, математика вне сервиса),
-  - US10: read-only SQL политика (DDL/DML запрещены),
-  - US11: роль + ограничение по таблицам и PII,
-  - US12: квоты (rate-limit) и ограничение сложности запроса.
+## What Lives Here
 
-## Структура
-- `frontend/app.py` — чат на Streamlit
-- `backend/ai_agent.py` — обертка LangChain + mcp-use
-- `backend/us1_schema_profiler.py` — US1 scanner (schema/profile/relations)
-- `backend/us2_glossary_service.py` — US2 glossary service (CRUD + mappings)
-- `backend/us3_mapping_rules.py` — US3 mapping rules + match logs
-- `backend/us4_query_assistant.py` — US4 examples + entity autocomplete
-- `backend/us5_query_builder.py` — US5 criteria builder + journal
-- `backend/us10_12_guardrails.py` — US10-US12 policy guardrails
-- `backend/us13_15_viz_service.py` — US13-US15 preview/recommend/share service
-- `.env.example` — образец настроек
+- `api/`
+  - auth/chat/viz/scan/frontend-log routes
+- `frontend-next/`
+  - primary UI for login, chat, preview, recommend, share and scan
+- `backend/`
+  - agent orchestration and domain services
+  - retained helper/admin business modules `US2-US5` remain here as backend
+    code, but they no longer have a supported Streamlit runtime surface
+- `tests/`
+  - API, backend and unit coverage
+- `start_fastapi_stack.sh`
+  - container/runtime entrypoint for the API image
+- `Dockerfile`
+  - FastAPI runtime image used by `assistant-api`
 
-## Быстрые подсказки
-- Ошибка подключения: проверьте `SUPERSET_MCP_PATH` и работу Superset MCP.
-- Ошибка `No such file or directory: 'python'`:
-  - укажите `SUPERSET_MCP_PYTHON` абсолютным путём (например, `/usr/bin/python3` или `/home/.../.venv/bin/python`),
-  - либо используйте новую авто-подстановку (fallback на `sys.executable`), уже включённую в `backend/ai_agent.py`.
-- Ошибка `SUPERSET_MCP_PATH does not exist`:
-  - для локального запуска используйте `/home/superset_ai/superset-mcp/main.py`,
-  - для docker-контейнера используйте `/app/superset-mcp/main.py`.
-- Ошибка про ключ: убедитесь, что `OPENAI_API_KEY` есть в `.env`.
-- Ошибка `GRAPH_RECURSION_LIMIT`: увеличьте `AI_AGENT_MAX_STEPS` и `AI_AGENT_RECURSION_LIMIT` в `.env`.
-- Ошибка `429 rate_limit_exceeded`: используйте `OPENAI_MODEL=gpt-4o-mini`, уменьшите контекст (`AI_AGENT_HISTORY_*`, `AI_AGENT_CONTEXT_CHARS`) и повторите запрос после cooldown.
-- Ошибка `Запрос заблокирован политикой безопасности US10-US12`: уточните формулировку в рамках Superset/SQL и используйте разрешённые таблицы/метрики.
+## Supported Local Run
+
+### Unified compose
+
+```bash
+cd /home/superset_ai
+cp .env.dev.example .env.dev
+./docker/dev/deploy-primary-stack.sh
+```
+
+Endpoints:
+- UI: `http://localhost:3001/login`
+- API: `http://localhost:8100/api/health`
+- Superset: `http://localhost:8088`
+
+Low-level compose path for debugging only:
+
+```bash
+cd /home/superset_ai
+docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
+```
+
+### Split run
+
+FastAPI:
+
+```bash
+cd /home/superset_ai/superset-ai-assistant-mcp
+.venv/bin/python -m uvicorn api.main:app --host 0.0.0.0 --port 8100
+```
+
+Next.js:
+
+```bash
+cd /home/superset_ai/superset-ai-assistant-mcp/frontend-next
+npm install
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8100 npm run dev -- --hostname 0.0.0.0 --port 3001
+```
+
+## Docker Runtime
+
+Assistant image:
+
+```bash
+cd /home/superset_ai
+docker build -t ai_superset_api -f superset-ai-assistant-mcp/Dockerfile .
+docker run --rm -p 8100:8100 --env-file superset-ai-assistant-mcp/.env ai_superset_api
+```
+
+Этот image поднимает только `FastAPI`. `Next.js` запускается отдельно либо
+через `docker-compose.dev.yml`, либо напрямую через `npm run start`.
+
+## Production-Like Public Model
+
+- `https://assistant.example.com/` -> `Next.js`
+- `https://assistant.example.com/api/*` -> `FastAPI`
+- `https://superset.example.com/` -> `Superset`
+
+Reverse proxy example:
+- `../docs/examples/nginx-primary-ui.conf.example`
+
+Runbooks:
+- `../docs/deployment.md`
+- `../docs/production-rollout-runbook.md`
+- `../docs/public-go-live-checklist.md`
+- `../docs/manual-smoke-checklist.md`
+- `../docs/update-and-debug.md`
+
+## Verification
+
+```bash
+cd /home/superset_ai
+./docker/dev/deploy-primary-stack.sh
+./docker/dev/check-primary-stack.sh
+```
+
+Operator helpers:
+- `../docker/dev/deploy-primary-stack.sh`
+- `../docker/dev/refresh-primary-stack.sh`
+- `../docker/dev/check-primary-stack.sh`
+- `../docker/dev/validate-primary-env.sh`
+- `../docker/dev/tail-primary-logs.sh`
+
+Recommended test set:
+
+```bash
+cd /home/superset_ai
+PYTHONPATH=./superset-ai-assistant-mcp superset-ai-assistant-mcp/.venv/bin/python -m unittest \
+  superset-ai-assistant-mcp/tests/test_api_auth.py \
+  superset-ai-assistant-mcp/tests/test_api_chats.py \
+  superset-ai-assistant-mcp/tests/test_api_viz.py \
+  superset-ai-assistant-mcp/tests/test_api_scan.py \
+  superset-ai-assistant-mcp/tests/test_api_frontend_logs.py
+```
+
+```bash
+cd /home/superset_ai/superset-ai-assistant-mcp/frontend-next
+npm run build
+```

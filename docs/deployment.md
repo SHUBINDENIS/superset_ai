@@ -1,140 +1,177 @@
-# Схема Развёртывания
+# Deployment
 
-Документ описывает схему Deployment для проекта `superset_ai` в формате: **облако → сервер → контейнеры**.
+Текущая схема deployment после retirement Streamlit runtime:
 
-## 1) Диаграмма развёртывания (Deployment: облако/сервер/контейнеры)
+- user-facing UI: `Next.js`
+- primary API: `FastAPI`
+- BI platform: `Superset`
+- Superset access from assistant: built-in MCP service
+
+`Streamlit` больше не является поддерживаемым runtime path.
+
+## Current Architecture
 
 ```mermaid
 flowchart TB
-    user[Пользователь<br/>Browser]
+    user[Browser]
 
-    subgraph cloud[Cloud / VPS провайдер]
-        subgraph vm[Linux VM / выделенный сервер]
-            subgraph docker[Docker Engine]
-                subgraph supstack[Compose: superset/docker-compose-image-tag.yml]
-                    superset_app[Container: superset_app<br/>Apache Superset<br/>:8088]
-                    superset_db[Container: superset_db<br/>PostgreSQL metadata<br/>:5432]
-                    superset_cache[Container: superset_cache<br/>Redis<br/>:6379]
-                    superset_worker[Container: superset_worker<br/>Celery worker]
-                    superset_beat[Container: superset_worker_beat<br/>Celery beat]
-                end
-
-                subgraph aistack[AI Assistant deployment]
-                    streamlit[Container/Process: Streamlit UI<br/>superset-ai-assistant-mcp<br/>:8051]
-                    wsapi[Process: WebSocket API<br/>backend/ws_api.py<br/>:8052]
-                    agent[Process: AI Agent<br/>backend/ai_agent.py]
-                    mcp[Process: Superset MCP<br/>superset-mcp/main.py<br/>stdio]
-                end
-            end
-        end
+    subgraph host[Server / Docker host]
+        nextjs[Next.js UI<br/>:3001]
+        fastapi[FastAPI API<br/>:8100]
+        superset[Apache Superset<br/>:8088]
+        mcp[Built-in MCP HTTP or stdio]
+        services[Shared assistant services<br/>backend/*]
     end
 
-    openai[External Cloud Service<br/>OpenAI API]
+    openai[OpenAI API]
 
-    user -->|HTTPS/HTTP| streamlit
-    user -->|HTTPS/HTTP| superset_app
-
-    streamlit -->|WebSocket| wsapi
-    streamlit -->|HTTP fallback| agent
-    wsapi --> agent
-    agent -->|LLM API| openai
-    agent -->|spawn + stdio| mcp
-    mcp -->|REST /api/v1/*| superset_app
-
-    superset_app --> superset_db
-    superset_app --> superset_cache
-    superset_worker --> superset_db
-    superset_worker --> superset_cache
-    superset_beat --> superset_cache
+    user -->|HTTPS/HTTP| nextjs
+    nextjs -->|/api/*| fastapi
+    fastapi --> services
+    services --> mcp
+    mcp --> superset
+    services --> openai
 ```
 
-## 2) Где разворачиваются компоненты
+## Components
 
-| Уровень | Компоненты | Где размещены |
+| Component | Path | Role |
 |---|---|---|
-| Облако / датацентр | VM / сервер | IaaS/VPS или физический сервер |
-| Сервер (OS) | Docker Engine | Linux host |
-| Контейнеры Superset | `superset_app`, `superset_db`, `superset_cache`, `superset_worker`, `superset_worker_beat` | Один docker network (`docker-compose-image-tag.yml`) |
-| Контейнер/процесс AI | Streamlit UI + backend сервисы + MCP subprocess | Отдельный контейнер `ai_superset` или локальный процесс |
-| Внешние сервисы | OpenAI API | Внешнее облако (SaaS API) |
+| Next.js UI | `superset-ai-assistant-mcp/frontend-next/` | Primary user interface |
+| FastAPI | `superset-ai-assistant-mcp/api/` | Auth, chats, viz, scan, frontend logs |
+| Shared backend | `superset-ai-assistant-mcp/backend/` | Agent and domain services |
+| Built-in MCP | `superset/superset/mcp_service/` | Superset tools / DAO / RBAC access |
+| Superset | `superset/` compose stack | SQL Lab, charts, dashboards |
 
-## 3) Компоненты и их назначение
+Retained but not exposed as UI runtime:
+- `backend/us2_glossary_service.py`
+- `backend/us3_mapping_rules.py`
+- `backend/us4_query_assistant.py`
+- `backend/us5_query_builder.py`
 
-| Компонент | Расположение | Назначение |
+## Public Access Model
+
+Recommended production-like publication:
+
+- `https://assistant.example.com/` -> `Next.js`
+- `https://assistant.example.com/api/*` -> `FastAPI`
+- `https://superset.example.com/` -> `Superset`
+
+Recommended public-host rules:
+- publish one assistant host and keep API same-origin under `/api/*`
+- keep `assistant-api` internal; do not expose `:8100` directly to the public internet
+- leave `API_CORS_ORIGINS` unset unless you intentionally need cross-origin API access
+- set `SUPERSET_PUBLIC_URL` to the public Superset host used in share/explore links
+- if `US15_SHARE_BASE_URL` is set, keep it on the same origin as `SUPERSET_PUBLIC_URL`
+
+Reverse proxy example:
+- `docs/examples/nginx-primary-ui.conf.example`
+
+## Local Ports
+
+| Endpoint | Port | Purpose |
 |---|---|---|
-| Streamlit UI | `superset-ai-assistant-mcp/frontend/app.py` | Пользовательский интерфейс ассистента |
-| WebSocket API | `superset-ai-assistant-mcp/backend/ws_api.py` | Real-time канал событий `status/chunk/done` для чата |
-| AI Agent | `superset-ai-assistant-mcp/backend/ai_agent.py` | Оркестрация запроса, guardrails, работа с LLM и MCP |
-| MCP Server | `superset-mcp/main.py` | Программный доступ к Superset API через MCP-инструменты |
-| Superset App | `superset_app` | BI-платформа, SQL Lab, charts/dashboards |
-| Superset DB | `superset_db` | Метаданные Superset (PostgreSQL) |
-| Superset Cache | `superset_cache` | Redis для кэша/очередей |
-| Worker/Beat | `superset_worker`, `superset_worker_beat` | Фоновые задачи Superset |
-| OpenAI API | внешний сервис | LLM для NL→SQL и генерации/уточнений |
+| `http://<host>:3001` | 3001 | Next.js UI |
+| `http://<host>:8100` | 8100 | FastAPI API |
+| `http://<host>:8088` | 8088 | Superset |
+| `mcp-http:5008` | 5008 | Built-in MCP HTTP inside unified compose |
 
-## 4) Сетевые точки и порты
+## Bring-Up
 
-| Endpoint | Порт | Использование |
-|---|---|---|
-| `http://<host>:8051` | 8051 | UI ассистента (Streamlit) |
-| `ws://<host>:8052/ws/chat/<session_id>` | 8052 | WebSocket transport для stream-ответов чата |
-| `http://<host>:8088` | 8088 | Apache Superset |
-| `superset_db` | 5432 | Внутренняя БД Superset |
-| `superset_cache` | 6379 | Внутренний Redis |
+### Unified local dev stack
 
-Примечание: MCP-сервер в текущем проекте обычно запускается как subprocess и общается с агентом через `stdio` (без публичного HTTP порта).
+```bash
+cd /home/superset_ai
+cp .env.dev.example .env.dev
+./docker/dev/deploy-primary-stack.sh
+```
 
-## 5) Потоки данных
+Stack services:
+- `superset`
+- `mcp-http`
+- `assistant-api`
+- `assistant-web`
+- supporting `db`, `redis`, `pagila-db`, `superset-init`
 
-1. Пользователь отправляет запрос в `Streamlit`.
-2. `Streamlit` открывает WebSocket к `backend/ws_api.py` и передаёт payload чата.
-3. `WS API` вызывает `AI Agent`, который применяет guardrails и готовит контекст.
-4. Агент вызывает `OpenAI API` для генерации/интерпретации.
-5. Для операций Superset агент вызывает MCP-инструменты (`superset-mcp/main.py`).
-6. MCP ходит в `Superset REST API` (`/api/v1/...`).
-7. `WS API` отдаёт в поток события `status/chunk/done`, Streamlit рендерит ответ и trace.
+Low-level compose path for debugging or manual recovery:
 
-## 6) Переменные окружения, критичные для развёртывания
+```bash
+cd /home/superset_ai
+docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
+```
 
-Основные переменные (см. `superset-ai-assistant-mcp/.env.example`):
+### Split run
 
-- `OPENAI_API_KEY`
-- `OPENAI_MODEL`
-- `SUPERSET_BASE_URL`
-- `SUPERSET_PUBLIC_URL`
-- `SUPERSET_USERNAME`
-- `SUPERSET_PASSWORD`
-- `SUPERSET_MCP_PATH`
-- `SUPERSET_MCP_PYTHON`
-- `US15_SHARE_BASE_URL`
-- `AI_ASSISTANT_WS_BASE_URL`
+1. Superset:
+```bash
+cd /home/superset_ai/superset
+docker compose -f docker-compose-image-tag.yml up -d db redis superset-init superset
+```
+2. FastAPI:
+```bash
+cd /home/superset_ai/superset-ai-assistant-mcp
+.venv/bin/python -m uvicorn api.main:app --host 0.0.0.0 --port 8100
+```
+3. Next.js:
+```bash
+cd /home/superset_ai/superset-ai-assistant-mcp/frontend-next
+npm install
+NEXT_PUBLIC_API_URL=http://127.0.0.1:8100 npm run dev -- --hostname 0.0.0.0 --port 3001
+```
 
-## 7) Минимальный сценарий запуска (для этой схемы)
+## Health Verification
 
-1. Поднять Superset стек:
-   - `cd superset`
-   - `docker compose -f docker-compose-image-tag.yml up -d`
-2. Поднять ассистент:
-   - локально: `uvicorn backend.ws_api:app --app-dir . --host 0.0.0.0 --port 8052` + `streamlit run frontend/app.py --server.port 8051 --server.address 0.0.0.0`
-   или
-   - контейнером `ai_superset` на портах `8051` и `8052`
-3. Проверить доступность:
-   - `http://<host>:8088` (Superset)
-   - `http://<host>:8051` (Assistant)
-   - `http://<host>:8052/health` (WS API health)
+```bash
+./docker/dev/validate-primary-env.sh
+./docker/dev/deploy-primary-stack.sh
+./docker/dev/check-primary-stack.sh
+./docker/dev/tail-primary-logs.sh compose assistant-api
+```
 
-## 8) Ограничения текущего deployment
+External checks after proxy publication:
 
-- Конфигурация ориентирована на MVP/демо и учебный контур.
-- Для production требуются отдельные меры: TLS, секреты, hardening, отказоустойчивость, мониторинг/алертинг, backup-политики.
+```bash
+curl -I https://assistant.example.com/login
+curl -I https://assistant.example.com/api/health
+curl -I https://superset.example.com/health
+```
 
-## 9) Как показать WebSocket на практике
+Final public signoff:
+- `docs/public-go-live-checklist.md`
 
-1. Поднять `WS API` и `Streamlit`, открыть `http://<host>:8051`.
-2. В sidebar выбрать транспорт `WebSocket (stream)` и проверить `WS base URL`.
-3. Отправить длинный запрос в чате (чтобы ответ приходил частями).
-4. Показать блок `WebSocket trace (last request)`:
-   - события `status` (этапы обработки),
-   - события `chunk` (поток текста),
-   - событие `done` (`latency_ms`, `finish_reason`).
-5. Для сравнения переключить транспорт на `HTTP (legacy)` и показать, что trace не заполняется и ответ приходит одним блоком.
+## Rollback Model
+
+Rollback now means restoring the previous known-good `Next.js/FastAPI`
+deployment, not redirecting users to a Streamlit fallback.
+
+Recommended operator actions:
+
+1. keep the failed deployment logs and trace identifiers
+2. restore the previous compose revision, image tag, or application build
+3. re-run `./docker/dev/check-primary-stack.sh`
+4. re-run `docs/manual-smoke-checklist.md`
+5. re-open traffic to the restored primary stack
+
+## Operator Helpers
+
+- `docker/dev/refresh-primary-stack.sh`
+  - rebuild or restart `assistant-api` / `assistant-web`, then wait for HTTP readiness
+- `docker/dev/deploy-primary-stack.sh`
+  - validate env, stamp release/build metadata, rebuild the selected services, run health checks
+- `docker/dev/check-primary-stack.sh`
+  - one-command health verification
+- `docker/dev/validate-primary-env.sh`
+  - fail early on missing required env vars and show release/build metadata inputs
+- `docker/dev/tail-primary-logs.sh`
+  - compose log tail or structured assistant file logs
+
+## Related Docs
+
+- `docs/production-rollout-runbook.md`
+- `docs/public-go-live-checklist.md`
+- `docs/update-and-debug.md`
+- `docs/manual-smoke-checklist.md`
+- `docs/streamlit-retirement-summary.md`
+- `docs/dual-run-parity-readiness.md` (historical archive)
+- `docs/phased-cutover-plan.md` (historical archive)
+- `docs/phased-cutover-signoff.md` (historical archive)

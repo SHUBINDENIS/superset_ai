@@ -1,3 +1,9 @@
 **/.venv
 **/__pycache__
 .git
+superset-ai-assistant-mcp/.env
+superset-ai-assistant-mcp/.venv
+superset-ai-assistant-mcp/data
+superset-ai-assistant-mcp/tests
+superset-ai-assistant-mcp/backend_logs.log
+superset-ai-assistant-mcp/*.log

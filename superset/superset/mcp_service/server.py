@@ -108,6 +108,7 @@ def run_server(
         os.environ[env_key] = "1"
         try:
             logging.info("Starting FastMCP on %s:%s", host, port)
+            os.environ.setdefault("FASTMCP_STATELESS_HTTP", "true")
             mcp_instance.run(transport="streamable-http", host=host, port=port)
         except Exception as e:
             logging.error("FastMCP failed: %s", e)

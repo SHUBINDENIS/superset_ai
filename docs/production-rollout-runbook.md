@@ -1,0 +1,129 @@
+# Production-Like Rollout Runbook
+
+Используйте этот runbook для rollout текущего поддерживаемого stack:
+
+- `Next.js` as default user entrypoint
+- `FastAPI` as primary API
+- `Superset` on its own host
+
+`Streamlit` fallback path removed from the supported runtime model.
+
+## 1. Recommended Public URLs
+
+- `https://assistant.example.com/` -> `Next.js`
+- `https://assistant.example.com/api/*` -> `FastAPI`
+- `https://superset.example.com/` -> `Superset`
+
+Recommended public exposure rule:
+- publish `Next.js` and Superset through the reverse proxy
+- keep `assistant-api` on an internal port and expose it only through same-origin `/api/*`
+- do not publish `:8100` directly
+
+## 2. Required Environment
+
+Проверьте перед rollout:
+
+- `ASSISTANT_DEPLOYMENT_MODE=production`
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL`
+- `SUPERSET_PUBLIC_URL=https://superset.example.com`
+- `AUTH_JWT_SECRET`
+
+Optional but recommended for release visibility:
+
+- `ASSISTANT_RELEASE_VERSION`
+- `ASSISTANT_BUILD_SHA`
+- `ASSISTANT_BUILD_TIMESTAMP`
+
+Optional share-link override:
+
+- `US15_SHARE_BASE_URL=https://superset.example.com`
+  - if omitted, the assistant uses `SUPERSET_PUBLIC_URL`
+- `API_CORS_ORIGINS=https://assistant.example.com`
+  - set this only if you intentionally expose FastAPI cross-origin
+  - preferred same-origin public rollout: leave it unset
+
+Production-mode safety checks now fail rollout if:
+- `AUTH_JWT_SECRET` is placeholder-like or shorter than 32 characters
+- `SUPERSET_PUBLIC_URL` or `US15_SHARE_BASE_URL` points to localhost/loopback
+- `US15_SHARE_BASE_URL` uses a different public origin than `SUPERSET_PUBLIC_URL`
+- `API_CORS_ORIGINS` contains localhost/loopback origins
+
+## 3. Bring-Up Options
+
+### Option A: unified compose
+
+```bash
+cd /home/superset_ai
+cp .env.dev.example .env.dev
+./docker/dev/deploy-primary-stack.sh
+```
+
+### Option B: split services
+
+1. start Superset
+2. start `FastAPI` on `:8100`
+3. start `Next.js` on `:3001`
+4. publish both through a reverse proxy
+
+## 4. Health Checks
+
+Internal:
+
+```bash
+./docker/dev/check-primary-stack.sh
+./docker/dev/tail-primary-logs.sh compose assistant-api
+```
+
+External:
+
+```bash
+curl -I https://assistant.example.com/login
+curl -I https://assistant.example.com/api/health
+curl -I https://superset.example.com/health
+```
+
+## 5. Post-Deploy Smoke
+
+1. run `./docker/dev/deploy-primary-stack.sh`
+2. confirm release/build metadata through `GET /api/health`
+3. run `./docker/dev/check-primary-stack.sh`
+4. open `https://assistant.example.com/login`
+5. login or register
+6. run `chat -> preview -> recommend -> share -> scan`
+7. run `docs/demo-query-pack.md`
+8. confirm trace correlation in logs via `./docker/dev/tail-primary-logs.sh structured`
+
+## 6. Rollback
+
+There is no separate runtime fallback host anymore. Rollback is deployment
+rollback:
+
+1. stop exposing the faulty release
+2. restore the previous known-good assistant-web / assistant-api deployment
+3. keep traces and logs for incident analysis
+4. rerun `./docker/dev/deploy-primary-stack.sh`
+5. rerun `docs/manual-smoke-checklist.md`
+
+## 7. Proxy Reference
+
+See:
+- `docs/examples/nginx-primary-ui.conf.example`
+- `docs/public-go-live-checklist.md`
+
+## 8. Day-2 Update And Debug
+
+See:
+- `docs/update-and-debug.md`
+
+## 9. Final Public Go-Live Signoff
+
+Use:
+- `docs/public-go-live-checklist.md`
+
+## 10. Historical References
+
+For the previous phased-cutover evidence only:
+- `docs/dual-run-parity-readiness.md`
+- `docs/phased-cutover-plan.md`
+- `docs/phased-cutover-signoff.md`

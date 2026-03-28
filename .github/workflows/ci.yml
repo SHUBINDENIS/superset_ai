@@ -25,20 +25,18 @@ jobs:
       - name: Ruff lint
         run: |
           ruff check \
+            superset-ai-assistant-mcp/api \
             superset-ai-assistant-mcp/backend \
-            superset-ai-assistant-mcp/frontend \
-            superset-ai-assistant-mcp/tests \
-            superset-mcp/main.py
+            superset-ai-assistant-mcp/tests
 
       - name: Python compile check
         run: |
           python -m compileall \
+            superset-ai-assistant-mcp/api \
             superset-ai-assistant-mcp/backend \
-            superset-ai-assistant-mcp/frontend \
-            superset-ai-assistant-mcp/tests \
-            superset-mcp/main.py
+            superset-ai-assistant-mcp/tests
 
-  test:
+  assistant-unit:
     runs-on: ubuntu-latest
 
     steps:
@@ -59,4 +57,161 @@ jobs:
         env:
           PYTHONPATH: ./superset-ai-assistant-mcp
         run: |
-          python -m unittest discover -s superset-ai-assistant-mcp/tests -p "test_*.py"
+          python -m unittest discover -s superset-ai-assistant-mcp/tests/unit -p "test_*.py"
+
+  assistant-product-flows:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r superset-ai-assistant-mcp/requirements.txt
+
+      - name: Run product flow tests
+        env:
+          PYTHONPATH: ./superset-ai-assistant-mcp
+        run: |
+          python -m unittest discover -s superset-ai-assistant-mcp/tests -p "test_ai_agent_clarifications.py"
+          python -m unittest discover -s superset-ai-assistant-mcp/tests -p "test_us13_15_viz_service.py"
+
+  assistant-web-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: superset-ai-assistant-mcp/frontend-next/package-lock.json
+
+      - name: Install frontend dependencies
+        run: |
+          cd superset-ai-assistant-mcp/frontend-next
+          npm ci
+
+      - name: Build Next.js frontend
+        run: |
+          cd superset-ai-assistant-mcp/frontend-next
+          npm run build
+
+  mcp-tool-inventory:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r superset-ai-assistant-mcp/requirements.txt
+
+      - name: Enforce target MCP tool inventory
+        env:
+          PYTHONPATH: ./superset-ai-assistant-mcp
+        run: |
+          python -m unittest discover -s superset-ai-assistant-mcp/tests/unit/mcp_client -p "test_tool_inventory.py"
+
+  assistant-integration:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r superset-ai-assistant-mcp/requirements.txt
+
+      - name: Run live integration tests
+        env:
+          PYTHONPATH: ./superset-ai-assistant-mcp
+        run: |
+          python -m unittest discover -s superset-ai-assistant-mcp/tests/integration -p "test_*.py"
+
+  superset-mcp-extension-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Superset MCP extension unit tests
+        env:
+          DOCKER_IMAGE: apachesuperset.docker.scarf.sh/apache/superset:latest-dev
+        run: |
+          docker run --rm -u 0:0 \
+            -v "$GITHUB_WORKSPACE/superset:/src:ro" \
+            "$DOCKER_IMAGE" \
+            /bin/bash -lc '
+              set -euo pipefail
+              TMP_WS=/tmp/workspace
+              rm -rf "$TMP_WS"
+              cp -R /src "$TMP_WS"
+              chmod -R u+w "$TMP_WS"
+              cd "$TMP_WS"
+              /app/.venv/bin/python -m pip install -e "./superset-core" "fastmcp<3" "marshmallow-union>=0.1,<1" pytest pytest-asyncio >/tmp/mcp_ext_fastmcp_install.log 2>&1
+              /app/.venv/bin/python -m pip install -e . >/tmp/mcp_ext_superset_install.log 2>&1
+              export PYTHONPATH="$TMP_WS/docker/pythonpath_dev"
+              export SUPERSET_CONFIG_PATH="$TMP_WS/docker/pythonpath_dev/superset_config.py"
+              /app/.venv/bin/python -m pytest --confcutdir=tests/unit_tests/mcp_service/extensions/tool tests/unit_tests/mcp_service/extensions/tool -q
+            '
+
+  superset-mcp-core-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Superset MCP core unit tests
+        env:
+          DOCKER_IMAGE: apachesuperset.docker.scarf.sh/apache/superset:latest-dev
+        run: |
+          docker run --rm -u 0:0 \
+            -v "$GITHUB_WORKSPACE/superset:/src:ro" \
+            "$DOCKER_IMAGE" \
+            /bin/bash -lc '
+              set -euo pipefail
+              export SUPERSET_SECRET_KEY=test-secret-key-for-mcp
+              TMP_WS=/tmp/workspace
+              rm -rf "$TMP_WS"
+              cp -R /src "$TMP_WS"
+              chmod -R u+w "$TMP_WS"
+              cd "$TMP_WS"
+              /app/.venv/bin/python -m pip install -e "./superset-core" "fastmcp<3" "marshmallow-union>=0.1,<1" pytest pytest-asyncio >/tmp/mcp_core_fastmcp_install.log 2>&1
+              /app/.venv/bin/python -m pip install -e . >/tmp/mcp_core_superset_install.log 2>&1
+              export PYTHONPATH="$TMP_WS/docker/pythonpath_dev"
+              export SUPERSET_CONFIG_PATH="$TMP_WS/docker/pythonpath_dev/superset_config.py"
+              /app/.venv/bin/python -m pytest \
+                --confcutdir=tests/unit_tests/mcp_service \
+                tests/unit_tests/mcp_service/test_core_mcp_injection.py \
+                tests/unit_tests/mcp_service/chart/test_query_utils.py \
+                tests/unit_tests/mcp_service/test_auth.py \
+                tests/unit_tests/mcp_service/utils/test_schema_utils.py \
+                -q
+            '

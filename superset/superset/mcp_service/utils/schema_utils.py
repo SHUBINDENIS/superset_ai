@@ -425,20 +425,32 @@ def parse_request(
         if asyncio.iscoroutinefunction(func):
 
             @wraps(func)
-            async def async_wrapper(request: Any, *args: Any, **kwargs: Any) -> Any:
+            async def async_wrapper(
+                request: Any | None = None, *args: Any, **kwargs: Any
+            ) -> Any:
                 # Parse if string, otherwise pass through
                 # (parse_json_or_model handles both)
-                parsed_request = parse_json_or_model(request, request_class, "request")
+                parsed_request = parse_json_or_model(
+                    {} if request is None else request,
+                    request_class,
+                    "request",
+                )
                 return await func(parsed_request, *args, **kwargs)
 
             wrapper = async_wrapper
         else:
 
             @wraps(func)
-            def sync_wrapper(request: Any, *args: Any, **kwargs: Any) -> Any:
+            def sync_wrapper(
+                request: Any | None = None, *args: Any, **kwargs: Any
+            ) -> Any:
                 # Parse if string, otherwise pass through
                 # (parse_json_or_model handles both)
-                parsed_request = parse_json_or_model(request, request_class, "request")
+                parsed_request = parse_json_or_model(
+                    {} if request is None else request,
+                    request_class,
+                    "request",
+                )
                 return func(parsed_request, *args, **kwargs)
 
             wrapper = sync_wrapper

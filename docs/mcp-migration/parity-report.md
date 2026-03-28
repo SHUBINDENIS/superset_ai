@@ -1,0 +1,106 @@
+# MCP Migration Parity Report
+
+Status: final legacy runtime removal pass complete.
+
+This report describes the current migration state of the assistant product from
+the former external MCP server in `superset-mcp/main.py` to the built-in
+Superset MCP service. This report now describes the post-removal state.
+
+## Validated Green Paths
+
+The following product-facing paths are now validated on the built-in MCP route:
+
+- browse databases for source and scope pickers through `mcp_ext.list_databases`
+- browse datasets, charts, and dashboards through built-in list/info tools
+- execute SQL through `execute_sql`
+- generate or update charts through `generate_chart` and `update_chart`
+- create an empty dashboard shell through `mcp_ext.create_empty_dashboard`
+- add charts to dashboards through `add_chart_to_existing_dashboard`
+- generate dashboards through `generate_dashboard`
+- generate explore links through `generate_explore_link`
+- generate SQL Lab URLs through `open_sql_lab_with_context`
+- run the US1 schema/profile/relations scan through `mcp_ext.list_databases` plus `execute_sql`
+
+Automated coverage now includes:
+
+- assistant-side unit tests for adapter mappings, runtime switching, inventory
+  enforcement, and normalized error handling
+- live built-in MCP integration tests for readonly and mutation flows
+- Superset-side extension unit tests for the custom MCP extension tools, now
+  isolated from full Flask app bootstrap so the CI job validates the extension
+  logic itself instead of unrelated global app imports
+
+## Intentional Fixes Versus Legacy
+
+The new runtime intentionally fixes known legacy defects instead of preserving
+them:
+
+- `L-001` broken `database/<id>/tables` dependence:
+  dataset-scoped flows are validated through dataset tools and no longer require
+  `superset_database_get_tables`.
+- `L-002` token exposure:
+  the migrated client and adapter redact sensitive fields and do not expose
+  token material as a product contract.
+- `L-003` flaky create flows:
+  product chart/dashboard creation now prefers built-in MCP semantics and keeps
+  `mcp_ext.legacy_chart_create` as a narrow compatibility bridge only for the
+  remaining `pie` gap.
+- `L-004` inconsistent error signaling:
+  not-found, access-denied, invalid-payload, timeout, and DML-denied outcomes
+  are normalized into one product error model.
+- `L-005` tool discovery drift:
+  tool inventory enforcement now keeps the target product tool set aligned with
+  automated coverage, and live `tools/list` integration continues to validate
+  the real runtime surface.
+
+## Remaining Legacy or Direct-REST Dependencies
+
+The legacy MCP runtime path is now removed.
+
+There are no remaining normal-runtime dependencies on:
+
+- `superset-mcp/main.py`
+- legacy runtime selection in the assistant MCP layer
+- legacy subprocess launcher env vars
+- direct REST login/CSRF fallbacks in the migrated product flows
+
+## Legacy-Only Items Still Present
+
+Some compatibility-oriented names remain by design, but they are not a legacy runtime:
+
+- `backend/mcp_client/legacy_compat_adapter.py`
+  - kept as the intentional contract adapter from legacy product call shapes to built-in MCP tools
+- `mcp_ext.legacy_chart_create`
+  - kept as the narrow compatibility bridge for the remaining pie-chart creation gap
+No normal product flow requires legacy token-based auth helpers, CSRF, raw
+`database/<id>/tables`, legacy subprocess launchers, or the deleted external MCP server.
+
+## `open_sql_lab_with_context` Status
+
+The built-in tool is now part of the validated target surface and has live
+integration coverage. There is still no dedicated frontend call site for it in
+the current Streamlit product runtime, so it is covered as a required migration
+capability rather than as a newly-added UI flow.
+
+## Removal Outcome
+
+Completed in this pass:
+
+1. Removed the low-level assistant runtime mode named `legacy`.
+2. Removed the legacy-only branches from `backend/us13_15_viz_service.py`.
+3. Deleted `superset-mcp/main.py`.
+4. Deleted the obsolete top-level `superset-mcp/` directory.
+5. Updated docs and ignore rules so they no longer describe that directory as present.
+6. Re-ran the parity and stability suites on the built-in-only path.
+
+## Current Gate Assessment
+
+- Built-in MCP is the default runtime: yes
+- Product-critical browse, SQL, chart, dashboard, and explore flows use the
+  unified MCP client: yes
+- US1 schema-profiler flow uses the unified MCP client: yes
+- Target product tool inventory is enforced by tests: yes
+- Superset-side extension tools have standalone CI coverage: yes
+- All normal product runtime paths are migrated off direct REST: yes
+- Legacy runtime can be removed now: yes
+- Legacy runtime path is fully removed: yes

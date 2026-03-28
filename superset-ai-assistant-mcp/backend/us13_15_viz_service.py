@@ -7,16 +7,21 @@ US13-US15 service:
 
 from __future__ import annotations
 
+import asyncio
+import copy
 import json
 import os
 import re
-from dataclasses import dataclass
+import time
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 from urllib.parse import urlparse, urlunparse
 
-import httpx
 from dotenv import load_dotenv
+
+from backend.observability import emit_event
+from backend.mcp_client.runtime import ProductMCPRuntime, create_product_mcp_runtime
 
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -117,14 +122,36 @@ def _infer_unit(column_name: str) -> str:
     return ""
 
 
+def _looks_ordered_axis_name(column_name: str) -> bool:
+    name = _normalize_text(column_name).casefold()
+    if not name:
+        return False
+    return any(token in name for token in ["year", "month", "week", "day", "period", "quarter"])
+
+
 @dataclass
 class US13To15VizService:
     base_url: str
-    username: str
-    password: str
     timeout_seconds: float = 30.0
     default_preview_limit: int = 20
     share_base_url: str = ""
+    metadata_cache_ttl_seconds: float = 45.0
+    metadata_cache_max_entries: int = 128
+    _loop: asyncio.AbstractEventLoop | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
+    _mcp_runtime: ProductMCPRuntime | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
+    _metadata_cache: Dict[Tuple[Any, ...], Tuple[float, Any]] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
 
     def __post_init__(self) -> None:
         self.base_url = self._normalize_base_url(
@@ -140,104 +167,128 @@ class US13To15VizService:
         if self._is_localhost_netloc(share_netloc) and not self._is_localhost_netloc(base_netloc):
             # Для внешних ссылок предпочитаем публичный host Superset.
             self.share_base_url = self.base_url
-        self._token: Optional[str] = None
-        self._client = httpx.Client(
-            base_url=self.base_url,
-            timeout=self.timeout_seconds,
-            follow_redirects=True,
-            headers={"Accept": "application/json"},
-        )
+        self.metadata_cache_ttl_seconds = max(0.0, float(self.metadata_cache_ttl_seconds))
+        self.metadata_cache_max_entries = max(0, int(self.metadata_cache_max_entries))
 
     @classmethod
     def from_env(cls) -> "US13To15VizService":
         base_url = os.getenv("SUPERSET_BASE_URL", DEFAULT_PUBLIC_SUPERSET_URL)
-        username = os.getenv("SUPERSET_USERNAME", "")
-        password = os.getenv("SUPERSET_PASSWORD", "")
         timeout = float(os.getenv("US13_15_TIMEOUT_SECONDS", "30"))
         preview_limit = int(os.getenv("US13_PREVIEW_LIMIT", "20"))
         public_base = os.getenv("SUPERSET_PUBLIC_URL", "").strip()
         share_base = os.getenv("US15_SHARE_BASE_URL", "").strip()
+        metadata_cache_ttl = float(os.getenv("US13_15_METADATA_CACHE_TTL_SECONDS", "45"))
+        metadata_cache_max_entries = int(
+            os.getenv("US13_15_METADATA_CACHE_MAX_ENTRIES", "128")
+        )
         return cls(
             base_url=base_url,
-            username=username,
-            password=password,
             timeout_seconds=timeout,
             default_preview_limit=preview_limit,
             share_base_url=public_base or share_base,
+            metadata_cache_ttl_seconds=metadata_cache_ttl,
+            metadata_cache_max_entries=metadata_cache_max_entries,
         )
 
     def close(self) -> None:
-        self._client.close()
+        if self._mcp_runtime is not None and self._loop is not None and not self._loop.is_closed():
+            self._loop.run_until_complete(self._mcp_runtime.close())
+        if self._loop is not None and not self._loop.is_closed():
+            self._loop.close()
+        self._mcp_runtime = None
+        self._loop = None
+        self._metadata_cache.clear()
 
-    def authenticate(self, force: bool = False) -> str:
-        if self._token and not force:
-            return self._token
-
-        if not self.username or not self.password:
-            raise RuntimeError("SUPERSET_USERNAME/SUPERSET_PASSWORD are required.")
-
-        payload = {
-            "username": self.username,
-            "password": self.password,
-            "provider": "db",
-            "refresh": True,
-        }
-        response = self._client.post("/api/v1/security/login", json=payload)
-        response.raise_for_status()
-        data = response.json() if response.content else {}
-        token = data.get("access_token")
-        if not isinstance(token, str) or not token:
-            raise RuntimeError("Superset auth succeeded without access_token.")
-        self._token = token
-        return token
-
-    def _get_csrf_token(self) -> str:
-        self.authenticate()
-        headers = {"Authorization": f"Bearer {self._token}"}
-        response = self._client.get("/api/v1/security/csrf_token/", headers=headers)
-        response.raise_for_status()
-        payload = response.json() if response.content else {}
-        token = payload.get("result")
-        if not isinstance(token, str) or not token:
-            raise RuntimeError("Failed to get CSRF token from Superset.")
-        return token
-
-    def _request(
-        self,
-        method: str,
-        endpoint: str,
-        *,
-        params: Optional[Dict[str, Any]] = None,
-        json_body: Optional[Dict[str, Any]] = None,
-        requires_auth: bool = True,
-        needs_csrf: bool = False,
-    ) -> Dict[str, Any]:
-        headers: Dict[str, str] = {"Accept": "application/json"}
-        if requires_auth:
-            self.authenticate()
-            headers["Authorization"] = f"Bearer {self._token}"
-        if needs_csrf:
-            csrf_token = self._get_csrf_token()
-            headers["X-CSRFToken"] = csrf_token
-            headers["Content-Type"] = "application/json"
-
-        response = self._client.request(
-            method.upper(),
-            endpoint,
-            params=params,
-            json=json_body,
-            headers=headers,
+    def clone_for_worker(self) -> "US13To15VizService":
+        return US13To15VizService(
+            base_url=self.base_url,
+            timeout_seconds=self.timeout_seconds,
+            default_preview_limit=self.default_preview_limit,
+            share_base_url=self.share_base_url,
+            metadata_cache_ttl_seconds=self.metadata_cache_ttl_seconds,
+            metadata_cache_max_entries=self.metadata_cache_max_entries,
         )
-        response.raise_for_status()
-        if not response.content:
-            return {}
-        return response.json()
 
-    def list_databases(self) -> List[Dict[str, Any]]:
-        payload = self._request("GET", "/api/v1/database/")
-        items = [x for x in _extract_result_items(payload) if isinstance(x, dict)]
+    def _get_loop(self) -> asyncio.AbstractEventLoop:
+        if self._loop is None or self._loop.is_closed():
+            self._loop = asyncio.new_event_loop()
+        return self._loop
+
+    def _run_async(self, coro: Any) -> Any:
+        return self._get_loop().run_until_complete(coro)
+
+    async def _ensure_mcp_runtime_async(self) -> ProductMCPRuntime:
+        if self._mcp_runtime is None:
+            self._mcp_runtime = await create_product_mcp_runtime()
+        return self._mcp_runtime
+
+    def _ensure_mcp_runtime(self) -> ProductMCPRuntime:
+        return self._run_async(self._ensure_mcp_runtime_async())
+
+    def _call_product_client(self, method_name: str, *args: Any) -> Dict[str, Any]:
+        runtime = self._ensure_mcp_runtime()
+        method = getattr(runtime.product_client, method_name)
+        return self._run_async(method(*args))
+
+    def _emit_artifact_event(self, event: str, **fields: Any) -> None:
+        emit_event("artifact", event, **fields)
+
+    def _cache_now(self) -> float:
+        return time.monotonic()
+
+    def _prune_metadata_cache(self) -> None:
+        if not self._metadata_cache:
+            return
+        now = self._cache_now()
+        expired_keys = [
+            key
+            for key, (stored_at, _) in self._metadata_cache.items()
+            if (now - stored_at) >= self.metadata_cache_ttl_seconds
+        ]
+        for key in expired_keys:
+            self._metadata_cache.pop(key, None)
+
+    def _get_cached_metadata(self, key: Tuple[Any, ...]) -> Any:
+        if self.metadata_cache_ttl_seconds <= 0 or self.metadata_cache_max_entries <= 0:
+            return None
+        self._prune_metadata_cache()
+        entry = self._metadata_cache.get(key)
+        if entry is None:
+            return None
+        _, payload = entry
+        return copy.deepcopy(payload)
+
+    def _store_cached_metadata(self, key: Tuple[Any, ...], value: Any) -> Any:
+        if self.metadata_cache_ttl_seconds <= 0 or self.metadata_cache_max_entries <= 0:
+            return value
+        self._prune_metadata_cache()
+        if (
+            key not in self._metadata_cache
+            and len(self._metadata_cache) >= self.metadata_cache_max_entries
+        ):
+            oldest_key = min(
+                self._metadata_cache.items(),
+                key=lambda item: item[1][0],
+            )[0]
+            self._metadata_cache.pop(oldest_key, None)
+        self._metadata_cache[key] = (self._cache_now(), copy.deepcopy(value))
+        return copy.deepcopy(value)
+
+    @staticmethod
+    def _raise_if_tool_error(payload: Dict[str, Any], *, default_message: str) -> None:
+        message = _normalize_text(payload.get("error"))
+        if message:
+            raise RuntimeError(message)
+        if payload.get("success") is False:
+            fallback = _normalize_text(payload.get("message")) or default_message
+            raise RuntimeError(fallback)
+
+    @staticmethod
+    def _normalize_database_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         databases: List[Dict[str, Any]] = []
         for item in items:
+            if not isinstance(item, dict):
+                continue
             db_id = item.get("id")
             if not isinstance(db_id, int):
                 continue
@@ -257,34 +308,37 @@ class US13To15VizService:
             )
         return databases
 
-    def list_datasets(self, limit: int = 200) -> List[Dict[str, Any]]:
-        payload = self._request(
-            "GET",
-            "/api/v1/dataset/",
-            params={"q": f"(page:0,page_size:{int(limit)})"},
-        )
-        items = [x for x in _extract_result_items(payload) if isinstance(x, dict)]
+    @staticmethod
+    def _normalize_dataset_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         datasets: List[Dict[str, Any]] = []
         for item in items:
+            if not isinstance(item, dict):
+                continue
             dataset_id = item.get("id")
             if not isinstance(dataset_id, int):
                 continue
             table_name = _normalize_text(
-                item.get("table_name") or item.get("dataset_name") or item.get("name") or ""
+                item.get("table_name")
+                or item.get("dataset_name")
+                or item.get("name")
+                or ""
             )
             schema_name = _normalize_text(item.get("schema") or item.get("schema_name") or "")
-            database_id = None
-            if isinstance(item.get("database"), dict):
-                db_obj = item.get("database")
-                db_id_value = db_obj.get("id")
-                if isinstance(db_id_value, int):
-                    database_id = db_id_value
-            elif isinstance(item.get("database"), int):
-                database_id = int(item.get("database"))
+            database_id = item.get("database_id")
+            if not isinstance(database_id, int):
+                database_id = None
+                database_obj = item.get("database")
+                if isinstance(database_obj, dict) and isinstance(database_obj.get("id"), int):
+                    database_id = int(database_obj["id"])
+                elif isinstance(database_obj, int):
+                    database_id = int(database_obj)
             database_name = _normalize_text(
-                item.get("database", {}).get("database_name")
-                if isinstance(item.get("database"), dict)
-                else item.get("database_name")
+                item.get("database_name")
+                or (
+                    item.get("database", {}).get("database_name")
+                    if isinstance(item.get("database"), dict)
+                    else ""
+                )
             )
             datasets.append(
                 {
@@ -297,8 +351,10 @@ class US13To15VizService:
             )
         return datasets
 
-    def get_dataset_metadata(self, dataset_id: int) -> Dict[str, Any]:
-        payload = self._request("GET", f"/api/v1/dataset/{int(dataset_id)}")
+    @staticmethod
+    def _normalize_dataset_metadata_payload(
+        payload: Dict[str, Any], dataset_id: int
+    ) -> Dict[str, Any]:
         result = payload.get("result") if isinstance(payload, dict) else None
         if not isinstance(result, dict):
             result = payload if isinstance(payload, dict) else {}
@@ -308,24 +364,25 @@ class US13To15VizService:
         )
         schema_name = _normalize_text(result.get("schema") or result.get("schema_name") or "")
 
-        database_id = None
-        database_name = ""
+        database_id = result.get("database_id")
+        if not isinstance(database_id, int):
+            database_id = None
+        database_name = _normalize_text(result.get("database_name") or "")
+
         if isinstance(result.get("database"), dict):
-            db_obj = result.get("database")
+            db_obj = result["database"]
             db_id_value = db_obj.get("id")
             if isinstance(db_id_value, int):
                 database_id = db_id_value
-            database_name = _normalize_text(
-                db_obj.get("database_name") or db_obj.get("name") or ""
-            )
+            if not database_name:
+                database_name = _normalize_text(
+                    db_obj.get("database_name") or db_obj.get("name") or ""
+                )
         elif isinstance(result.get("database"), int):
-            database_id = int(result.get("database"))
+            database_id = int(result["database"])
 
-        if not database_name:
-            database_name = _normalize_text(result.get("database_name") or "")
-
-        columns_payload = result.get("columns")
         columns: List[Dict[str, Any]] = []
+        columns_payload = result.get("columns")
         if isinstance(columns_payload, list):
             for column in columns_payload:
                 if not isinstance(column, dict):
@@ -342,17 +399,21 @@ class US13To15VizService:
                     {
                         "column_name": column_name,
                         "verbose_name": _normalize_text(column.get("verbose_name") or ""),
-                        "type": _normalize_text(column.get("type") or column.get("type_generic") or ""),
+                        "type": _normalize_text(
+                            column.get("type") or column.get("type_generic") or ""
+                        ),
                     }
                 )
 
-        metrics_payload = result.get("metrics")
         metrics: List[str] = []
+        metrics_payload = result.get("metrics")
         if isinstance(metrics_payload, list):
             for metric in metrics_payload:
                 if not isinstance(metric, dict):
                     continue
-                metric_name = _normalize_text(metric.get("metric_name") or metric.get("label") or "")
+                metric_name = _normalize_text(
+                    metric.get("metric_name") or metric.get("label") or ""
+                )
                 if metric_name:
                     metrics.append(metric_name)
 
@@ -365,6 +426,56 @@ class US13To15VizService:
             "columns": columns,
             "metrics": metrics,
         }
+
+    def list_databases(self) -> List[Dict[str, Any]]:
+        cache_key = ("list_databases",)
+        cached = self._get_cached_metadata(cache_key)
+        if cached is not None:
+            return cached
+        payload = self._call_product_client(
+            "list_databases",
+            {"page": 1, "page_size": 1000},
+        )
+        items = payload.get("databases", [])
+        if not isinstance(items, list):
+            return []
+        normalized = self._normalize_database_items([x for x in items if isinstance(x, dict)])
+        return self._store_cached_metadata(cache_key, normalized)
+
+    def list_datasets(
+        self,
+        limit: int = 200,
+        *,
+        search: str = "",
+    ) -> List[Dict[str, Any]]:
+        page_size = max(1, min(int(limit), 1000))
+        safe_search = _normalize_text(search)
+        cache_key = ("list_datasets", page_size, safe_search.casefold())
+        cached = self._get_cached_metadata(cache_key)
+        if cached is not None:
+            return cached
+        request_payload: Dict[str, Any] = {"page": 1, "page_size": page_size}
+        if safe_search:
+            request_payload["search"] = safe_search
+        payload = self._call_product_client(
+            "list_datasets",
+            request_payload,
+        )
+        items = payload.get("datasets", [])
+        if not isinstance(items, list):
+            return []
+        normalized = self._normalize_dataset_items([x for x in items if isinstance(x, dict)])
+        return self._store_cached_metadata(cache_key, normalized)
+
+    def get_dataset_metadata(self, dataset_id: int) -> Dict[str, Any]:
+        safe_dataset_id = int(dataset_id)
+        cache_key = ("dataset_metadata", safe_dataset_id)
+        cached = self._get_cached_metadata(cache_key)
+        if cached is not None:
+            return cached
+        payload = self._call_product_client("get_dataset_info", int(dataset_id))
+        normalized = self._normalize_dataset_metadata_payload(payload, safe_dataset_id)
+        return self._store_cached_metadata(cache_key, normalized)
 
     def preview_sql(
         self,
@@ -385,24 +496,21 @@ class US13To15VizService:
         if not re.search(r"\blimit\b", safe_sql.casefold()):
             sql_to_run = f"{safe_sql}\nLIMIT {limit}"
 
-        payload = {
-            "database_id": int(database_id),
-            "sql": sql_to_run,
-            "schema": _normalize_text(schema),
-            "tab": "US13 Preview",
-            "runAsync": False,
-            "select_as_cta": False,
-        }
-
-        result = self._request(
-            "POST",
-            "/api/v1/sqllab/execute/",
-            json_body=payload,
-            requires_auth=True,
-            needs_csrf=True,
+        schema_name = _normalize_text(schema)
+        result = self._call_product_client(
+            "execute_sql",
+            {
+                "database_id": int(database_id),
+                "sql": sql_to_run,
+                "schema": schema_name,
+                "limit": limit,
+            },
         )
+        self._raise_if_tool_error(result, default_message="SQL preview failed.")
+        rows = result.get("rows", [])
+        if not isinstance(rows, list):
+            rows = []
 
-        rows = _extract_rows(result)
         if len(rows) > limit:
             rows = rows[:limit]
 
@@ -415,9 +523,19 @@ class US13To15VizService:
             for item in columns
         ]
 
+        self._emit_artifact_event(
+            "preview_completed",
+            status="ok",
+            database_id=int(database_id),
+            schema=schema_name,
+            preview_limit=limit,
+            rows_count=len(rows),
+            column_count=len(columns),
+        )
+
         return {
             "database_id": int(database_id),
-            "schema": _normalize_text(schema),
+            "schema": schema_name,
             "sql_executed": sql_to_run,
             "preview_limit": limit,
             "rows_count": len(rows),
@@ -498,11 +616,14 @@ class US13To15VizService:
             for c in columns
             if c.get("inferred_type") in {"text", "boolean"}
         ]
+        ordered_numeric_cols = [c for c in numeric_cols if _looks_ordered_axis_name(c)]
 
         metric = metric_column if metric_column in numeric_cols else (numeric_cols[0] if numeric_cols else "")
         dimension = (
             dimension_column if dimension_column in text_cols else (text_cols[0] if text_cols else "")
         )
+        if not dimension and dimension_column in ordered_numeric_cols:
+            dimension = dimension_column
         time_col = time_column if time_column in temporal_cols else (temporal_cols[0] if temporal_cols else "")
 
         candidates: List[Dict[str, Any]] = []
@@ -544,6 +665,31 @@ class US13To15VizService:
                         "reason": "Небольшое число категорий, можно показать доли.",
                     }
                 )
+
+        ordered_numeric_dimension = ""
+        if dimension_column in ordered_numeric_cols:
+            ordered_numeric_dimension = dimension_column
+        elif ordered_numeric_cols:
+            ordered_numeric_dimension = ordered_numeric_cols[0]
+
+        if ordered_numeric_dimension and metric:
+            candidates.append(
+                {
+                    "viz_type": "line",
+                    "score": 0.93,
+                    "reason": (
+                        f"Числовая ось '{ordered_numeric_dimension}' выглядит как упорядоченный период, "
+                        f"а '{metric}' подходит как метрика."
+                    ),
+                }
+            )
+            candidates.append(
+                {
+                    "viz_type": "bar",
+                    "score": 0.86,
+                    "reason": "Упорядоченная числовая ось подходит для сравнительного bar chart.",
+                }
+            )
 
         if len(numeric_cols) >= 2:
             candidates.append(
@@ -637,6 +783,116 @@ class US13To15VizService:
 
         return params
 
+    @staticmethod
+    def _unique_column_names(*groups: List[str]) -> List[str]:
+        seen = set()
+        ordered: List[str] = []
+        for group in groups:
+            for raw in group:
+                value = _normalize_text(raw)
+                if not value:
+                    continue
+                key = value.casefold()
+                if key in seen:
+                    continue
+                seen.add(key)
+                ordered.append(value)
+        return ordered
+
+    def _resolve_chart_columns(
+        self,
+        *,
+        dataset_id: int,
+        metric_column: str = "",
+        dimension_column: str = "",
+        time_column: str = "",
+    ) -> List[str]:
+        selected = self._unique_column_names(
+            [dimension_column],
+            [metric_column],
+            [time_column],
+        )
+        if selected:
+            return selected
+
+        metadata = self.get_dataset_metadata(dataset_id)
+        columns = metadata.get("columns", [])
+        if not isinstance(columns, list):
+            return []
+        resolved: List[str] = []
+        for column in columns:
+            if not isinstance(column, dict):
+                continue
+            column_name = _normalize_text(column.get("column_name"))
+            if column_name:
+                resolved.append(column_name)
+            if len(resolved) >= 3:
+                break
+        return resolved
+
+    def _build_mcp_chart_config(
+        self,
+        *,
+        dataset_id: int,
+        viz_type: str,
+        metric_column: str = "",
+        dimension_column: str = "",
+        time_column: str = "",
+    ) -> Dict[str, Any]:
+        safe_viz = _normalize_text(viz_type).lower() or "table"
+        if safe_viz not in COMMON_VIZ_TYPES:
+            safe_viz = "table"
+
+        available_columns = self._resolve_chart_columns(
+            dataset_id=dataset_id,
+            metric_column=metric_column,
+            dimension_column=dimension_column,
+            time_column=time_column,
+        )
+        if not available_columns:
+            raise RuntimeError(
+                f"Dataset {dataset_id} does not expose usable columns for chart generation."
+            )
+
+        if safe_viz == "table":
+            return {
+                "chart_type": "table",
+                "columns": [{"name": name} for name in available_columns],
+            }
+
+        if safe_viz == "pie":
+            raise RuntimeError(
+                "Pie chart creation uses the compatibility extension path, not the built-in schema."
+            )
+
+        x_name = _normalize_text(time_column) or _normalize_text(dimension_column) or available_columns[0]
+        metric_name = _normalize_text(metric_column)
+        count_base = _normalize_text(dimension_column) or x_name
+        y_config: Dict[str, Any]
+        if metric_name:
+            y_config = {
+                "name": metric_name,
+                "aggregate": "SUM",
+                "label": f"SUM({metric_name})",
+            }
+        else:
+            y_config = {
+                "name": count_base,
+                "aggregate": "COUNT",
+                "label": f"COUNT({count_base})",
+            }
+
+        config: Dict[str, Any] = {
+            "chart_type": "xy",
+            "x": {"name": x_name},
+            "y": [y_config],
+            "kind": safe_viz if safe_viz in {"line", "bar", "area", "scatter"} else "bar",
+        }
+        group_by = _normalize_text(dimension_column)
+        if group_by and group_by != x_name:
+            config["group_by"] = {"name": group_by}
+        return config
+
     def create_dashboard_widget_with_share(
         self,
         *,
@@ -652,6 +908,7 @@ class US13To15VizService:
     ) -> Dict[str, Any]:
         safe_dashboard_title = _normalize_text(dashboard_title) or "AI Dashboard"
         safe_slice_name = _normalize_text(slice_name) or "AI Widget"
+        safe_viz_type = _normalize_text(viz_type).lower() or "table"
 
         dashboard = self._create_dashboard(safe_dashboard_title)
         dashboard_id = int(dashboard["dashboard_id"])
@@ -669,15 +926,26 @@ class US13To15VizService:
             slice_name=safe_slice_name,
             datasource_id=int(dataset_id),
             datasource_type="table",
-            viz_type=_normalize_text(viz_type).lower() or "table",
+            viz_type=safe_viz_type,
             params=params,
             dashboard_id=dashboard_id,
             description=description,
+            metric_column=metric_column,
+            dimension_column=dimension_column,
+            time_column=time_column,
         )
 
         dashboard_url = dashboard.get("dashboard_url") or f"/superset/dashboard/{dashboard_id}/"
         chart_id = int(chart["chart_id"])
         chart_url = chart.get("chart_url") or f"/explore/?slice_id={chart_id}"
+        self._emit_artifact_event(
+            "useful_links_produced",
+            status="ok",
+            dashboard_id=dashboard_id,
+            chart_id=chart_id,
+            link_count=2,
+            link_kinds=["chart", "dashboard"],
+        )
 
         return {
             "dashboard_id": dashboard_id,
@@ -687,29 +955,245 @@ class US13To15VizService:
             "dashboard_link": self._to_absolute_url(dashboard_url),
             "chart_link": self._to_absolute_url(chart_url),
             "params": params,
-            "viz_type": _normalize_text(viz_type).lower() or "table",
+            "viz_type": safe_viz_type,
         }
 
-    def _create_dashboard(self, dashboard_title: str) -> Dict[str, Any]:
-        payload = {
-            "dashboard_title": dashboard_title,
-            "json_metadata": "{}",
-        }
-        result = self._request(
-            "POST",
-            "/api/v1/dashboard/",
-            json_body=payload,
-            requires_auth=True,
-            needs_csrf=True,
+    def create_chart_with_share(
+        self,
+        *,
+        dataset_id: int,
+        slice_name: str,
+        viz_type: str,
+        metric_column: str = "",
+        dimension_column: str = "",
+        time_column: str = "",
+        row_limit: int = 1000,
+        description: str = "",
+    ) -> Dict[str, Any]:
+        safe_slice_name = _normalize_text(slice_name) or "AI Chart"
+        safe_viz_type = _normalize_text(viz_type).lower() or "table"
+
+        params = self.build_chart_params(
+            dataset_id=dataset_id,
+            viz_type=viz_type,
+            metric_column=metric_column,
+            dimension_column=dimension_column,
+            time_column=time_column,
+            row_limit=row_limit,
         )
 
-        dashboard_id = result.get("id")
+        chart = self._create_chart(
+            slice_name=safe_slice_name,
+            datasource_id=int(dataset_id),
+            datasource_type="table",
+            viz_type=safe_viz_type,
+            params=params,
+            description=description,
+            metric_column=metric_column,
+            dimension_column=dimension_column,
+            time_column=time_column,
+        )
+
+        chart_id = int(chart["chart_id"])
+        chart_url = chart.get("chart_url") or f"/explore/?slice_id={chart_id}"
+        self._emit_artifact_event(
+            "useful_links_produced",
+            status="ok",
+            chart_id=chart_id,
+            link_count=1,
+            link_kinds=["chart"],
+        )
+
+        return {
+            "chart_id": chart_id,
+            "chart_url": chart_url,
+            "chart_link": self._to_absolute_url(chart_url),
+            "params": params,
+            "viz_type": safe_viz_type,
+        }
+
+    def generate_dashboard(
+        self,
+        *,
+        chart_ids: List[int],
+        dashboard_title: str,
+        description: str = "",
+    ) -> Dict[str, Any]:
+        safe_title = _normalize_text(dashboard_title) or "AI Dashboard"
+        if not chart_ids:
+            return self._create_dashboard(safe_title)
+        payload = self._call_product_client(
+            "generate_dashboard",
+            {
+                "chart_ids": [int(chart_id) for chart_id in chart_ids],
+                "dashboard_title": safe_title,
+                "description": _normalize_text(description) or None,
+                "published": False,
+            },
+        )
+        self._raise_if_tool_error(payload, default_message="Dashboard generation failed.")
+        dashboard = payload.get("dashboard", {})
+        dashboard_id = dashboard.get("id") if isinstance(dashboard, dict) else None
+        dashboard_url = _normalize_text(
+            payload.get("dashboard_url")
+            or (dashboard.get("url") if isinstance(dashboard, dict) else "")
+        )
+        if not isinstance(dashboard_id, int):
+            raise RuntimeError(f"Dashboard generate response does not contain id: {payload}")
+        self._emit_artifact_event(
+            "dashboard_created",
+            status="ok",
+            artifact_type="dashboard",
+            artifact_id=dashboard_id,
+        )
+        return {
+            "dashboard_id": dashboard_id,
+            "dashboard_url": dashboard_url or f"/superset/dashboard/{dashboard_id}/",
+            "dashboard_link": self._to_absolute_url(
+                dashboard_url or f"/superset/dashboard/{dashboard_id}/"
+            ),
+            "raw": payload,
+        }
+
+    def update_chart(
+        self,
+        *,
+        chart_id: int,
+        dataset_id: int,
+        viz_type: str,
+        metric_column: str = "",
+        dimension_column: str = "",
+        time_column: str = "",
+    ) -> Dict[str, Any]:
+        safe_viz = _normalize_text(viz_type).lower() or "table"
+        if safe_viz == "pie":
+            raise RuntimeError(
+                "Pie chart updates are not yet migrated to built-in MCP semantics."
+            )
+        payload = self._call_product_client(
+            "update_chart",
+            {
+                "identifier": int(chart_id),
+                "config": self._build_mcp_chart_config(
+                    dataset_id=int(dataset_id),
+                    viz_type=safe_viz,
+                    metric_column=metric_column,
+                    dimension_column=dimension_column,
+                    time_column=time_column,
+                ),
+                "generate_preview": False,
+            },
+        )
+        self._raise_if_tool_error(payload, default_message="Chart update failed.")
+        chart = payload.get("chart", {})
+        updated_chart_id = chart.get("id") if isinstance(chart, dict) else None
+        chart_url = _normalize_text(
+            payload.get("explore_url")
+            or (chart.get("url") if isinstance(chart, dict) else "")
+        )
+        if not isinstance(updated_chart_id, int):
+            raise RuntimeError(f"Chart update response does not contain id: {payload}")
+        return {
+            "chart_id": updated_chart_id,
+            "chart_url": chart_url or f"/explore/?slice_id={updated_chart_id}",
+            "raw": payload,
+        }
+
+    def generate_explore_link(
+        self,
+        *,
+        dataset_id: int,
+        viz_type: str,
+        metric_column: str = "",
+        dimension_column: str = "",
+        time_column: str = "",
+    ) -> str:
+        safe_viz = _normalize_text(viz_type).lower() or "table"
+        if safe_viz == "pie":
+            raise RuntimeError(
+                "Pie explore-link generation is not yet migrated to built-in MCP semantics."
+            )
+        payload = self._call_product_client(
+            "generate_explore_link",
+            {
+                "dataset_id": int(dataset_id),
+                "config": self._build_mcp_chart_config(
+                    dataset_id=int(dataset_id),
+                    viz_type=safe_viz,
+                    metric_column=metric_column,
+                    dimension_column=dimension_column,
+                    time_column=time_column,
+                ),
+            },
+        )
+        self._raise_if_tool_error(payload, default_message="Explore link generation failed.")
+        url = _normalize_text(payload.get("url"))
+        if not url:
+            raise RuntimeError(f"Explore link response does not contain url: {payload}")
+        self._emit_artifact_event(
+            "useful_links_produced",
+            status="ok",
+            dataset_id=int(dataset_id),
+            link_count=1,
+            link_kinds=["chart"],
+        )
+        return self._to_absolute_url(url)
+
+    def open_sql_lab_link(
+        self,
+        *,
+        database_id: int,
+        schema_name: str = "",
+        dataset_in_context: str = "",
+        title: str = "AI SQL Preview",
+    ) -> str:
+        payload = self._call_product_client(
+            "open_sql_lab_with_context",
+            {
+                "database_connection_id": int(database_id),
+                "schema_name": _normalize_text(schema_name),
+                "dataset_in_context": _normalize_text(dataset_in_context),
+                "title": _normalize_text(title) or "AI SQL Preview",
+            },
+        )
+        self._raise_if_tool_error(payload, default_message="SQL Lab link generation failed.")
+        url = _normalize_text(payload.get("url"))
+        if not url:
+            raise RuntimeError(f"SQL Lab response does not contain url: {payload}")
+        self._emit_artifact_event(
+            "useful_links_produced",
+            status="ok",
+            database_id=int(database_id),
+            link_count=1,
+            link_kinds=["sql_lab"],
+        )
+        return self._to_absolute_url(url)
+
+    def _create_dashboard(self, dashboard_title: str) -> Dict[str, Any]:
+        result = self._call_product_client(
+            "create_empty_dashboard",
+            {"dashboard_title": dashboard_title},
+        )
+        self._raise_if_tool_error(result, default_message="Dashboard creation failed.")
+        dashboard = result.get("dashboard")
+        dashboard_id = dashboard.get("id") if isinstance(dashboard, dict) else None
+        dashboard_url = _normalize_text(
+            result.get("dashboard_url")
+            or (dashboard.get("url") if isinstance(dashboard, dict) else "")
+        )
+
         if not isinstance(dashboard_id, int):
             raise RuntimeError(f"Dashboard create response does not contain id: {result}")
 
-        dashboard_url = _normalize_text(result.get("url"))
         if not dashboard_url:
             dashboard_url = f"/superset/dashboard/{dashboard_id}/"
+
+        self._emit_artifact_event(
+            "dashboard_created",
+            status="ok",
+            artifact_type="dashboard",
+            artifact_id=dashboard_id,
+        )
 
         return {
             "dashboard_id": dashboard_id,
@@ -727,34 +1211,76 @@ class US13To15VizService:
         params: Dict[str, Any],
         dashboard_id: Optional[int] = None,
         description: str = "",
+        metric_column: str = "",
+        dimension_column: str = "",
+        time_column: str = "",
     ) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {
-            "slice_name": slice_name,
-            "datasource_id": int(datasource_id),
-            "datasource_type": _normalize_text(datasource_type) or "table",
-            "viz_type": _normalize_text(viz_type) or "table",
-            "params": json.dumps(params, ensure_ascii=False),
-        }
-        if dashboard_id is not None:
-            payload["dashboards"] = [int(dashboard_id)]
-        if _normalize_text(description):
-            payload["description"] = _normalize_text(description)
+        safe_viz = _normalize_text(viz_type).lower() or "table"
+        if safe_viz == "pie":
+            result = self._call_product_client(
+                "legacy_chart_create",
+                {
+                    "slice_name": slice_name,
+                    "datasource_id": int(datasource_id),
+                    "datasource_type": _normalize_text(datasource_type) or "table",
+                    "viz_type": safe_viz,
+                    "params": params,
+                    "description": _normalize_text(description) or None,
+                },
+            )
+            self._raise_if_tool_error(result, default_message="Chart creation failed.")
+            chart_id = result.get("chart_id")
+            chart_url = _normalize_text(result.get("chart_url"))
+        else:
+            result = self._call_product_client(
+                "generate_chart",
+                {
+                    "dataset_id": int(datasource_id),
+                    "config": self._build_mcp_chart_config(
+                        dataset_id=int(datasource_id),
+                        viz_type=safe_viz,
+                        metric_column=metric_column,
+                        dimension_column=dimension_column,
+                        time_column=time_column,
+                    ),
+                    "save_chart": True,
+                    "generate_preview": False,
+                },
+            )
+            self._raise_if_tool_error(result, default_message="Chart creation failed.")
+            chart = result.get("chart")
+            chart_id = chart.get("id") if isinstance(chart, dict) else None
+            chart_url = _normalize_text(
+                result.get("explore_url")
+                or (chart.get("url") if isinstance(chart, dict) else "")
+            )
+            if dashboard_id is not None and isinstance(chart_id, int):
+                attach_result = self._call_product_client(
+                    "add_chart_to_existing_dashboard",
+                    {
+                        "dashboard_id": int(dashboard_id),
+                        "chart_id": int(chart_id),
+                    },
+                )
+                self._raise_if_tool_error(
+                    attach_result,
+                    default_message="Attaching chart to dashboard failed.",
+                )
 
-        result = self._request(
-            "POST",
-            "/api/v1/chart/",
-            json_body=payload,
-            requires_auth=True,
-            needs_csrf=True,
-        )
-
-        chart_id = result.get("id")
         if not isinstance(chart_id, int):
             raise RuntimeError(f"Chart create response does not contain id: {result}")
 
-        chart_url = _normalize_text(result.get("url"))
         if not chart_url:
             chart_url = f"/explore/?slice_id={chart_id}"
+
+        self._emit_artifact_event(
+            "chart_created",
+            status="ok",
+            artifact_type="chart",
+            artifact_id=chart_id,
+            viz_type=safe_viz,
+            dashboard_id=dashboard_id,
+        )
 
         return {
             "chart_id": chart_id,

@@ -31,6 +31,7 @@ from superset.mcp_service.chart.chart_utils import (
     generate_chart_name,
     map_config_to_form_data,
 )
+from superset.mcp_service.chart.query_utils import build_chart_query_context_json
 from superset.mcp_service.chart.schemas import (
     AccessibilityMetadata,
     GenerateChartResponse,
@@ -130,6 +131,12 @@ async def update_chart(
 
         # Map the new config to form_data format
         new_form_data = map_config_to_form_data(request.config)
+        runtime_form_data = {
+            **new_form_data,
+            "slice_id": chart.id,
+            "datasource": f"{chart.datasource_id}__{chart.datasource_type}",
+            "viz_type": new_form_data["viz_type"],
+        }
 
         # Update chart using Superset's command
         from superset.commands.chart.update import UpdateChartCommand
@@ -145,6 +152,11 @@ async def update_chart(
             "slice_name": chart_name,
             "viz_type": new_form_data["viz_type"],
             "params": json.dumps(new_form_data),
+            "query_context": build_chart_query_context_json(
+                form_data=runtime_form_data,
+                force_refresh=False,
+                cache_timeout=None,
+            ),
         }
 
         command = UpdateChartCommand(chart.id, update_payload)

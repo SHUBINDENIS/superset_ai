@@ -16,8 +16,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-import httpx
 from dotenv import load_dotenv
+
+from backend.mcp_client.base import BaseProductMCPClient
+from backend.mcp_client.runtime import ProductMCPRuntime, create_product_mcp_runtime
 
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
@@ -276,106 +278,75 @@ def _build_heuristic_relations(
 @dataclass
 class SupersetUS1SchemaProfiler:
     base_url: str
-    username: str
-    password: str
     timeout_seconds: float = 30.0
     max_tables_per_db: int = 120
 
     def __post_init__(self) -> None:
         self.base_url = self.base_url.rstrip("/")
-        self._token: Optional[str] = None
-        self._client = httpx.AsyncClient(
-            base_url=self.base_url,
-            timeout=self.timeout_seconds,
-            limits=httpx.Limits(max_keepalive_connections=10, max_connections=50),
-        )
+        self._mcp_runtime: ProductMCPRuntime | None = None
 
     @classmethod
     def from_env(cls) -> "SupersetUS1SchemaProfiler":
         base_url = os.getenv("SUPERSET_BASE_URL", "http://localhost:8088")
-        username = os.getenv("SUPERSET_USERNAME", "")
-        password = os.getenv("SUPERSET_PASSWORD", "")
         max_tables = int(os.getenv("US1_MAX_TABLES_PER_DB", "120"))
         timeout = float(os.getenv("US1_TIMEOUT_SECONDS", "30"))
         return cls(
             base_url=base_url,
-            username=username,
-            password=password,
             timeout_seconds=timeout,
             max_tables_per_db=max_tables,
         )
 
     async def close(self) -> None:
-        await self._client.aclose()
+        if self._mcp_runtime is not None:
+            await self._mcp_runtime.close()
+            self._mcp_runtime = None
 
-    async def _request(
-        self,
-        method: str,
-        endpoint: str,
-        *,
-        params: Optional[Dict[str, Any]] = None,
-        json_body: Optional[Dict[str, Any]] = None,
-        requires_auth: bool = True,
-        needs_csrf: bool = False,
+    async def _ensure_product_client(self) -> BaseProductMCPClient:
+        if self._mcp_runtime is None:
+            self._mcp_runtime = await create_product_mcp_runtime(
+                fallback_runtime="none"
+            )
+        return self._mcp_runtime.product_client
+
+    async def _call_product_client(
+        self, method_name: str, request: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
-        headers: Dict[str, str] = {"Accept": "application/json"}
-        if requires_auth and self._token:
-            headers["Authorization"] = f"Bearer {self._token}"
-        if needs_csrf:
-            csrf_token = await self._get_csrf_token()
-            if csrf_token:
-                headers["X-CSRFToken"] = csrf_token
-            headers["Content-Type"] = "application/json"
+        product_client = await self._ensure_product_client()
+        method = getattr(product_client, method_name)
+        if request is None:
+            response = await method()
+        else:
+            response = await method(dict(request))
+        return dict(response or {})
 
-        response = await self._client.request(
-            method.upper(),
-            endpoint,
-            params=params,
-            json=json_body,
-            headers=headers,
-        )
-        response.raise_for_status()
-        if not response.content:
-            return {}
-        return response.json()
+    def _query_timeout_seconds(self) -> int:
+        return max(1, min(int(self.timeout_seconds), 300))
 
-    async def _get_csrf_token(self) -> Optional[str]:
-        try:
-            payload = await self._request(
-                "GET",
-                "/api/v1/security/csrf_token/",
-                requires_auth=True,
-                needs_csrf=False,
+    async def _list_accessible_databases(self) -> List[Dict[str, Any]]:
+        databases: List[Dict[str, Any]] = []
+        page = 1
+        page_size = 1000
+
+        while True:
+            payload = await self._call_product_client(
+                "list_databases",
+                {
+                    "page": page,
+                    "page_size": page_size,
+                },
             )
-            token = payload.get("result")
-            return token if isinstance(token, str) and token else None
-        except Exception:
-            return None
+            items = [
+                item
+                for item in list(payload.get("databases", []) or [])
+                if isinstance(item, dict)
+            ]
+            databases.extend(items)
+            total_count = int(payload.get("total_count", len(databases)) or 0)
+            if not items or len(databases) >= total_count or len(items) < page_size:
+                break
+            page += 1
 
-    async def authenticate(self) -> None:
-        if not self.username or not self.password:
-            raise RuntimeError(
-                "SUPERSET_USERNAME/SUPERSET_PASSWORD are required for US1 scanner."
-            )
-
-        login_payload = {
-            "username": self.username,
-            "password": self.password,
-            "provider": "db",
-            "refresh": True,
-        }
-        response = await self._request(
-            "POST",
-            "/api/v1/security/login",
-            json_body=login_payload,
-            requires_auth=False,
-            needs_csrf=False,
-        )
-
-        token = response.get("access_token")
-        if not isinstance(token, str) or not token:
-            raise RuntimeError("Superset auth succeeded without access_token.")
-        self._token = token
+        return databases
 
     async def _sql_query(
         self,
@@ -383,22 +354,51 @@ class SupersetUS1SchemaProfiler:
         sql: str,
         schema: str = "",
     ) -> List[Dict[str, Any]]:
-        payload = {
+        payload: Dict[str, Any] = {
             "database_id": database_id,
             "sql": sql,
-            "schema": schema,
-            "tab": "US1 Metadata Scan",
-            "runAsync": False,
-            "select_as_cta": False,
+            "limit": 10000,
+            "timeout": self._query_timeout_seconds(),
         }
-        result = await self._request(
-            "POST",
-            "/api/v1/sqllab/execute/",
-            json_body=payload,
-            requires_auth=True,
-            needs_csrf=True,
+        if schema:
+            payload["schema"] = schema
+        result = await self._call_product_client("execute_sql", payload)
+        if result.get("success") is False:
+            error_text = str(
+                result.get("error")
+                or result.get("message")
+                or "execute_sql returned success=false"
+            ).strip()
+            raise RuntimeError(error_text)
+        rows = result.get("rows")
+        if not isinstance(rows, list):
+            return []
+        return [dict(row) for row in rows if isinstance(row, dict)]
+
+    async def _load_database_schemas(self, database_id: int) -> List[str]:
+        rows = await self._sql_query(
+            database_id=database_id,
+            sql="""
+                SELECT schema_name
+                FROM information_schema.schemata
+                WHERE schema_name <> 'information_schema'
+                  AND schema_name NOT LIKE 'pg_%'
+                ORDER BY schema_name
+            """,
         )
-        return _extract_rows(result)
+        schemas = sorted(
+            {
+                schema_name
+                for row in rows
+                for schema_name in [
+                    str(row.get("schema_name") or row.get("schema") or "").strip()
+                ]
+                if schema_name
+                and schema_name != "information_schema"
+                and not schema_name.startswith("pg_")
+            }
+        )
+        return schemas or ["public"]
 
     async def _load_table_columns(
         self, database_id: int, schema_name: str, table_name: str
@@ -454,21 +454,6 @@ class SupersetUS1SchemaProfiler:
     async def _load_tables_for_schema(
         self, database_id: int, schema_name: str
     ) -> List[Dict[str, Any]]:
-        # Primary path: Superset API endpoint with required schema_name query.
-        query = _build_schema_query_rison(schema_name=schema_name, force=False)
-        try:
-            payload = await self._request(
-                "GET",
-                f"/api/v1/database/{database_id}/tables/",
-                params={"q": query},
-            )
-            normalized = _normalize_tables(payload)
-            if normalized:
-                return normalized
-        except Exception:
-            pass
-
-        # Fallback: information_schema query for robustness.
         sql = f"""
             SELECT table_schema AS schema, table_name AS table
             FROM information_schema.tables
@@ -487,11 +472,7 @@ class SupersetUS1SchemaProfiler:
         return list(dedup_keyed.values())
 
     async def build_report(self) -> Dict[str, Any]:
-        await self.authenticate()
-
-        databases_payload = await self._request("GET", "/api/v1/database/")
-        raw_db_items = _extract_result_items(databases_payload)
-        db_items = [item for item in raw_db_items if isinstance(item, dict)]
+        db_items = await self._list_accessible_databases()
 
         scan_only_postgres = (
             os.getenv("US1_ONLY_POSTGRES", "true").strip().lower()
@@ -508,19 +489,7 @@ class SupersetUS1SchemaProfiler:
 
             db_name = _extract_db_name(db, db_id)
             backend_hint = _detect_backend_hint(db)
-            backend_source = "list"
-            detail_probe_error: Optional[str] = None
-
-            if backend_hint == "unknown":
-                try:
-                    detail_payload = await self._request("GET", f"/api/v1/database/{db_id}")
-                    detail_result = detail_payload.get("result")
-                    if isinstance(detail_result, dict):
-                        merged = {**db, **detail_result}
-                        backend_hint = _detect_backend_hint(merged)
-                        backend_source = "details"
-                except Exception as exc:
-                    detail_probe_error = str(exc)
+            backend_source = "mcp_ext.list_databases"
 
             is_postgres = "postgres" in backend_hint.lower()
             candidate = {
@@ -530,8 +499,6 @@ class SupersetUS1SchemaProfiler:
                 "backend_source": backend_source,
                 "is_postgres": is_postgres,
             }
-            if detail_probe_error:
-                candidate["detail_probe_error"] = detail_probe_error
             database_candidates.append(candidate)
 
             if (scan_only_postgres and is_postgres) or (not scan_only_postgres):
@@ -552,10 +519,7 @@ class SupersetUS1SchemaProfiler:
             db_name = str(db.get("database_name") or f"db_{db_id}")
             backend = str(db.get("backend") or "unknown")
 
-            schemas_payload = await self._request("GET", f"/api/v1/database/{db_id}/schemas/")
-            schemas = _normalize_schemas(schemas_payload)
-            if not schemas:
-                schemas = ["public"]
+            schemas = await self._load_database_schemas(db_id)
 
             tables: List[Dict[str, Any]] = []
             table_errors: List[Dict[str, str]] = []

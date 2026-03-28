@@ -92,6 +92,7 @@ services:
   superset-worker:
     image: *superset-image
     container_name: superset_worker
+    profiles: ["async"]
     command: ["/app/docker/docker-bootstrap.sh", "worker"]
     env_file:
       - path: docker/.env # default
@@ -114,6 +115,7 @@ services:
   superset-worker-beat:
     image: *superset-image
     container_name: superset_worker_beat
+    profiles: ["async"]
     command: ["/app/docker/docker-bootstrap.sh", "beat"]
     env_file:
       - path: docker/.env # default

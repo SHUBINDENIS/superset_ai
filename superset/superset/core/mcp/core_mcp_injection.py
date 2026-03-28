@@ -22,6 +22,8 @@ This module provides the concrete implementation of MCP abstractions
 that replaces the abstract functions in superset-core during initialization.
 """
 
+import functools
+import inspect
 import logging
 from typing import Any, Callable, Optional, TypeVar
 
@@ -29,6 +31,30 @@ from typing import Any, Callable, Optional, TypeVar
 F = TypeVar("F", bound=Callable[..., Any])
 
 logger = logging.getLogger(__name__)
+
+
+def wrap_with_flask_app_context(func: F) -> F:
+    """Ensure MCP tool/prompt executions always run with an active Flask app context."""
+    from superset.mcp_service.flask_singleton import get_flask_app
+
+    flask_app = get_flask_app()
+    is_async = inspect.iscoroutinefunction(func)
+
+    if is_async:
+
+        @functools.wraps(func)
+        async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
+            with flask_app.app_context():
+                return await func(*args, **kwargs)
+
+        return async_wrapper  # type: ignore[return-value]
+
+    @functools.wraps(func)
+    def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+        with flask_app.app_context():
+            return func(*args, **kwargs)
+
+    return sync_wrapper  # type: ignore[return-value]
 
 
 def create_tool_decorator(
@@ -77,6 +103,7 @@ def create_tool_decorator(
                 wrapped_func = mcp_auth_hook(func)
             else:
                 wrapped_func = func
+            wrapped_func = wrap_with_flask_app_context(wrapped_func)
 
             from fastmcp.tools import Tool
 
@@ -165,6 +192,7 @@ def create_prompt_decorator(
                 wrapped_func = mcp_auth_hook(func)
             else:
                 wrapped_func = func
+            wrapped_func = wrap_with_flask_app_context(wrapped_func)
 
             # Register prompt with FastMCP using the same pattern as existing code
             mcp.prompt(
@@ -202,6 +230,57 @@ def create_prompt_decorator(
         return decorator(func)
 
     return parameterized_decorator
+
+
+def create_resource_decorator(
+    uri: str,
+    *,
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+    mime_type: Optional[str] = None,
+    tags: Optional[set[str]] = None,
+    protect: bool = True,
+) -> Callable[[F], F]:
+    """Create the concrete MCP resource decorator implementation."""
+
+    def decorator(func: F) -> F:
+        try:
+            from superset.mcp_service.app import mcp
+
+            if protect:
+                from superset.mcp_service.auth import mcp_auth_hook
+
+                wrapped_func = mcp_auth_hook(func)
+            else:
+                wrapped_func = func
+            wrapped_func = wrap_with_flask_app_context(wrapped_func)
+
+            resource_kwargs: dict[str, Any] = {}
+            if name is not None:
+                resource_kwargs["name"] = name
+            if description is not None:
+                resource_kwargs["description"] = description
+            if mime_type is not None:
+                resource_kwargs["mime_type"] = mime_type
+            if tags is not None:
+                resource_kwargs["tags"] = tags
+
+            mcp.resource(uri, **resource_kwargs)(wrapped_func)
+
+            protected_status = "protected" if protect else "public"
+            logger.info(
+                "Registered MCP resource: %s (%s)",
+                name or func.__name__,
+                protected_status,
+            )
+            return wrapped_func
+        except Exception as e:
+            logger.error(
+                "Failed to register MCP resource %s: %s", name or func.__name__, e
+            )
+            return func
+
+    return decorator
 
 
 def initialize_core_mcp_dependencies() -> None:

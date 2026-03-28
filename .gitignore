@@ -79,6 +79,7 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 package-lock.json
+!superset-ai-assistant-mcp/frontend-next/package-lock.json
 pnpm-lock.yaml
 yarn.lock
 
@@ -102,8 +103,6 @@ superset/.venv/
 superset/venv/
 superset-ai-assistant-mcp/.venv/
 superset-ai-assistant-mcp/venv/
-superset-mcp/.venv/
-superset-mcp/venv/
 
 # -----------------------------
 # Сгенерированные артефакты MCP-проектов
@@ -111,5 +110,3 @@ superset-mcp/venv/
 # -----------------------------
 superset-ai-assistant-mcp/dist/
 superset-ai-assistant-mcp/build/
-superset-mcp/dist/
-superset-mcp/build/

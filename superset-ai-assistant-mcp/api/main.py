@@ -1,0 +1,84 @@
+"""
+FastAPI application entrypoint.
+
+Run locally:
+    cd superset-ai-assistant-mcp
+    uvicorn api.main:app --reload --port 8100
+
+This app serves the single supported assistant API for the Next.js frontend.
+"""
+
+from __future__ import annotations
+
+import os
+import sys
+from contextlib import asynccontextmanager
+
+# Ensure the assistant package root is on sys.path so that
+# ``from backend.auth_service import …`` works regardless of CWD.
+_PACKAGE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _PACKAGE_ROOT not in sys.path:
+    sys.path.insert(0, _PACKAGE_ROOT)
+
+from dotenv import load_dotenv
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+import logging
+
+load_dotenv()
+
+from api.routers import auth, chats, frontend_logs, health, scan, viz  # noqa: E402
+from api.runtime_config import RuntimeConfigError, validate_runtime_config  # noqa: E402
+
+
+logger = logging.getLogger("api.runtime_config")
+
+
+# ---------------------------------------------------------------------------
+# Lifespan: clean up agent sessions / MCP runtimes on shutdown
+# ---------------------------------------------------------------------------
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    try:
+        report = validate_runtime_config()
+        app.state.deployment_mode = report["mode"]
+        for warning in report["warnings"]:
+            logger.warning(warning)
+    except RuntimeConfigError:
+        logger.exception("Startup config validation failed")
+        raise
+    yield
+    try:
+        from backend.ai_agent import shutdown_global_resources
+        await shutdown_global_resources()
+    except Exception:
+        pass
+
+
+app = FastAPI(
+    title="Superset AI Assistant API",
+    version="0.1.0",
+    docs_url="/api/docs",
+    openapi_url="/api/openapi.json",
+    lifespan=_lifespan,
+)
+
+# CORS — permissive for local dev; tighten for production.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.getenv(
+        "API_CORS_ORIGINS",
+        "http://localhost:3001,http://127.0.0.1:3001",
+    ).split(","),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(auth.router)
+app.include_router(chats.router)
+app.include_router(frontend_logs.router)
+app.include_router(viz.router)
+app.include_router(scan.router)
+app.include_router(health.router)
