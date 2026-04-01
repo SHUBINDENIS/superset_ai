@@ -1,24 +1,39 @@
 # Superset AI Assistant
 
-`Superset AI Assistant` is a release-ready analytics assistant built on top of
-`Next.js + FastAPI + Apache Superset + built-in Superset MCP`.
+Analytics assistant for Apache Superset built on `Next.js + FastAPI + built-in Superset MCP`.
 
-The product gives analysts and demo users one browser workflow for:
-
-- asking business or technical questions in chat;
-- previewing datasets before asking or charting;
-- getting chart recommendations from previewed data;
-- creating charts and dashboards in Superset with usable links;
-- scanning Superset-connected PostgreSQL sources, including Pagila demo data.
-
-The only supported runtime path is:
+The system gives analysts one browser workflow for asking questions, previewing datasets, getting chart recommendations, and creating charts or dashboards in Superset without switching between disconnected tools. The supported runtime path is:
 
 `Browser -> Next.js UI -> FastAPI API -> built-in Superset MCP -> Superset`
 
-The legacy external `superset-mcp/main.py` runtime is no longer part of the
-supported product path.
+The legacy external `superset-mcp/main.py` runtime is not part of the active product path.
 
-## Product Overview
+## What This System Does
+
+- chat-driven business and technical analysis
+- dataset preview and field inspection before charting
+- chart recommendation from preview context
+- chart and dashboard creation with normalized Superset links
+- schema and database scan across Superset-connected PostgreSQL sources, including Pagila demo data
+
+## Why The Architecture Matters
+
+- `Next.js` owns the user-facing application shell and browser workflow
+- `FastAPI` owns auth, chat, viz, scan, and runtime validation
+- built-in `Superset MCP` keeps the assistant on the same product path as Superset datasets, charts, and dashboards
+- the repository ships a single supported runtime instead of parallel legacy entrypoints
+
+That separation keeps the UI responsive, backend behavior testable, and Superset integration explicit.
+
+## System At A Glance
+
+| Area | What is here |
+| --- | --- |
+| Product UI | Login, chat, preview, recommend, share, and scan flows |
+| Backend API | Auth, chats, visualization flows, schema scan, and frontend logs |
+| Analytics platform | Apache Superset for datasets, SQL Lab, charts, and dashboards |
+| Tool layer | built-in Superset MCP service used by the assistant runtime |
+| Local runtime | Docker Compose stack for Next.js, FastAPI, Superset, Pagila, and supporting services |
 
 Current user-facing routes:
 
@@ -30,64 +45,23 @@ Current user-facing routes:
 | `/app/preview` | Data preview and field inspection |
 | `/app/recommend` | Chart recommendation based on preview context |
 | `/app/share` | Chart and dashboard creation with links |
-| `/app/scan` | Schema/database scan for source discovery |
+| `/app/scan` | Schema and database scan for source discovery |
 
-Release highlights in the current branch:
+## Key Capabilities
 
-- stable new-chat and first-message flow;
-- per-chat settings with persisted `business/technical` and detail levels;
-- inline table/chart preview artifacts in chat;
-- cleaned link cards instead of raw Superset URLs;
-- Pagila-aware dataset discovery and real chart/dashboard flows;
-- responsive shell with desktop collapse, mobile drawer, sticky composer, and
-  mobile helper toggle;
-- unified built-in MCP client/runtime path with parity coverage and CI jobs.
-
-## Stack
-
-| Layer | Technology | Main path |
-| --- | --- | --- |
-| UI | Next.js 14, React 18, Tailwind | `superset-ai-assistant-mcp/frontend-next/` |
-| API | FastAPI | `superset-ai-assistant-mcp/api/` |
-| Shared backend | Python services | `superset-ai-assistant-mcp/backend/` |
-| Analytics platform | Apache Superset | `superset/` |
-| MCP | built-in Superset MCP service | `superset/superset/mcp_service/` |
-| Dev stack | Docker Compose | `docker-compose.dev.yml` |
-
-## Repository Structure
-
-```text
-.
-├── README.md
-├── docker-compose.dev.yml
-├── docker/dev/
-├── docs/
-├── superset/
-└── superset-ai-assistant-mcp/
-    ├── api/
-    ├── backend/
-    ├── frontend-next/
-    ├── tests/
-    ├── .env.example
-    └── start_fastapi_stack.sh
-```
-
-Key docs:
-
-- [User Guide](docs/user-guide.md)
-- [Developer Guide](docs/developer-guide.md)
-- [Architecture](docs/architecture.md)
-- [Release Notes](docs/release-notes.md)
-- [Deployment](docs/deployment.md)
-- [Update And Debug](docs/update-and-debug.md)
-- [Manual Smoke Checklist](docs/manual-smoke-checklist.md)
+- stable new-chat and first-message flow
+- per-chat settings for `business` vs `technical` mode and detail level
+- inline table and chart artifacts in chat
+- normalized link cards instead of raw Superset URLs
+- Pagila-aware dataset discovery and chart/dashboard flows
+- responsive shell with mobile and desktop support
+- unified built-in MCP runtime with parity coverage and CI enforcement
 
 ## Quick Start
 
 ### Recommended local bring-up
 
 ```bash
-cd /home/superset_ai
 cp .env.dev.example .env.dev
 ./docker/dev/deploy-primary-stack.sh
 ```
@@ -101,7 +75,6 @@ Default local endpoints:
 Smoke-check the stack:
 
 ```bash
-cd /home/superset_ai
 ./docker/dev/check-primary-stack.sh
 ```
 
@@ -110,157 +83,141 @@ cd /home/superset_ai
 Superset:
 
 ```bash
-cd /home/superset_ai/superset
+cd superset
 docker compose -f docker-compose-image-tag.yml up -d db redis superset-init superset
 ```
 
 FastAPI:
 
 ```bash
-cd /home/superset_ai/superset-ai-assistant-mcp
+cd superset-ai-assistant-mcp
 .venv/bin/python -m uvicorn api.main:app --host 0.0.0.0 --port 8100
 ```
 
 Next.js:
 
 ```bash
-cd /home/superset_ai/superset-ai-assistant-mcp/frontend-next
+cd superset-ai-assistant-mcp/frontend-next
 npm install
 NEXT_PUBLIC_API_URL=http://127.0.0.1:8100 \
 NEXT_PUBLIC_BROWSER_API_URL=http://127.0.0.1:8100 \
 npm run dev -- --hostname 0.0.0.0 --port 3001
 ```
 
-## Requirements And Environment
+## Where To Look
 
-Baseline runtime assumptions used in CI and docs:
+### Docs map
 
-- Python `3.12`
-- Node.js `20`
-- Docker / Docker Compose for the unified stack
-- reachable Superset instance and built-in MCP runtime
-- OpenAI API key
+- [Docs Index](docs/README.md)
+- [Architecture](docs/architecture.md)
+- [Deployment](docs/deployment.md)
+- [User Guide](docs/user-guide.md)
+- [Developer Guide](docs/developer-guide.md)
+- [Release Notes](docs/release-notes.md)
+- [Update And Debug](docs/update-and-debug.md)
+- [Manual Smoke Checklist](docs/manual-smoke-checklist.md)
+
+### Main code boundaries
+
+- UI: [`superset-ai-assistant-mcp/frontend-next/`](superset-ai-assistant-mcp/frontend-next/)
+- API: [`superset-ai-assistant-mcp/api/`](superset-ai-assistant-mcp/api/)
+- backend services: [`superset-ai-assistant-mcp/backend/`](superset-ai-assistant-mcp/backend/)
+- assistant tests: [`superset-ai-assistant-mcp/tests/`](superset-ai-assistant-mcp/tests/)
+- Superset and built-in MCP: [`superset/`](superset/)
+
+## Runtime And Deployment
+
+Primary runtime model:
+
+- `https://assistant.example.com/` -> Next.js
+- `https://assistant.example.com/api/*` -> FastAPI
+- `https://superset.example.com/` -> Superset
+
+Most important runtime files:
+
+- dev stack: [`docker-compose.dev.yml`](docker-compose.dev.yml)
+- primary deploy helper: [`docker/dev/deploy-primary-stack.sh`](docker/dev/deploy-primary-stack.sh)
+- primary stack health check: [`docker/dev/check-primary-stack.sh`](docker/dev/check-primary-stack.sh)
+- FastAPI entrypoint: [`superset-ai-assistant-mcp/api/main.py`](superset-ai-assistant-mcp/api/main.py)
+- Next.js API proxy: [`superset-ai-assistant-mcp/frontend-next/src/app/api/[...path]/route.ts`](superset-ai-assistant-mcp/frontend-next/src/app/api/[...path]/route.ts)
+- proxy example: [`docs/examples/nginx-primary-ui.conf.example`](docs/examples/nginx-primary-ui.conf.example)
 
 Primary environment files:
 
 - root dev stack: [`.env.dev.example`](.env.dev.example)
 - assistant service env: [`superset-ai-assistant-mcp/.env.example`](superset-ai-assistant-mcp/.env.example)
 
-Most important variables:
+## Testing And Reliability
 
-| Variable | Meaning |
-| --- | --- |
-| `OPENAI_API_KEY` | Required for assistant generation |
-| `OPENAI_MODEL` | Active OpenAI model |
-| `ASSISTANT_DEPLOYMENT_MODE` | `development` or `production` |
-| `SUPERSET_PRODUCT_MCP_RUNTIME` | `built_in_stdio` or `built_in_http` |
-| `SUPERSET_PUBLIC_URL` | Public Superset host used for links |
-| `SUPERSET_BASE_URL` | Internal Superset URL for backend access |
-| `AUTH_JWT_SECRET` | Auth signing secret |
-| `API_CORS_ORIGINS` | Only needed for intentional cross-origin API access |
-| `US15_SHARE_BASE_URL` | Optional share-link override |
+The repository includes:
 
-Runtime config validation runs on API startup and in deploy helpers.
+- assistant unit tests
+- API and product-flow regression tests
+- built-in MCP integration tests
+- MCP tool inventory enforcement
+- release smoke-check scripts for the unified stack
 
-## Running Frontend And Backend
+Representative test locations:
 
-Primary service entrypoints:
+- API and product flow tests: [`superset-ai-assistant-mcp/tests/`](superset-ai-assistant-mcp/tests/)
+- MCP integration tests: [`superset-ai-assistant-mcp/tests/integration/mcp_client/`](superset-ai-assistant-mcp/tests/integration/mcp_client/)
+- unit suites: [`superset-ai-assistant-mcp/tests/unit/`](superset-ai-assistant-mcp/tests/unit/)
+- CI workflows: [`.github/workflows/ci.yml`](.github/workflows/ci.yml), [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml)
 
-- FastAPI container/start script: [`start_fastapi_stack.sh`](superset-ai-assistant-mcp/start_fastapi_stack.sh)
-- Next.js proxy route: [`route.ts`](superset-ai-assistant-mcp/frontend-next/src/app/api/[...path]/route.ts)
-- FastAPI app: [`api/main.py`](superset-ai-assistant-mcp/api/main.py)
-
-Production-like publication model:
-
-- `https://assistant.example.com/` -> Next.js
-- `https://assistant.example.com/api/*` -> FastAPI
-- `https://superset.example.com/` -> Superset
-
-Proxy reference:
-
-- [nginx-primary-ui.conf.example](docs/examples/nginx-primary-ui.conf.example)
-
-## Testing
-
-Assistant API/backend regression set:
+Common local commands:
 
 ```bash
-cd /home/superset_ai
-PYTHONPATH=./superset-ai-assistant-mcp \
-superset-ai-assistant-mcp/.venv/bin/python -m unittest \
-  superset-ai-assistant-mcp/tests/test_api_auth.py \
-  superset-ai-assistant-mcp/tests/test_api_chats.py \
-  superset-ai-assistant-mcp/tests/test_api_viz.py \
-  superset-ai-assistant-mcp/tests/test_api_scan.py \
-  superset-ai-assistant-mcp/tests/test_api_frontend_logs.py \
-  superset-ai-assistant-mcp/tests/test_auth_service.py \
-  superset-ai-assistant-mcp/tests/test_ai_agent_clarifications.py \
-  superset-ai-assistant-mcp/tests/test_us13_15_viz_service.py
-```
-
-Unit suites:
-
-```bash
-cd /home/superset_ai
 PYTHONPATH=./superset-ai-assistant-mcp \
 superset-ai-assistant-mcp/.venv/bin/python -m unittest discover \
   -s superset-ai-assistant-mcp/tests/unit \
   -p "test_*.py"
 ```
 
-Frontend build:
-
 ```bash
-cd /home/superset_ai/superset-ai-assistant-mcp/frontend-next
+cd superset-ai-assistant-mcp/frontend-next
 npm ci
 npm run build
 ```
 
-CI also runs:
+## Repository Layout
 
-- assistant unit tests;
-- assistant product-flow tests;
-- built-in MCP integration tests;
-- MCP tool inventory enforcement;
-- Superset MCP extension and core unit tests.
+```text
+.
+├── README.md
+├── docker-compose.dev.yml
+├── docker/dev/                     # deploy, validation, and stack helper scripts
+├── docs/                           # architecture, deployment, user/dev guides, rollout docs
+├── superset/                       # Apache Superset + built-in MCP implementation
+└── superset-ai-assistant-mcp/
+    ├── api/                        # FastAPI routes and app wiring
+    ├── backend/                    # assistant, viz, auth, scan, and domain services
+    ├── frontend-next/              # Next.js product UI
+    ├── tests/                      # unit, regression, and integration tests
+    └── start_fastapi_stack.sh
+```
 
 ## Common Issues
 
 `/api/health` returns config errors:
-- check `OPENAI_API_KEY`, `OPENAI_MODEL`, `SUPERSET_PUBLIC_URL`,
-  `AUTH_JWT_SECRET`, and `ASSISTANT_DEPLOYMENT_MODE`.
+- check `OPENAI_API_KEY`, `OPENAI_MODEL`, `SUPERSET_PUBLIC_URL`, `AUTH_JWT_SECRET`, and `ASSISTANT_DEPLOYMENT_MODE`
 
 Chat links open the wrong Superset host:
-- fix `SUPERSET_PUBLIC_URL` and, if set, `US15_SHARE_BASE_URL`.
+- fix `SUPERSET_PUBLIC_URL` and, if set, `US15_SHARE_BASE_URL`
 
 UI works but long chat requests fail through the Next.js proxy:
-- set `NEXT_PUBLIC_BROWSER_API_URL` so the browser can call FastAPI directly.
+- set `NEXT_PUBLIC_BROWSER_API_URL` so the browser can call FastAPI directly
 
 Production validation blocks startup:
-- in `production` mode, placeholder JWT secrets and localhost public URLs are
-  hard failures by design.
+- in `production` mode, placeholder JWT secrets and localhost public URLs are hard failures by design
 
 Pagila flows are unavailable:
-- confirm `pagila-db`, `superset-init`, `superset`, and `mcp-http` are healthy,
-  then rerun the scan flow.
-
-## Documentation
-
-Start here depending on your role:
-
-- product usage: [docs/user-guide.md](docs/user-guide.md)
-- codebase and local dev: [docs/developer-guide.md](docs/developer-guide.md)
-- system design and flows: [docs/architecture.md](docs/architecture.md)
-- rollout and day-2 ops: [docs/deployment.md](docs/deployment.md)
-- update/debug runbook: [docs/update-and-debug.md](docs/update-and-debug.md)
-- current release summary: [docs/release-notes.md](docs/release-notes.md)
+- confirm `pagila-db`, `superset-init`, `superset`, and `mcp-http` are healthy, then rerun the scan flow
 
 ## Historical Migration Material
 
 Migration evidence and parity artifacts remain in:
 
-- [`docs/mcp-migration/`](docs/mcp-migration)
+- [`docs/mcp-migration/`](docs/mcp-migration/)
 - [`docs/streamlit-retirement-summary.md`](docs/streamlit-retirement-summary.md)
 
-These are historical/supporting documents, not the primary runbooks for the
-current product.
+These documents are historical support material, not the primary runbooks for the current system.
