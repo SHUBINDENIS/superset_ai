@@ -1,7 +1,8 @@
 # Update And Debug Guide
 
-Используйте этот документ как основной day-2 operator/developer guide для
-единственного поддерживаемого runtime stack: `Next.js + FastAPI`.
+Use this document as the primary day-2 operator and developer guide for the only supported runtime stack: `Next.js + FastAPI`.
+
+In command examples below, `<repo-root>` means the root directory of this repository checkout.
 
 ## Final Supported Scope
 
@@ -39,7 +40,7 @@ Deployment-mode contract:
 Default local or production-like compose run:
 
 ```bash
-cd /home/superset_ai
+cd <repo-root>
 cp .env.dev.example .env.dev
 ./docker/dev/deploy-primary-stack.sh
 ```
@@ -52,7 +53,7 @@ Primary endpoints:
 Low-level compose path for debugging only:
 
 ```bash
-cd /home/superset_ai
+cd <repo-root>
 docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
 ```
 
@@ -61,21 +62,21 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
 Primary health:
 
 ```bash
-cd /home/superset_ai
+cd <repo-root>
 ./docker/dev/check-primary-stack.sh
 ```
 
 Standard deploy/update path:
 
 ```bash
-cd /home/superset_ai
+cd <repo-root>
 ./docker/dev/deploy-primary-stack.sh
 ```
 
 Update or rebuild primary services:
 
 ```bash
-cd /home/superset_ai
+cd <repo-root>
 ./docker/dev/refresh-primary-stack.sh
 ./docker/dev/refresh-primary-stack.sh rebuild assistant-api
 ./docker/dev/refresh-primary-stack.sh rebuild assistant-web
@@ -86,23 +87,23 @@ cd /home/superset_ai
 Restart primary services without rebuild:
 
 ```bash
-cd /home/superset_ai
+cd <repo-root>
 ./docker/dev/refresh-primary-stack.sh restart
 ```
 
 Tail logs:
 
 ```bash
-cd /home/superset_ai
+cd <repo-root>
 ./docker/dev/tail-primary-logs.sh
 ./docker/dev/tail-primary-logs.sh compose assistant-api
 ./docker/dev/tail-primary-logs.sh structured
 ```
 
-Если нужны non-default порты для health helper:
+If you need non-default ports for the health helper:
 
 ```bash
-cd /home/superset_ai
+cd <repo-root>
 DEV_API_PORT=18100 DEV_NEXTJS_PORT=13001 DEV_SUPERSET_PORT=18088 ./docker/dev/check-primary-stack.sh
 ```
 
@@ -133,7 +134,7 @@ Optional release visibility:
 Preflight validation:
 
 ```bash
-cd /home/superset_ai
+cd <repo-root>
 ./docker/dev/validate-primary-env.sh
 ```
 

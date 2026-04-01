@@ -1,13 +1,14 @@
 # Superset AI Assistant
 
-Этот каталог теперь поддерживает один runtime path:
+This directory now supports a single runtime path:
 
-- `FastAPI` backend в `api/`
-- `Next.js` frontend в `frontend-next/`
-- shared backend services в `backend/`
+- `FastAPI` backend in `api/`
+- `Next.js` frontend in `frontend-next/`
+- shared backend services in `backend/`
 
-`Streamlit` UI/runtime path удалён. История удаления и сохранённые backend-only
-модули перечислены в `../docs/streamlit-retirement-summary.md`.
+The `Streamlit` UI/runtime path has been removed. The retirement history and retained backend-only modules are documented in `../docs/streamlit-retirement-summary.md`.
+
+In command examples below, `<repo-root>` means the root directory of this repository checkout.
 
 ## What Lives Here
 
@@ -31,7 +32,7 @@
 ### Unified compose
 
 ```bash
-cd /home/superset_ai
+cd <repo-root>
 cp .env.dev.example .env.dev
 ./docker/dev/deploy-primary-stack.sh
 ```
@@ -44,7 +45,7 @@ Endpoints:
 Low-level compose path for debugging only:
 
 ```bash
-cd /home/superset_ai
+cd <repo-root>
 docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
 ```
 
@@ -53,14 +54,14 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
 FastAPI:
 
 ```bash
-cd /home/superset_ai/superset-ai-assistant-mcp
+cd <repo-root>/superset-ai-assistant-mcp
 .venv/bin/python -m uvicorn api.main:app --host 0.0.0.0 --port 8100
 ```
 
 Next.js:
 
 ```bash
-cd /home/superset_ai/superset-ai-assistant-mcp/frontend-next
+cd <repo-root>/superset-ai-assistant-mcp/frontend-next
 npm install
 NEXT_PUBLIC_API_URL=http://127.0.0.1:8100 npm run dev -- --hostname 0.0.0.0 --port 3001
 ```
@@ -70,13 +71,12 @@ NEXT_PUBLIC_API_URL=http://127.0.0.1:8100 npm run dev -- --hostname 0.0.0.0 --po
 Assistant image:
 
 ```bash
-cd /home/superset_ai
+cd <repo-root>
 docker build -t ai_superset_api -f superset-ai-assistant-mcp/Dockerfile .
 docker run --rm -p 8100:8100 --env-file superset-ai-assistant-mcp/.env ai_superset_api
 ```
 
-Этот image поднимает только `FastAPI`. `Next.js` запускается отдельно либо
-через `docker-compose.dev.yml`, либо напрямую через `npm run start`.
+This image starts only `FastAPI`. `Next.js` runs separately either through `docker-compose.dev.yml` or directly through `npm run start`.
 
 ## Production-Like Public Model
 
@@ -97,7 +97,7 @@ Runbooks:
 ## Verification
 
 ```bash
-cd /home/superset_ai
+cd <repo-root>
 ./docker/dev/deploy-primary-stack.sh
 ./docker/dev/check-primary-stack.sh
 ```
@@ -112,7 +112,7 @@ Operator helpers:
 Recommended test set:
 
 ```bash
-cd /home/superset_ai
+cd <repo-root>
 PYTHONPATH=./superset-ai-assistant-mcp superset-ai-assistant-mcp/.venv/bin/python -m unittest \
   superset-ai-assistant-mcp/tests/test_api_auth.py \
   superset-ai-assistant-mcp/tests/test_api_chats.py \
@@ -122,6 +122,6 @@ PYTHONPATH=./superset-ai-assistant-mcp superset-ai-assistant-mcp/.venv/bin/pytho
 ```
 
 ```bash
-cd /home/superset_ai/superset-ai-assistant-mcp/frontend-next
+cd <repo-root>/superset-ai-assistant-mcp/frontend-next
 npm run build
 ```

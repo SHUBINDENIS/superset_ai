@@ -1,7 +1,6 @@
 # Feedback Capture Template
 
-Используйте этот шаблон после каждого manual scenario run. Он рассчитан на
-быстрое копирование в issue, PR comment или следующий чат с Codex.
+Use this template after each manual scenario run. It is designed for quick copy/paste into an issue, PR comment, or follow-up Codex session.
 
 ## Short Form
 

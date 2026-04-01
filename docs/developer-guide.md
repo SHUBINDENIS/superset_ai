@@ -12,6 +12,8 @@ It focuses on:
 - local development, testing, and debugging;
 - known debts that should not be mistaken for release blockers.
 
+In command examples below, `<repo-root>` means the root directory of this repository checkout.
+
 ## Current Runtime
 
 Supported path:
@@ -32,7 +34,7 @@ Relevant historical references:
 ## Repository Structure
 
 ```text
-/home/superset_ai
+<repo-root>
 ├── README.md
 ├── docker-compose.dev.yml
 ├── docker/dev/
@@ -244,7 +246,7 @@ It is responsible for:
 - Pagila-aware chart/dashboard workflows;
 - response-style and detail-level shaping;
 - artifact construction for table/chart/link results;
-- recent-object follow-up behavior such as `дай ссылку на дашборд`.
+- recent-object follow-up behavior such as `give me the dashboard link`.
 
 ### Preview/recommend/share service
 
@@ -429,7 +431,7 @@ This keeps migration parity without preserving the old runtime dependency.
 ### Recommended local stack
 
 ```bash
-cd /home/superset_ai
+cd <repo-root>
 cp .env.dev.example .env.dev
 ./docker/dev/deploy-primary-stack.sh
 ```
@@ -439,21 +441,21 @@ cp .env.dev.example .env.dev
 Superset:
 
 ```bash
-cd /home/superset_ai/superset
+cd <repo-root>/superset
 docker compose -f docker-compose-image-tag.yml up -d db redis superset-init superset
 ```
 
 FastAPI:
 
 ```bash
-cd /home/superset_ai/superset-ai-assistant-mcp
+cd <repo-root>/superset-ai-assistant-mcp
 .venv/bin/python -m uvicorn api.main:app --host 0.0.0.0 --port 8100
 ```
 
 Next.js:
 
 ```bash
-cd /home/superset_ai/superset-ai-assistant-mcp/frontend-next
+cd <repo-root>/superset-ai-assistant-mcp/frontend-next
 npm install
 NEXT_PUBLIC_API_URL=http://127.0.0.1:8100 \
 NEXT_PUBLIC_BROWSER_API_URL=http://127.0.0.1:8100 \
@@ -505,7 +507,7 @@ npm run dev -- --hostname 0.0.0.0 --port 3001
 Assistant regression set:
 
 ```bash
-cd /home/superset_ai
+cd <repo-root>
 PYTHONPATH=./superset-ai-assistant-mcp \
 superset-ai-assistant-mcp/.venv/bin/python -m unittest \
   superset-ai-assistant-mcp/tests/test_api_auth.py \
@@ -521,7 +523,7 @@ superset-ai-assistant-mcp/.venv/bin/python -m unittest \
 Assistant unit tests:
 
 ```bash
-cd /home/superset_ai
+cd <repo-root>
 PYTHONPATH=./superset-ai-assistant-mcp \
 superset-ai-assistant-mcp/.venv/bin/python -m unittest discover \
   -s superset-ai-assistant-mcp/tests/unit \
@@ -531,7 +533,7 @@ superset-ai-assistant-mcp/.venv/bin/python -m unittest discover \
 Frontend build:
 
 ```bash
-cd /home/superset_ai/superset-ai-assistant-mcp/frontend-next
+cd <repo-root>/superset-ai-assistant-mcp/frontend-next
 npm ci
 npm run build
 ```

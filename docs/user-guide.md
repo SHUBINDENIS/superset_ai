@@ -66,7 +66,7 @@ What happens next:
 
 ### Sign Out
 
-Use the `Выйти` button at the bottom of the left sidebar.
+Use the sign-out button at the bottom of the left sidebar.
 
 ## Navigation Basics
 
@@ -92,9 +92,9 @@ Best when you already know what you want to ask.
 
 Examples:
 
-- `Покажи выручку по магазинам`
-- `Какие категории фильмов приносят больше всего выручки?`
-- `Сделай график по платежам по месяцам`
+- `Show revenue by store`
+- `Which film categories generate the most revenue?`
+- `Build a monthly payments chart`
 
 ### 2. Preview -> recommend -> share
 
@@ -102,9 +102,9 @@ Best when you want to validate columns before creating a chart.
 
 This path is:
 
-1. inspect rows and fields in `Предпросмотр`;
-2. get a suggested chart type in `Рекомендации`;
-3. create a chart and dashboard in `Шеринг`.
+1. inspect rows and fields in preview;
+2. get a suggested chart type in recommend;
+3. create a chart and dashboard in share.
 
 ### 3. Scan -> preview/chat
 
@@ -112,9 +112,9 @@ Best when you do not know where the source data lives.
 
 This path is:
 
-1. run `Сканер схем`;
+1. run scan;
 2. identify the likely database and dataset;
-3. continue in `Предпросмотр` or `Чат`.
+3. continue in preview or chat.
 
 ## Chat
 
@@ -133,17 +133,17 @@ This path is:
 
 ### How to send a message
 
-1. Open `Чат`.
-2. If needed, create a new chat with `Новый чат`.
-3. Type your request into `Опишите задачу или вопрос по данным…`.
+1. Open the chat page.
+2. If needed, create a new chat.
+3. Type your request into the main message composer.
 4. Press `Enter` to send or `Shift+Enter` for a new line.
 
 ### Chat settings
 
 Each chat has its own persistent settings:
 
-- `Режим ответа`: `Бизнес` or `Технический`
-- `Глубина ответа`: `Кратко`, `Стандартно`, `Подробно`
+- `Response mode`: `Business` or `Technical`
+- `Detail level`: `Concise`, `Standard`, `Detailed`
 
 Important behavior:
 
@@ -154,14 +154,14 @@ Important behavior:
 
 ### Business vs technical mode
 
-`Бизнес` mode is better when you want:
+`Business` mode is better when you want:
 
 - a short conclusion;
 - business meaning first;
 - minimal implementation detail;
 - faster decision support.
 
-`Технический` mode is better when you want:
+`Technical` mode is better when you want:
 
 - more structure and assumptions;
 - field-level or query-level detail;
@@ -170,17 +170,17 @@ Important behavior:
 
 ### Detail levels
 
-`Кратко`:
+`Concise`:
 
 - the shortest practical answer;
 - use it for quick iteration and chat follow-ups.
 
-`Стандартно`:
+`Standard`:
 
 - the default balance between explanation and speed;
 - use it for most everyday questions.
 
-`Подробно`:
+`Detailed`:
 
 - more assumptions, context, and action items;
 - use it when you need to understand why the answer was produced.
@@ -192,14 +192,13 @@ Assistant replies can include:
 - formatted text;
 - table preview artifacts;
 - inline chart preview artifacts;
-- labeled links such as `Открыть график`, `Открыть дашборд`, or
-  `Открыть SQL Lab`.
+- labeled links such as `Open chart`, `Open dashboard`, or `Open SQL Lab`.
 
 Why this matters:
 
 - you do not need to copy raw Superset URLs from the text body;
 - a chart/dashboard created in one reply can be reused in a follow-up such as
-  `дай ссылку на дашборд`;
+  `give me the dashboard link`;
 - recent preview and link artifacts stay available in the same chat history.
 
 ### Chat help area
@@ -207,7 +206,7 @@ Why this matters:
 At the top of the chat page there is a helper area with:
 
 - a short explanation of when to use chat vs preview;
-- the `Как начать` help drawer;
+- the `How to start` help drawer;
 - safe-mode guidance;
 - on mobile, a header button to hide or show the helper area.
 
@@ -237,12 +236,12 @@ Use preview when:
 
 ### How to run preview
 
-1. Open `Предпросмотр`.
+1. Open preview.
 2. Select a database.
 3. Select a dataset/table.
 4. Pick a preview template.
 5. Choose a row limit.
-6. Click `Быстро посмотреть данные`.
+6. Run the preview action.
 
 ### What preview shows
 
@@ -259,8 +258,8 @@ After a successful run you get:
 Preview context is stored in session state for the current browser session and
 reused by:
 
-- `Рекомендации`
-- `Шеринг`
+- recommend
+- share
 
 That shared context includes:
 
@@ -284,12 +283,12 @@ Use recommendation when:
 
 ### How to get a recommendation
 
-1. Open `Рекомендации` after running preview.
+1. Open recommend after running preview.
 2. Optionally choose:
    - metric;
    - grouping dimension;
    - time field.
-3. Click `Подобрать тип графика`.
+3. Run the recommendation action.
 
 ### What you get
 
@@ -319,7 +318,7 @@ This page calls the existing backend share flow and creates:
 
 ### How to create a chart and dashboard
 
-1. Open `Шеринг`.
+1. Open share.
 2. Select a Superset dataset.
 3. Pick a chart type.
 4. Fill or adjust:
@@ -330,7 +329,7 @@ This page calls the existing backend share flow and creates:
    - time field;
    - row limit;
    - description.
-5. Click `Создать виджет`.
+5. Create the widget.
 
 ### What is prefilled automatically
 
@@ -374,8 +373,8 @@ Use scan when:
 
 ### How to run it
 
-1. Open `Сканер схем`.
-2. Click `Запустить сканирование`.
+1. Open scan.
+2. Start the scan.
 3. Wait for the report to finish.
 
 ### What the report contains
@@ -400,9 +399,9 @@ The current release explicitly supports Pagila-based demo flows.
 
 Use prompts like:
 
-- `Покажи выручку по магазинам в Pagila`
-- `Сделай график по платежам по месяцам в Pagila`
-- `Собери дашборд по Pagila`
+- `Show revenue by store in Pagila`
+- `Build a monthly payments chart in Pagila`
+- `Create a dashboard for Pagila`
 
 What the assistant now does reliably:
 
@@ -413,19 +412,19 @@ What the assistant now does reliably:
 
 ### Safer Pagila path for demos
 
-1. Open `Сканер схем` and confirm `Pagila Demo (PostgreSQL)`.
-2. Go to `Предпросмотр` and select a Pagila dataset.
+1. Open scan and confirm `Pagila Demo (PostgreSQL)`.
+2. Go to preview and select a Pagila dataset.
 3. Run preview.
-4. Use `Рекомендации` if you want a guided chart type.
-5. Finish in `Шеринг` or ask for a chart/dashboard directly in chat.
+4. Use recommend if you want a guided chart type.
+5. Finish in share or ask for a chart/dashboard directly in chat.
 
 ### Useful Pagila follow-ups
 
 After a chart or dashboard is created in chat, you can ask:
 
-- `дай ссылку на график`
-- `дай ссылку на дашборд`
-- `покажи preview этого графика`
+- `give me the chart link`
+- `give me the dashboard link`
+- `show a preview of that chart`
 
 ## How To Build Charts
 
@@ -437,7 +436,7 @@ Best when your request is already clear.
 
 Example:
 
-`Построй график выручки по магазинам в Pagila`
+`Build a revenue by store chart in Pagila`
 
 Expected result:
 
@@ -465,7 +464,7 @@ Dashboard creation is currently exposed in two ways.
 
 Example:
 
-`Собери дашборд по Pagila`
+`Create a dashboard for Pagila`
 
 Expected result:
 
@@ -525,14 +524,11 @@ after sign-in and confirm cookies are enabled.
 
 ### The assistant says the source is not found
 
-Run `Сканер схем` first and confirm the expected database exists. Then continue
-in `Предпросмотр` or restate the request with the database name, for example
-`в Pagila`.
+Run scan first and confirm the expected database exists. Then continue in preview or restate the request with the database name, for example `in Pagila`.
 
 ### I need a chart, but chat is still too vague
 
-Switch to `Предпросмотр`, inspect the columns, then use `Рекомендации` and
-`Шеринг`.
+Switch to preview, inspect the columns, then use recommend and share.
 
 ### I got a link but not enough detail
 
@@ -556,20 +552,20 @@ That is expected in the current version. The scan flow is synchronous.
 
 If the business question is already clear:
 
-- start with `Чат`.
+- start with chat.
 
 If you need to inspect fields and rows first:
 
-- start with `Предпросмотр`.
+- start with preview.
 
 If you want help choosing a chart:
 
-- continue with `Рекомендации`.
+- continue with recommend.
 
 If you want a chart and dashboard created in Superset:
 
-- finish in `Шеринг` or ask directly in `Чат`.
+- finish in share or ask directly in chat.
 
 If you do not know where the data lives:
 
-- start with `Сканер схем`.
+- start with scan.

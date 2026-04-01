@@ -1,13 +1,15 @@
 # Deployment
 
-Текущая схема deployment после retirement Streamlit runtime:
+This document describes the current deployment model after the Streamlit runtime retirement.
 
 - user-facing UI: `Next.js`
 - primary API: `FastAPI`
 - BI platform: `Superset`
 - Superset access from assistant: built-in MCP service
 
-`Streamlit` больше не является поддерживаемым runtime path.
+`Streamlit` is no longer a supported runtime path.
+
+In command examples below, `<repo-root>` means the root directory of this repository checkout.
 
 ## Current Architecture
 
@@ -81,7 +83,7 @@ Reverse proxy example:
 ### Unified local dev stack
 
 ```bash
-cd /home/superset_ai
+cd <repo-root>
 cp .env.dev.example .env.dev
 ./docker/dev/deploy-primary-stack.sh
 ```
@@ -96,7 +98,7 @@ Stack services:
 Low-level compose path for debugging or manual recovery:
 
 ```bash
-cd /home/superset_ai
+cd <repo-root>
 docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
 ```
 
@@ -104,17 +106,17 @@ docker compose --env-file .env.dev -f docker-compose.dev.yml up -d --build
 
 1. Superset:
 ```bash
-cd /home/superset_ai/superset
+cd <repo-root>/superset
 docker compose -f docker-compose-image-tag.yml up -d db redis superset-init superset
 ```
 2. FastAPI:
 ```bash
-cd /home/superset_ai/superset-ai-assistant-mcp
+cd <repo-root>/superset-ai-assistant-mcp
 .venv/bin/python -m uvicorn api.main:app --host 0.0.0.0 --port 8100
 ```
 3. Next.js:
 ```bash
-cd /home/superset_ai/superset-ai-assistant-mcp/frontend-next
+cd <repo-root>/superset-ai-assistant-mcp/frontend-next
 npm install
 NEXT_PUBLIC_API_URL=http://127.0.0.1:8100 npm run dev -- --hostname 0.0.0.0 --port 3001
 ```

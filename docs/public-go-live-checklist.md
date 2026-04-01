@@ -1,11 +1,10 @@
 # Public Go-Live Checklist
 
-Используйте этот документ как финальный public-exposure checklist для
-единственного поддерживаемого stack: `Next.js + FastAPI`.
+Use this document as the final public-exposure checklist for the only supported stack: `Next.js + FastAPI`.
 
 ## Public Model
 
-Рекомендуемый go-live contract:
+Recommended go-live contract:
 
 - `https://assistant.example.com/` -> `Next.js`
 - `https://assistant.example.com/api/*` -> `FastAPI`

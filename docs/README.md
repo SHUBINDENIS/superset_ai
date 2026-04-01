@@ -2,6 +2,8 @@
 
 This directory contains the primary operating and product documentation for Superset AI Assistant.
 
+The documents under `Start Here` and `Operations` are the actively maintained references for the current `Next.js + FastAPI + Superset` runtime. Historical materials remain available for migration context.
+
 ## Start Here
 
 - [Architecture](architecture.md)
